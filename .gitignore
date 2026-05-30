@@ -53,6 +53,10 @@ web_modules/
 # Optional eslint cache
 .eslintcache
 
+# Turborepo
+.turbo/
+**/.turbo/
+
 # Optional stylelint cache
 .stylelintcache
 
@@ -141,3 +145,12 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+.omx/
+.codex/*
+!.codex/agents/
+!.codex/agents/**
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/**
+!.codex/prompts/
+!.codex/prompts/**
