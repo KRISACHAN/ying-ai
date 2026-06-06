@@ -1,75 +1,115 @@
 ---
 name: code-review
-description: "[OMX] Run a comprehensive code review"
+description: "[OMX] Comprehensive code review: OMX dual-lane (code-reviewer + architect), ying-companion project standards and AI editor rules, scope from user commit/paths else staged else unstaged; write numbered Chinese reports to docs/code-reviews/. Use for code review, PR review, or quality assessment."
 ---
 
-# Code Review Skill
+# Code Review
 
-Conduct a thorough code review for quality, security, and maintainability with severity-rated feedback.
+OMX 双车道审查 + 本项目规范 + AI 编辑器规则。报告**全文中文**，写入 `docs/code-reviews/`。
 
-## When to Use
+## 何时使用
 
-This skill activates when:
-- User requests "review this code", "code review"
-- Before merging a pull request
-- After implementing a major feature
-- User wants quality assessment
+- 用户请求 code review / 审查代码
+- PR 合并前、重大功能完成后
+- 用户指定 commit、路径，或未指定时审查暂存/未暂存变更
 
-## GPT-5.5 Guidance Alignment
+## 工作流总览
 
-- Default to outcome-first progress and completion reporting: state the target result, evidence, validation status, and stop condition before adding process detail.
-- Treat newer user task updates as local overrides for the active workflow branch while preserving earlier non-conflicting constraints.
-- If correctness depends on additional inspection, retrieval, execution, or verification, keep using the relevant tools until the review is grounded; stop once enough evidence exists.
-- Continue through clear, low-risk, reversible next steps automatically; ask only when the next step is materially branching, destructive, credentialed, external-production, or preference-dependent.
+1. **确定 scope**（优先级见下）
+2. **加载规范**（项目 + 编辑器规则）
+3. **并行双车道审查**（`code-reviewer` + `architect`）
+4. **按 OMX 规则合成结论**
+5. **写入中文报告**到 `docs/code-reviews/`
 
-Delegates to the `code-reviewer` and `architect` agents in parallel for a two-lane review:
+---
 
-1. **Identify Changes**
-   - Run `git diff` to find changed files
-   - Determine scope of review (specific files or entire PR)
+## 1. 确定审查范围（优先级）
 
-2. **Launch Parallel Review Lanes**
-   - **`code-reviewer` lane** - owns spec compliance, security, code quality, performance, and maintainability findings
-   - **`architect` lane** - owns the devil's-advocate / design-tradeoff perspective
-   - Both lanes run in parallel and produce distinct outputs before final synthesis
-   - If either lane cannot be launched or does not return evidence, report `independent review unavailable`; do **not** substitute the current/authoring lane, and do **not** approve or mark the review merge-ready.
+按顺序取**第一个**匹配项，确定后不再降级。
 
-3. **Review Categories**
-   - **Security** - Hardcoded secrets, injection risks, XSS, CSRF
-   - **Code Quality** - Function size, complexity, nesting depth
-   - **Performance** - Algorithm efficiency, N+1 queries, caching
-   - **Best Practices** - Naming, documentation, error handling
-   - **Maintainability** - Duplication, coupling, testability
+| 优先级 | 条件 | Git 命令 | slug 示例 |
+| ------ | ---- | -------- | --------- |
+| 1 | 用户指定 commit 或路径/目录 | `git show <commit>` / `git diff <base>..<head>` / `git diff [--cached] -- <paths>` | `commit-a1b2c3d`, `packages-ai-core` |
+| 2 | 暂存区有变更 | `git diff --cached --stat` → 非空则 `git diff --cached --no-color` | `staged` |
+| 3 | 工作区有未暂存变更 | `git diff --stat` → 非空则 `git diff --no-color` | `unstaged` |
 
-4. **Severity Rating**
-   - **CRITICAL** - Security vulnerability (must fix before merge)
-   - **HIGH** - Bug or major code smell (should fix before merge)
-   - **MEDIUM** - Minor issue (fix when possible)
-   - **LOW** - Style/suggestion (consider fixing)
+三者皆空 → 告知用户无可审查内容并停止。
 
-5. **Architectural Status Contract**
-   - **CLEAR** - No unresolved architectural blocker was found
-   - **WATCH** - Non-blocking design/tradeoff concern that must appear in the final synthesis
-   - **BLOCK** - Unresolved design concern that prevents a merge-ready verdict
+---
 
-6. **Specific Recommendations**
-   - File:line locations for each issue
-   - Concrete fix suggestions
-   - Code examples where applicable
+## 2. 加载规范（审查前必读）
 
-7. **Final Synthesis**
-   - Combine the `code-reviewer` recommendation and the architect status into one final verdict
-   - Approval requires explicit evidence from both independent lanes; missing or failed delegation is a blocking unavailable-review state, not an approval fallback
-   - Deterministic merge gating rules:
-     - If architect status is **BLOCK**, final recommendation is **REQUEST CHANGES**
-     - Else if `code-reviewer` recommendation is **REQUEST CHANGES**, final recommendation is **REQUEST CHANGES**
-     - Else if architect status is **WATCH**, final recommendation is **COMMENT**
-     - Else final recommendation follows the `code-reviewer` lane
-   - The final report must make architect blockers impossible to miss
+有项目规则时**不得**仅用通用 best practice。将已读文件记入报告 **依据规范**。
 
-## Agent Delegation
+### 始终加载
 
-Do not self-review as a fallback. If the `code-reviewer` or `architect` agent path is missing, unavailable, skipped, or fails, emit a clear unavailable-review result and block approval until the independent lane evidence exists.
+| 文件 | 用途 |
+| ---- | ---- |
+| [AGENTS.md](../../../AGENTS.md) | 项目入口 |
+| [docs/ai/core/principles.md](../../../docs/ai/core/principles.md) | 操作原则 |
+| [docs/ai/core/working-agreements.md](../../../docs/ai/core/working-agreements.md) | diff 规模、模式、验证 |
+| [docs/ai/core/verification.md](../../../docs/ai/core/verification.md) | 验证循环 |
+| [docs/ai/core/project-context.md](../../../docs/ai/core/project-context.md) | monorepo 布局与命令 |
+| [.cursor/rules/00-ai-guide.mdc](../../../.cursor/rules/00-ai-guide.mdc) | Cursor AI 规则入口 |
+| [eslint.config.mjs](../../../eslint.config.mjs) | Lint（如 `consistent-type-imports`, `no-explicit-any`） |
+| [prettier.config.mjs](../../../prettier.config.mjs) | 格式化 |
+
+### 按 scope 追加
+
+| 条件 | 追加读取 |
+| ---- | -------- |
+| `apps/**` | [.cursor/rules/10-project-context.mdc](../../../.cursor/rules/10-project-context.mdc) |
+| `apps/web/**` | [apps/web/AGENTS.md](../../../apps/web/AGENTS.md) |
+| `apps/api/**` | [apps/api/AGENTS.md](../../../apps/api/AGENTS.md) |
+| `packages/**` | 包内约定；架构相关则读 `docs/requirements/` |
+| 审查 commit / message | [docs/ai/core/git-protocol.md](../../../docs/ai/core/git-protocol.md), [commitlint.config.mjs](../../../commitlint.config.mjs) |
+
+双车道 prompt 中须注入：**已加载规范摘要** + **scope 的 git diff**。
+
+---
+
+## 3. OMX 双车道审查
+
+**禁止**用当前 lane 替代缺失的另一 lane。任一路不可用 → 报告「独立审查不可用」，**不得**标记为可合并。
+
+### code-reviewer lane
+
+负责：规范合规、安全、代码质量、性能、可维护性。
+
+**检查维度**
+
+- **Security** — 硬编码密钥、注入、XSS、CSRF、鉴权
+- **Code Quality** — 复杂度、重复、命名、函数规模
+- **Performance** — N+1、缓存、算法效率、多余重渲染
+- **Best Practices** — 错误处理、日志、文档、测试
+- **项目规范** — 上文已加载的 AGENTS.md、docs/ai/core、eslint/prettier；违规须标注 `[规范: path]`
+
+**严重级别**：CRITICAL / HIGH / MEDIUM / LOW → 报告对应 严重/高/中/低
+
+**输出**：审查文件数、各级问题（含 file:line）、修复建议、lane 建议（APPROVE / REQUEST CHANGES / COMMENT）
+
+### architect lane
+
+负责：架构/设计 tradeoff、魔鬼代言人视角。
+
+**检查维度**
+
+- 系统边界与接口
+- 隐藏耦合与长期维护风险
+- 主 reviewer 可能遗漏的 tradeoff
+- 反对「按现状批准」的最强论据
+
+**架构状态**（必选其一）：
+
+| 状态 | 含义 |
+| ---- | ---- |
+| **CLEAR** | 无未解决架构阻塞 |
+| **WATCH** | 非阻塞设计顾虑，须写入最终合成 |
+| **BLOCK** | 未解决设计问题，不可 merge-ready |
+
+**输出**：Architectural Status、file:line 证据、设计建议
+
+### 并行委派
 
 ```
 delegate(
@@ -77,216 +117,172 @@ delegate(
   tier="THOROUGH",
   prompt="CODE REVIEW TASK
 
-Review code changes for quality, security, and maintainability.
+审查质量、安全、可维护性及**本项目规范**（见下方规范列表）。
+此为 code/spec/security lane，不承担架构所有权。
 
-This is the code/spec/security lane. Do not absorb architectural ownership.
+Scope: [git diff 或指定文件]
+已加载规范: [列表]
 
-Scope: [git diff or specific files]
+Checklist: OWASP、代码质量、性能、最佳实践、项目 ESLint/AGENTS.md/docs/ai/core 合规
 
-Review Checklist:
-- Security vulnerabilities (OWASP Top 10)
-- Code quality (complexity, duplication)
-- Performance issues (N+1, inefficient algorithms)
-- Best practices (naming, documentation, error handling)
-- Maintainability (coupling, testability)
-
-Output: Code review report with:
-- Files reviewed count
-- Issues by severity (CRITICAL, HIGH, MEDIUM, LOW)
-- Specific file:line locations
-- Fix recommendations
-- Approval recommendation (APPROVE / REQUEST CHANGES / COMMENT)"
+Output: 文件数、CRITICAL/HIGH/MEDIUM/LOW、file:line、修复建议、APPROVE/REQUEST CHANGES/COMMENT"
 )
 
 delegate(
   role="architect",
   tier="THOROUGH",
-  prompt="ARCHITECTURE / DEVIL'S-ADVOCATE REVIEW TASK
+  prompt="ARCHITECTURE REVIEW TASK
 
-Review the same code changes from the architecture/tradeoff perspective.
+同一 scope 的架构/tradeoff 审查。
 
-Scope: [git diff or specific files]
+Scope: [git diff 或指定文件]
+已加载规范: [列表]
 
-Focus:
-- System boundaries and interfaces
-- Hidden coupling or long-term maintainability risks
-- Tradeoff tension the main reviewer might miss
-- Strongest counterargument against approving as-is
+Focus: 边界、耦合、长期风险、反对批准的理由
 
-Output:
-- Architectural Status: CLEAR / WATCH / BLOCK
-- File:line evidence for each concern
-- Concrete tradeoff or design recommendation"
+Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
 )
-
-Run both lanes in parallel, then synthesize them with the deterministic rules above.
 ```
 
-## External Model Consultation (Preferred)
+两 lane **并行**执行，再合成。
 
-The code-reviewer agent SHOULD consult Codex for cross-validation.
+### 外部模型交叉验证（可选）
 
-### Protocol
-1. **Form your OWN review FIRST** - Complete the review independently
-2. **Consult for validation** - Cross-check findings with Codex
-3. **Critically evaluate** - Never blindly adopt external findings
-4. **Graceful optional consultation fallback** - Never block because optional external consultation tools are unavailable; this does not waive the required independent `code-reviewer` and `architect` lanes
+1. 先独立完成本 lane 审查
+2. 可用时 consult Codex 交叉验证
+3. 批判性采纳，不盲目引用
+4. 外部 consult 不可用**不阻塞**；但不可替代必需的双 lane
 
-### When to Consult
-- Security-sensitive code changes
-- Complex architectural patterns
-- Unfamiliar codebases or languages
-- High-stakes production code
+---
 
-### When to Skip
-- Simple refactoring
-- Well-understood patterns
-- Time-critical reviews
-- Small, isolated changes
+## 4. 合成规则（OMX）
 
-### Tool Usage
-Prefer native `code-reviewer` agent consultation or CLI-backed `ask_codex` surfaces when available. Optional MCP compatibility ask tools may be used only when already enabled. If optional external consultation tools are unavailable, continue with the required independent `code-reviewer` and `architect` lanes; do not replace those lanes with self-review.
+| 条件 | 最终结论（中文） |
+| ---- | ---------------- |
+| architect = **BLOCK** | **需修改** |
+| code-reviewer = **REQUEST CHANGES** | **需修改** |
+| architect = **WATCH** | **建议** |
+| 其余 | 跟随 code-reviewer → **批准** / **建议** |
 
-**Note:** Codex calls can take up to 1 hour. Consider the review timeline before consulting.
+映射：APPROVE → 批准；COMMENT → 建议；REQUEST CHANGES → 需修改
 
-## Output Format
+任一路 delegation 失败/跳过 → **需修改**（独立审查不可用），不得批准。
+
+---
+
+## 5. 输出
+
+### 语言
+
+报告**全文中文**（标题、摘要、问题、检查项、备注）。路径、SHA、代码标识符保持原文。
+
+### 路径与文件名
+
+- 目录：`docs/code-reviews/`（不存在则创建）
+- 文件名：`{n}-{slug}.md`
+  - `{n}`：扫描 `^\d+-`，取 max+1；目录为空则从 `0` 开始
+  - `{slug}`：kebab-case 范围提示（≤40 字符）
+
+### 报告模板
+
+```markdown
+# 代码审查 — {范围简述}
+
+**日期：** {YYYY-MM-DD}
+**审查范围：** {用户指定 / 已暂存 / 未暂存}
+**引用：** {commit SHA、路径、git 命令}
+**结论：** {批准 | 建议 | 需修改}
+
+## 依据规范
+
+{实际读取的规范与规则文件列表}
+
+## 摘要
+
+{2–4 句；变更是否符合项目规范；双车道概览}
+
+## 审查统计
+
+- 审查文件数：{n}
+- 问题总数：{n}（严重 {n} / 高 {n} / 中 {n} / 低 {n}）
+- code-reviewer 建议：{APPROVE | REQUEST CHANGES | COMMENT}
+- 架构状态：{CLEAR | WATCH | BLOCK}
+
+## 问题清单
+
+### 严重
+
+- [{file}:{line}] [规范: {path}] {问题} — {修复建议}
+
+### 高
+
+- ...
+
+### 中
+
+- ...
+
+### 低
+
+- ...
+
+（无则写「无」。项目规范类须带 `[规范: …]` 或 `[规则: …]`。）
+
+## 架构关注项
+
+{architect lane 的 WATCH/BLOCK 项；CLEAR 时写「无阻塞架构问题」}
+
+- [{file}:{line}] {顾虑} — {建议}
+
+## 合成说明
+
+- code-reviewer：{建议}
+- 架构状态：{CLEAR/WATCH/BLOCK}
+- 最终结论：{批准/建议/需修改}（依据 OMX 合成规则）
+
+## 检查项
+
+### 安全
+- [ ] 无硬编码密钥；输入校验；注入/XSS/CSRF；鉴权
+
+### 代码质量
+- [ ] 复杂度与重复；命名；DRY
+
+### 性能
+- [ ] N+1；缓存；算法；多余重渲染
+
+### 项目规范
+- [ ] docs/ai/core/ 原则与工作约定
+- [ ] .cursor/rules/ 与相关 AGENTS.md
+- [ ] ESLint / Prettier / TypeScript
+
+### 架构
+- [ ] 边界与接口明确；耦合风险已评估；状态为 CLEAR/WATCH/BLOCK
+
+### 验证
+- [ ] 测试与验证说明（verification.md）
+
+## 备注
+
+{未审查范围、建议验证命令、独立 lane 是否可用}
+```
+
+### 聊天回复
+
+写入文件后简短回复：结论、主要发现、报告路径（如 `docs/code-reviews/2-staged.md`）。
+
+---
+
+## 与其他 OMX Skill 联用
 
 ```
-CODE REVIEW REPORT
-==================
-
-Files Reviewed: 8
-Total Issues: 12
-Architectural Status: WATCH
-
-CRITICAL (0)
------------
-(none)
-
-HIGH (0)
---------
-(none)
-
-MEDIUM (7)
-----------
-1. src/api/auth.ts:42
-   Issue: Email normalization logic is duplicated instead of reusing the shared helper
-   Risk: Validation rules can drift between authentication paths
-   Fix: Route both paths through the shared normalization helper
-
-2. src/components/UserProfile.tsx:89
-   Issue: Derived permissions are recalculated on every render
-   Risk: Avoidable work during profile refreshes
-   Fix: Memoize the derived permissions list or compute it upstream
-
-3. src/utils/validation.ts:15
-   Issue: Form-layer and server-layer validation messages are defined separately
-   Risk: User-facing validation guidance can become inconsistent
-   Fix: Share one validation message helper across both call sites
-
-LOW (5)
--------
-...
-
-ARCHITECTURE WATCHLIST
-----------------------
-- src/review/orchestrator.ts:88
-  Concern: Review result synthesis relies on implicit ordering rather than an explicit blocker contract
-  Status: WATCH
-  Recommendation: Define deterministic merge gating before expanding reviewers
-
-SYNTHESIS
----------
-- code-reviewer recommendation: COMMENT
-- architect status: WATCH
-- final recommendation: COMMENT
-
-RECOMMENDATION: COMMENT
-
-Address any WATCH concerns before treating the change as merge-ready.
-```
-
-## Review Checklist
-
-The `code-reviewer` lane checks:
-
-### Security
-- [ ] No hardcoded secrets (API keys, passwords, tokens)
-- [ ] All user inputs sanitized
-- [ ] SQL/NoSQL injection prevention
-- [ ] XSS prevention (escaped outputs)
-- [ ] CSRF protection on state-changing operations
-- [ ] Authentication/authorization properly enforced
-
-### Code Quality
-- [ ] Functions < 50 lines (guideline)
-- [ ] Cyclomatic complexity < 10
-- [ ] No deeply nested code (> 4 levels)
-- [ ] No duplicate logic (DRY principle)
-- [ ] Clear, descriptive naming
-
-### Performance
-- [ ] No N+1 query patterns
-- [ ] Appropriate caching where applicable
-- [ ] Efficient algorithms (avoid O(n²) when O(n) possible)
-- [ ] No unnecessary re-renders (React/Vue)
-
-### Best Practices
-- [ ] Error handling present and appropriate
-- [ ] Logging at appropriate levels
-- [ ] Documentation for public APIs
-- [ ] Tests for critical paths
-- [ ] No commented-out code
-
-## Architect Lane Checklist
-
-The `architect` lane checks:
-
-- [ ] Boundary or interface changes are explicit
-- [ ] New coupling/tradeoff risks are surfaced
-- [ ] Long-horizon maintainability concerns are evidence-backed
-- [ ] Architectural status is one of `CLEAR`, `WATCH`, or `BLOCK`
-- [ ] Any `BLOCK` concern cites the reason merge-ready status should be withheld
-
-## Approval Criteria
-
-**APPROVE** - `code-reviewer` returns APPROVE, architect status is `CLEAR`, and both independent lanes returned evidence
-**REQUEST CHANGES** - `code-reviewer` returns REQUEST CHANGES, architect status is `BLOCK`, or required independent review delegation is unavailable/skipped/failed
-**COMMENT** - `code-reviewer` returns COMMENT with architect status `CLEAR`, architect status is `WATCH`, or only LOW/MEDIUM improvements remain
-
-
-## Scenario Examples
-
-**Good:** The user says `continue` after the workflow already has a clear next step. Continue the current branch of work instead of restarting or re-asking the same question.
-
-**Good:** The user changes only the output shape or downstream delivery step (for example `make a PR`). Preserve earlier non-conflicting workflow constraints and apply the update locally.
-
-**Bad:** The user says `continue`, and the workflow restarts discovery or stops before the missing verification/evidence is gathered.
-
-## Use with Other Skills
-
-**With Team:**
-```
-/team "review recent auth changes and report findings"
-```
-Includes coordinated review execution across specialized agents.
-
-**With Ralph:**
-```
-/ralph code-review then fix all issues
-```
-On the explicit Ralph path, review findings should flow into automatic fix follow-up without another permission prompt. Plain `code-review` itself remains read-only and does **not** promise auto-fix.
-
-**With Ultrawork:**
-```
+/team "review recent auth changes"
+/ralph code-review then fix all issues   # Ralph 路径可自动修复；纯 code-review 只读
 /ultrawork review all files in src/
 ```
-Parallel code review across multiple files.
 
-## Best Practices
+## 最佳实践
 
-- **Review early** - Catch issues before they compound
-- **Review often** - Small, frequent reviews better than huge ones
-- **Address CRITICAL/HIGH first** - Fix security and bugs immediately
-- **Consider context** - Some "issues" may be intentional trade-offs
-- **Learn from reviews** - Use feedback to improve coding practices
+- 早审、小步审；优先 CRITICAL/HIGH
+- 结合上下文——部分「问题」可能是 intentional tradeoff
+- 有 WATCH 项时在 merge 前处理或明确记录
