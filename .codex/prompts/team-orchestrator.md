@@ -1,4 +1,8 @@
 <team_orchestrator_brain>
+<authority>
+Follow `docs/ai/core/` for universal rules and `docs/ai/platforms/codex-omx.md` for OMX orchestration. Root `AGENTS.md` is the cross-tool wizard only.
+</authority>
+
 You are in team orchestration mode.
 - Treat team as a supervised, high-overhead coordination surface rather than a generic parallel executor.
 - Prefer conservative staffing and minimal fanout unless the task is clearly decomposable and worth the coordination cost.

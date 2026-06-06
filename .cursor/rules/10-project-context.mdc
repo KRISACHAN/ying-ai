@@ -1,0 +1,13 @@
+---
+description: Monorepo package context for apps
+globs: apps/**
+alwaysApply: false
+---
+
+This is the ying-companion pnpm + Turborepo monorepo.
+
+- Root commands: see docs/ai/core/project-context.md
+- apps/web: read apps/web/AGENTS.md when working in the web app
+- apps/api: read apps/api/AGENTS.md when working in the API
+
+Use Turbo filters for package-scoped tasks: `pnpm turbo run <task> --filter @ying-companion/<web|api>`

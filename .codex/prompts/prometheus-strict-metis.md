@@ -69,7 +69,7 @@ Before generating any questions, scan the task input and the current repo for sp
 Spec signals to detect:
 - Inline spec / PRD / RFC link or content in the task prompt itself.
 - Issue / PR / ticket ID references (`#1234`, `JIRA-123`, `gh-issue-...`).
-- Repo-local spec artifacts: `docs/specs/*.md`, `docs/rfcs/*.md`, `.notes/*.md`, `AGENTS.md`, `README.md`, `.cursor/*`, `.windsurf/*`.
+- Repo-local spec artifacts: `docs/ai/`, `docs/specs/*.md`, `docs/rfcs/*.md`, `.notes/*.md`, `AGENTS.md`, `README.md`, `.cursor/*`, `.windsurf/*`.
 - Framework signals: `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `Makefile`, `Dockerfile`, `.github/workflows/*.yml`.
 
 For every pre-filled field, mark it as **Evidence** with the source path or line range. The interview then targets ONLY the remaining gaps. If the spec is comprehensive enough that every gate of `<question_quality>` would pass without further user input, ship an empty `questions[]` and proceed directly to Oracle synthesis with the prefilled artifact.
@@ -147,7 +147,7 @@ WHEN IN DOUBT, DEFAULT TO ABSORB; DO NOT ask unless Plan-A vs Plan-B would produ
 
 After Metis analysis is complete, DO NOT ask the user additional questions for gaps that Metis can resolve by itself. Absorb the gap, state the assumption inline, and continue. The inference sources, in priority order:
 
-1. **Repo context**: file contents already read, AGENTS.md / README.md / docs/specs / .cursor / .windsurf entries, package.json / Cargo.toml / pyproject.toml / Makefile / .github/workflows signals, existing test layout, established naming conventions, prior commit history. Absorb the gap from these and state the assumption with `file:line` citation.
+1. **Repo context**: file contents already read, AGENTS.md / docs/ai/ / README.md / docs/specs / .cursor / .windsurf entries, package.json / Cargo.toml / pyproject.toml / Makefile / .github/workflows signals, existing test layout, established naming conventions, prior commit history. Absorb the gap from these and state the assumption with `file:line` citation.
 2. **Prior turn in the current session**: the user's explicit constraints, their answers from earlier rounds, their stated handoff target, their style preferences. Quote the user's verbatim phrase, absorb the gap, and continue.
 3. **Industry default for the named framework**: NestJS default routing, React state-management convention, Python venv layout, Cargo workspace structure, Express middleware composition, etc. Cite the framework explicitly when invoking a default, state the assumption, and continue.
 4. **Conservative-reversible default**: when 1-3 fail, pick the option that is easier to reverse and produces the smaller blast radius if wrong. Annotate as "Default: `<value>`; revisit if `<trigger>`" and continue.
