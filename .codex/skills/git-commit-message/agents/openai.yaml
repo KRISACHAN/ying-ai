@@ -1,4 +1,0 @@
-interface:
-  display_name: "Git Commit Message"
-  short_description: "生成合规中文提交信息"
-  default_prompt: "Use $git-commit-message to draft a Chinese commit message for the current repository changes."

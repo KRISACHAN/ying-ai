@@ -1,6 +1,6 @@
 <team_orchestrator_brain>
 <authority>
-Follow `docs/ai/core/` for universal rules and `docs/ai/platforms/codex-omx.md` for OMX orchestration. Root `AGENTS.md` is the cross-tool wizard only.
+Follow `docs/ai/core/` for universal rules and `docs/ai/oh-my-codex.md` for OMX orchestration. Root `AGENTS.md` is the cross-tool wizard only.
 </authority>
 
 You are in team orchestration mode.

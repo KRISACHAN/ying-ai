@@ -1,41 +1,113 @@
-# ying-companion — AI Agent Guide
+# ying-companion — AI Entry
 
-> **Single entry for all tools.** Read this file first, then follow your platform adapter below.
-> Detailed prompts: [docs/ai/](docs/ai/) · Codex/OMX: [docs/ai/platforms/codex-omx.md](docs/ai/platforms/codex-omx.md)
+> **Single entry for all AI tools.** Read this file first. [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) redirect here.
+> Human overview: [README.md](README.md)
 
 **USER-MANAGED:** Content above `<!-- OMX:AGENTS:START -->` is the portable wizard. Do not run `omx setup --force` on this file. Prefer `omx setup --merge-agents` only when refreshing the model table.
 
-## Start Here
+---
 
-1. Read [docs/ai/README.md](docs/ai/README.md)
-2. Apply [core rules](docs/ai/core/)
-3. Pick your platform adapter (see table below)
+## Read Path
 
-## Platform Quick Reference
+```txt
+1. AGENTS.md              ← you are here
+2. docs/ai/core/          ← universal rules (required before coding)
+3. docs/ai/platforms.md   ← tool map; then native assets for your IDE
+4. docs/ai/oh-my-codex.md ← OMX orchestration (required when using .codex/)
+5. .requirements/         ← what to build (stage specs)
+6. apps/*/README.md       ← package context when editing code
+7. .code-reviews/         ← past reviews when relevant
+```
 
-| Tool        | Entry (all start from AGENTS.md)                                     | Adapter          |
-| ----------- | -------------------------------------------------------------------- | ---------------- |
-| Codex + OMX | [docs/ai/platforms/codex-omx.md](docs/ai/platforms/codex-omx.md)     | `.codex/`        |
-| Cursor      | [docs/ai/platforms/cursor.md](docs/ai/platforms/cursor.md)           | `.cursor/rules/` |
-| Antigravity | [docs/ai/platforms/antigravity.md](docs/ai/platforms/antigravity.md) | `.agents/`       |
-| Claude Code | [docs/ai/platforms/claude.md](docs/ai/platforms/claude.md)           | —                |
+**Rule precedence:** user prompt → nearest package `README.md` → this file → `docs/ai/core/` → native tool assets (`.codex/`, `.cursor/rules/`, `.agents/`). Details: [docs/ai/guidance-schema.md](docs/ai/guidance-schema.md) · [docs/ai/platforms.md](docs/ai/platforms.md).
 
-## Universal Rules (summary)
+---
 
-- Principles: [docs/ai/core/principles.md](docs/ai/core/principles.md)
-- Working agreements: [docs/ai/core/working-agreements.md](docs/ai/core/working-agreements.md)
-- Verification: [docs/ai/core/verification.md](docs/ai/core/verification.md)
-- Git (Lore protocol): [docs/ai/core/git-protocol.md](docs/ai/core/git-protocol.md)
-- Monorepo commands: [docs/ai/core/project-context.md](docs/ai/core/project-context.md)
+## Project Snapshot
 
-## Nested Context
+| Layer           | Location                  | Status                                                      |
+| --------------- | ------------------------- | ----------------------------------------------------------- |
+| **AI Core SDK** | `packages/ai-core`        | Stage 1 **Model Runtime** — generate/stream, retry/fallback |
+| **Debug app**   | `apps/model-runtime-demo` | Next.js UI for Stage 1 runtime verification                 |
+| **Product API** | `apps/api`                | Scaffold — planned RBAC backend                             |
+| **Product web** | `apps/web`                | Scaffold — planned user frontend                            |
 
-- [apps/web/AGENTS.md](apps/web/AGENTS.md) — web app specifics
-- [apps/api/AGENTS.md](apps/api/AGENTS.md) — API specifics
+**V1 boundary** ([`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in.
 
-## Extension
+**Current work:** [`.requirements/stages/stage-01/01-model-runtime.md`](.requirements/stages/stage-01/01-model-runtime.md). Full roadmap: [`.requirements/prompts/03-plan.md`](.requirements/prompts/03-plan.md).
 
-See [docs/ai/guidance-schema.md](docs/ai/guidance-schema.md) for adding platforms, skills, and nested context.
+---
+
+## `.requirements/` — what to build
+
+| When                    | Read                                                           |
+| ----------------------- | -------------------------------------------------------------- |
+| Product vision          | `prompts/00-basic.md`, `01-detail.md`                          |
+| V1 scope / constraints  | `prompts/02-execution.md`                                      |
+| Full roadmap            | `prompts/03-plan.md`                                           |
+| Implement current stage | `stages/stage-{NN}/{NN}-{topic}.md` (patches only for history) |
+
+- **`prompts/`** — planning context (why and overall shape); not the live task checklist.
+- **`stages/`** — executable specs with acceptance criteria; read the main `{NN}-{topic}.md` before coding.
+
+Full conventions: [`.requirements/README.md`](.requirements/README.md). Requirement **content is Chinese**.
+
+---
+
+## `.code-reviews/` — review archive
+
+| When                           | Read / do                                                  |
+| ------------------------------ | ---------------------------------------------------------- |
+| Check if a commit was reviewed | `{n}-{7-char-sha}/` folder                                 |
+| Understand past findings       | `{tool}-review.md` in that folder                          |
+| Verify fixes                   | `{model}-followup.md` in same folder                       |
+| Write a new review             | `.codex/skills/code-review/` → `.code-reviews/{n}-{slug}/` |
+
+Full naming rules: [`.code-reviews/README.md`](.code-reviews/README.md). Follow-up skill: `.codex/skills/code-review-followup/`.
+
+---
+
+## Operating Rules (`docs/ai/core/`)
+
+| File                                                        | Topic                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------- |
+| [principles.md](docs/ai/core/principles.md)                 | Operating principles                                          |
+| [working-agreements.md](docs/ai/core/working-agreements.md) | Diff size, patterns                                           |
+| [verification.md](docs/ai/core/verification.md)             | Verify before claiming done                                   |
+| [git-protocol.md](docs/ai/core/git-protocol.md)             | Commits (Chinese, conventional)                               |
+| [project-context.md](docs/ai/core/project-context.md)       | Monorepo layout and commands                                  |
+| [oh-my-codex.md](docs/ai/oh-my-codex.md)                    | OMX orchestration — **read when using `.codex/`** (all tools) |
+
+---
+
+## Platform Adapter
+
+Shared tool map: [docs/ai/platforms.md](docs/ai/platforms.md). Tool-specific behavior lives in native asset dirs — not duplicated in `docs/`.
+
+| Tool            | Native assets                                                                           |
+| --------------- | --------------------------------------------------------------------------------------- |
+| **Codex + OMX** | `.codex/` — `skills/`, `agents/`, `prompts/` + [oh-my-codex.md](docs/ai/oh-my-codex.md) |
+| **Cursor**      | `.cursor/rules/`                                                                        |
+| **Antigravity** | `.agents/skills/`, `.agents/workflows/`                                                 |
+| **Claude Code** | — (uses AGENTS.md + `docs/ai/core/`; [CLAUDE.md](CLAUDE.md) redirects here)             |
+
+---
+
+## Package Context
+
+When editing under `apps/` or `packages/`, read that package's `README.md`:
+
+- [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — Stage 1 demo env vars and local run
+- [apps/web/README.md](apps/web/README.md) · [apps/api/README.md](apps/api/README.md) — product scaffolds
+
+---
+
+## Non-Negotiables
+
+- **Verify before done** → [docs/ai/core/verification.md](docs/ai/core/verification.md)
+- **Small, focused diffs** → [docs/ai/core/working-agreements.md](docs/ai/core/working-agreements.md)
+- **Commits** → [docs/ai/core/git-protocol.md](docs/ai/core/git-protocol.md)
+- **Monorepo commands** → [docs/ai/core/project-context.md](docs/ai/core/project-context.md)
 
 <!-- OMX:AGENTS:START -->
 <!-- omx:generated:agents-md -->
@@ -48,11 +120,7 @@ USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES 
 
 <!-- END AUTONOMY DIRECTIVE -->
 
-# oh-my-codex — Codex/OMX Layer
-
-Full orchestration contract: [docs/ai/platforms/codex-omx.md](docs/ai/platforms/codex-omx.md)
-Universal rules: [docs/ai/core/](docs/ai/core/)
-Role prompts: `.codex/prompts/` | Skills: `.codex/skills/` | Agents: `.codex/agents/`
+Codex/OMX orchestration: [docs/ai/oh-my-codex.md](docs/ai/oh-my-codex.md) · Skills: `.codex/skills/` · Agents: `.codex/agents/`
 
 <!-- OMX:MODELS:START -->
 
@@ -91,12 +159,3 @@ Auto-generated by `omx setup` from the current `config.toml` plus OMX model over
 <!-- OMX:MODELS:END -->
 
 <!-- OMX:AGENTS:END -->
-
-## Setup (Codex / OMX)
-
-```bash
-omx setup --merge-agents --scope project   # refresh model table only
-omx doctor                                  # verify installation
-```
-
-Full OMX contract: [docs/ai/platforms/codex-omx.md](docs/ai/platforms/codex-omx.md)

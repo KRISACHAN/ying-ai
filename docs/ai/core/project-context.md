@@ -9,12 +9,16 @@
 ```
 ying-companion/
 ├── apps/
-│   ├── web/          # @ying-companion/web
-│   └── api/          # @ying-companion/api
-├── packages/         # shared packages (scaffold)
-├── docs/ai/          # AI agent documentation (this tree)
-├── .codex/           # Codex / OMX project scope
-└── turbo.json        # Turborepo task graph
+│   ├── api/                  # @ying-companion/api
+│   ├── web/                  # @ying-companion/web
+│   └── model-runtime-demo/   # @ying-companion/model-runtime-demo
+├── packages/
+│   └── ai-core/              # @ying-companion/ai-core
+├── docs/ai/                  # AI agent operating rules
+├── .requirements/            # Requirement and stage specs
+├── .code-reviews/            # Code review archive
+├── .codex/                   # Codex / OMX project scope
+└── turbo.json                # Turborepo task graph
 ```
 
 ## Root Commands
@@ -32,11 +36,11 @@ ying-companion/
 
 ## Package-Scoped Commands
 
-Use Turbo filters to target a single app:
+Use Turbo filters to target a single package:
 
 ```bash
-pnpm turbo run build --filter @ying-companion/web
-pnpm turbo run typecheck --filter @ying-companion/api
+pnpm turbo run build --filter @ying-companion/ai-core
+pnpm turbo run typecheck --filter @ying-companion/model-runtime-demo
 pnpm turbo run lint --filter @ying-companion/web
 ```
 
@@ -44,13 +48,14 @@ Or run scripts from the package directory:
 
 ```bash
 cd apps/web && pnpm typecheck
-cd apps/api && pnpm lint
+cd packages/ai-core && pnpm build
 ```
 
 ## Nested Agent Context
 
-- [`apps/web/AGENTS.md`](../../../apps/web/AGENTS.md) — web app specifics
-- [`apps/api/AGENTS.md`](../../../apps/api/AGENTS.md) — API specifics
+- [`apps/web/README.md`](../../../apps/web/README.md) — web app specifics
+- [`apps/api/README.md`](../../../apps/api/README.md) — API specifics
+- [`apps/model-runtime-demo/README.md`](../../../apps/model-runtime-demo/README.md) — Stage 1 demo env vars and local run
 
 ## Tech Stack
 

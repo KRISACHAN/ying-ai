@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context Memory"
-  short_description: "Summarize context into .memory"
-  default_prompt: "Use $context-memory to summarize the current conversation into .memory/preferences.md."

@@ -5,114 +5,114 @@ description: "[OMX] Comprehensive code review: OMX dual-lane (code-reviewer + ar
 
 # Code Review
 
-OMX 双车道审查 + 本项目规范 + AI 编辑器规则。报告**全文中文**，写入 `.code-reviews/`。
+OMX dual-lane review + project standards + AI editor rules. Skill instructions are in English; **report output is Chinese** and saved under `.code-reviews/`.
 
-## 何时使用
+## When to Use
 
-- 用户请求 code review / 审查代码
-- PR 合并前、重大功能完成后
-- 用户指定 commit、路径，或未指定时审查暂存/未暂存变更
+- User requests a code review
+- Before merging a PR or after completing a major feature
+- User specifies a commit, paths, or leaves scope unset (staged/unstaged changes)
 
-**不包含**：对已有 review 报告的修复跟进或交叉复核 → 使用 **`code-review-followup`** skill。
+**Out of scope:** follow-up on an existing review report or cross-validation → use the **`code-review-followup`** skill.
 
-## 工作流总览
+## Workflow Overview
 
-1. **确定 scope**（优先级见下）
-2. **加载规范**（项目 + 编辑器规则）
-3. **并行双车道审查**（`code-reviewer` + `architect`）
-4. **按 OMX 规则合成结论**
-5. **写入中文报告**到 `.code-reviews/{n}-{slug}/`
-
----
-
-## 1. 确定审查范围（优先级）
-
-按顺序取**第一个**匹配项，确定后不再降级。
-
-| 优先级 | 条件 | Git 命令 | 文件夹 `{slug}` 示例 |
-| ------ | ---- | -------- | -------------------- |
-| 1a | 用户指定 commit / 短 SHA / HEAD（最新 commit） | `git show <commit>` / `git rev-parse HEAD` | `63288da`（完整 SHA 前 7 位）→ 文件夹 `0-63288da` |
-| 1b | 用户指定路径/目录 | `git diff [--cached] -- <paths>` | `packages-ai-core` → 文件夹 `2-packages-ai-core` |
-| 2 | 暂存区有变更 | `git diff --cached --stat` → 非空则 `git diff --cached --no-color` | `staged` → 文件夹 `2-staged` |
-| 3 | 工作区有未暂存变更 | `git diff --stat` → 非空则 `git diff --no-color` | `unstaged` → 文件夹 `2-unstaged` |
-
-三者皆空 → 告知用户无可审查内容并停止。
+1. **Determine scope** (priority rules below)
+2. **Load standards** (project + editor rules)
+3. **Run dual-lane review in parallel** (`code-reviewer` + `architect`)
+4. **Synthesize verdict** per OMX rules
+5. **Write Chinese report** to `.code-reviews/{n}-{slug}/`
 
 ---
 
-## 2. 加载规范（审查前必读）
+## 1. Determine Review Scope (Priority)
 
-有项目规则时**不得**仅用通用 best practice。将已读文件记入报告 **依据规范**。
+Take the **first** matching item in order; do not fall back once matched.
 
-### 始终加载
+| Priority | Condition | Git command | Folder `{slug}` example |
+| -------- | --------- | ----------- | ----------------------- |
+| 1a | User-specified commit / short SHA / HEAD (latest commit) | `git show <commit>` / `git rev-parse HEAD` | `63288da` (first 7 chars of full SHA) → folder `0-63288da` |
+| 1b | User-specified path(s)/directory | `git diff [--cached] -- <paths>` | `packages-ai-core` → folder `2-packages-ai-core` |
+| 2 | Staged changes exist | `git diff --cached --stat` → if non-empty, `git diff --cached --no-color` | `staged` → folder `2-staged` |
+| 3 | Unstaged working-tree changes | `git diff --stat` → if non-empty, `git diff --no-color` | `unstaged` → folder `2-unstaged` |
 
-| 文件 | 用途 |
-| ---- | ---- |
-| [AGENTS.md](../../../AGENTS.md) | 项目入口 |
-| [docs/ai/core/principles.md](../../../docs/ai/core/principles.md) | 操作原则 |
-| [docs/ai/core/working-agreements.md](../../../docs/ai/core/working-agreements.md) | diff 规模、模式、验证 |
-| [docs/ai/core/verification.md](../../../docs/ai/core/verification.md) | 验证循环 |
-| [docs/ai/core/project-context.md](../../../docs/ai/core/project-context.md) | monorepo 布局与命令 |
-| [.cursor/rules/00-ai-guide.mdc](../../../.cursor/rules/00-ai-guide.mdc) | Cursor AI 规则入口 |
-| [eslint.config.mjs](../../../eslint.config.mjs) | Lint（如 `consistent-type-imports`, `no-explicit-any`） |
-| [prettier.config.mjs](../../../prettier.config.mjs) | 格式化 |
-
-### 按 scope 追加
-
-| 条件 | 追加读取 |
-| ---- | -------- |
-| `apps/**` | [.cursor/rules/10-project-context.mdc](../../../.cursor/rules/10-project-context.mdc) |
-| `apps/web/**` | [apps/web/AGENTS.md](../../../apps/web/AGENTS.md) |
-| `apps/api/**` | [apps/api/AGENTS.md](../../../apps/api/AGENTS.md) |
-| `packages/**` | 包内约定；架构相关则读 `docs/requirements/` |
-| 审查 commit / message | [docs/ai/core/git-protocol.md](../../../docs/ai/core/git-protocol.md), [commitlint.config.mjs](../../../commitlint.config.mjs) |
-
-双车道 prompt 中须注入：**已加载规范摘要** + **scope 的 git diff**。
+If all three are empty → tell the user there is nothing to review and stop.
 
 ---
 
-## 3. OMX 双车道审查
+## 2. Load Standards (Required Before Review)
 
-**禁止**用当前 lane 替代缺失的另一 lane。任一路不可用 → 报告「独立审查不可用」，**不得**标记为可合并。
+When project rules exist, **do not** rely on generic best practices alone. Record loaded files under **Standards Referenced** in the report.
+
+### Always Load
+
+| File | Purpose |
+| ---- | ------- |
+| [AGENTS.md](../../../AGENTS.md) | Project entry point |
+| [docs/ai/core/principles.md](../../../docs/ai/core/principles.md) | Operating principles |
+| [docs/ai/core/working-agreements.md](../../../docs/ai/core/working-agreements.md) | Diff size, patterns, verification |
+| [docs/ai/core/verification.md](../../../docs/ai/core/verification.md) | Verification loop |
+| [docs/ai/core/project-context.md](../../../docs/ai/core/project-context.md) | Monorepo layout and commands |
+| [.cursor/rules/ai-guide.mdc](../../../.cursor/rules/ai-guide.mdc) | Cursor AI rules entry |
+| [eslint.config.mjs](../../../eslint.config.mjs) | Lint (`consistent-type-imports`, `no-explicit-any`, etc.) |
+| [prettier.config.mjs](../../../prettier.config.mjs) | Formatting |
+
+### Load by Scope
+
+| Condition | Also read |
+| --------- | --------- |
+| `apps/**` | [.cursor/rules/project-context.mdc](../../../.cursor/rules/project-context.mdc) |
+| `apps/web/**` | [apps/web/README.md](../../../apps/web/README.md) |
+| `apps/api/**` | [apps/api/README.md](../../../apps/api/README.md) |
+| `packages/**` | Package conventions; read `docs/requirements/` when architecture-related |
+| Reviewing commit / message | [docs/ai/core/git-protocol.md](../../../docs/ai/core/git-protocol.md), [commitlint.config.mjs](../../../commitlint.config.mjs) |
+
+Dual-lane prompts must include: **summary of loaded standards** + **git diff for scope**.
+
+---
+
+## 3. OMX Dual-Lane Review
+
+**Do not** substitute one lane for a missing lane. If either lane is unavailable → report "independent review unavailable" and **do not** mark merge-ready.
 
 ### code-reviewer lane
 
-负责：规范合规、安全、代码质量、性能、可维护性。
+Responsible for: standards compliance, security, code quality, performance, maintainability.
 
-**检查维度**
+**Check dimensions**
 
-- **Security** — 硬编码密钥、注入、XSS、CSRF、鉴权
-- **Code Quality** — 复杂度、重复、命名、函数规模
-- **Performance** — N+1、缓存、算法效率、多余重渲染
-- **Best Practices** — 错误处理、日志、文档、测试
-- **项目规范** — 上文已加载的 AGENTS.md、docs/ai/core、eslint/prettier；违规须标注 `[规范: path]`
+- **Security** — hardcoded secrets, injection, XSS, CSRF, auth
+- **Code Quality** — complexity, duplication, naming, function size
+- **Performance** — N+1, caching, algorithm efficiency, unnecessary re-renders
+- **Best Practices** — error handling, logging, docs, tests
+- **Project standards** — AGENTS.md, docs/ai/core, eslint/prettier loaded above; violations must be tagged `[standard: path]`
 
-**严重级别**：CRITICAL / HIGH / MEDIUM / LOW → 报告对应 严重/高/中/低
+**Severity:** CRITICAL / HIGH / MEDIUM / LOW → report as Critical / High / Medium / Low
 
-**输出**：审查文件数、各级问题（含 file:line）、修复建议、lane 建议（APPROVE / REQUEST CHANGES / COMMENT）
+**Output:** files reviewed, findings by severity (with file:line), fix suggestions, lane recommendation (APPROVE / REQUEST CHANGES / COMMENT)
 
 ### architect lane
 
-负责：架构/设计 tradeoff、魔鬼代言人视角。
+Responsible for: architecture/design tradeoffs, devil's advocate perspective.
 
-**检查维度**
+**Check dimensions**
 
-- 系统边界与接口
-- 隐藏耦合与长期维护风险
-- 主 reviewer 可能遗漏的 tradeoff
-- 反对「按现状批准」的最强论据
+- System boundaries and interfaces
+- Hidden coupling and long-term maintenance risk
+- Tradeoffs the primary reviewer may miss
+- Strongest argument against approving as-is
 
-**架构状态**（必选其一）：
+**Architecture status** (pick one):
 
-| 状态 | 含义 |
-| ---- | ---- |
-| **CLEAR** | 无未解决架构阻塞 |
-| **WATCH** | 非阻塞设计顾虑，须写入最终合成 |
-| **BLOCK** | 未解决设计问题，不可 merge-ready |
+| Status | Meaning |
+| ------ | ------- |
+| **CLEAR** | No unresolved architecture blockers |
+| **WATCH** | Non-blocking design concerns; must appear in final synthesis |
+| **BLOCK** | Unresolved design issue; not merge-ready |
 
-**输出**：Architectural Status、file:line 证据、设计建议
+**Output:** Architectural Status, file:line evidence, design recommendations
 
-### 并行委派
+### Parallel Delegation
 
 ```
 delegate(
@@ -120,15 +120,15 @@ delegate(
   tier="THOROUGH",
   prompt="CODE REVIEW TASK
 
-审查质量、安全、可维护性及**本项目规范**（见下方规范列表）。
-此为 code/spec/security lane，不承担架构所有权。
+Review quality, security, maintainability, and **project standards** (see list below).
+This is the code/spec/security lane; it does not own architecture.
 
-Scope: [git diff 或指定文件]
-已加载规范: [列表]
+Scope: [git diff or specified files]
+Loaded standards: [list]
 
-Checklist: OWASP、代码质量、性能、最佳实践、项目 ESLint/AGENTS.md/docs/ai/core 合规
+Checklist: OWASP, code quality, performance, best practices, project ESLint/AGENTS.md/docs/ai/core compliance
 
-Output: 文件数、CRITICAL/HIGH/MEDIUM/LOW、file:line、修复建议、APPROVE/REQUEST CHANGES/COMMENT"
+Output: file count, CRITICAL/HIGH/MEDIUM/LOW, file:line, fix suggestions, APPROVE/REQUEST CHANGES/COMMENT"
 )
 
 delegate(
@@ -136,98 +136,98 @@ delegate(
   tier="THOROUGH",
   prompt="ARCHITECTURE REVIEW TASK
 
-同一 scope 的架构/tradeoff 审查。
+Architecture/tradeoff review for the same scope.
 
-Scope: [git diff 或指定文件]
-已加载规范: [列表]
+Scope: [git diff or specified files]
+Loaded standards: [list]
 
-Focus: 边界、耦合、长期风险、反对批准的理由
+Focus: boundaries, coupling, long-term risk, reasons to reject approval
 
-Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
+Output: CLEAR/WATCH/BLOCK, file:line, design recommendations"
 )
 ```
 
-两 lane **并行**执行，再合成。
+Run both lanes **in parallel**, then synthesize.
 
-### 外部模型交叉验证（可选）
+### External Model Cross-Check (Optional)
 
-1. 先独立完成本 lane 审查
-2. 可用时 consult Codex 交叉验证
-3. 批判性采纳，不盲目引用
-4. 外部 consult 不可用**不阻塞**；但不可替代必需的双 lane
+1. Complete this lane's review independently first
+2. Consult Codex for cross-validation when available
+3. Adopt critically; do not cite blindly
+4. External consult unavailable is **non-blocking**; it cannot replace the required dual lanes
 
 ---
 
-## 4. 合成规则（OMX）
+## 4. Synthesis Rules (OMX)
 
-| 条件 | 最终结论（中文） |
-| ---- | ---------------- |
+| Condition | Final verdict (in report) |
+| --------- | ------------------------- |
 | architect = **BLOCK** | **需修改** |
 | code-reviewer = **REQUEST CHANGES** | **需修改** |
 | architect = **WATCH** | **建议** |
-| 其余 | 跟随 code-reviewer → **批准** / **建议** |
+| Otherwise | Follow code-reviewer → **批准** / **建议** |
 
-映射：APPROVE → 批准；COMMENT → 建议；REQUEST CHANGES → 需修改
+Mapping: APPROVE → 批准; COMMENT → 建议; REQUEST CHANGES → 需修改
 
-任一路 delegation 失败/跳过 → **需修改**（独立审查不可用），不得批准。
+If either lane delegation fails or is skipped → **需修改** (independent review unavailable); do not approve.
 
 ---
 
-## 5. 输出
+## 5. Output
 
-### 语言
+### Language
 
-报告**全文中文**（标题、摘要、问题、检查项、备注）。路径、SHA、代码标识符保持原文。
+Reports are **written in Chinese** (headings, summary, findings, checklist, notes). Paths, SHAs, and code identifiers stay as-is. This skill file stays in English for agent readability.
 
-### 目录结构
+### Directory Layout
 
 ```
 .code-reviews/
   {n}-{slug}/
-    {tool}-review.md       # 初次审查
+    {tool}-review.md       # initial review
 ```
 
-- 根目录：`.code-reviews/`（不存在则创建）
-- 每个审查 scope 对应**一个子文件夹**；同一 scope 下不同 AI 工具各写独立文件，不覆盖彼此
+- Root: `.code-reviews/` (create if missing)
+- One review scope → **one subfolder**; different AI tools write separate files under the same scope without overwriting
 
-### 文件夹命名 `{n}-{slug}`
+### Folder Naming `{n}-{slug}`
 
-| 部分 | 规则 |
+| Part | Rule |
 | ---- | ---- |
-| `{n}` | 扫描 `.code-reviews/` 下匹配 `^\d+-` 的文件夹，取 max+1；目录为空则从 `0` 开始 |
-| `{slug}` | 见下表 |
+| `{n}` | Scan `.code-reviews/` for folders matching `^\d+-`, take max+1; start at `0` if empty |
+| `{slug}` | See table below |
 
-| scope 类型 | `{slug}` 规则 | 示例 |
-| ---------- | ------------- | ---- |
-| 用户指定 commit、短 SHA、或 **HEAD / 最新 commit** | 完整 SHA 的**前 7 位小写** | `0-63288da`、`1-ca46e25` |
-| 已暂存 / 未暂存 / 路径范围（无 commit 上下文） | kebab-case 范围提示（≤40 字符） | `staged`、`packages-ai-core` |
+| Scope type | `{slug}` rule | Example |
+| ---------- | ------------- | ------- |
+| User-specified commit, short SHA, or **HEAD / latest commit** | First **7 lowercase chars** of full SHA | `0-63288da`, `1-ca46e25` |
+| Staged / unstaged / path scope (no commit context) | kebab-case scope hint (≤40 chars) | `staged`, `packages-ai-core` |
 
-**commit 类 scope 必须**使用 `{n}-{7-char-sha}` 格式，与用户已归档的 `.code-reviews/0-63288da`、`.code-reviews/1-ca46e25` 保持一致。
+**Commit scopes must** use `{n}-{7-char-sha}` format, consistent with archived folders `.code-reviews/0-63288da` and `.code-reviews/1-ca46e25`.
 
-确定 slug 时：若 scope 对应某个 commit，先 `git rev-parse` 得到完整 SHA，再取前 7 位。
+When resolving slug: if scope maps to a commit, run `git rev-parse` for the full SHA, then take the first 7 characters.
 
-### 文件名 `{tool}-review.md`
+### File Naming `{tool}-review.md`
 
-| 部分 | 规则 |
+| Part | Rule |
 | ---- | ---- |
-| `{tool}` | 执行审查的 AI 工具标识，**小写 kebab-case** |
-| 后缀 | `-review.md` |
+| `{tool}` | AI tool identifier that performed the review, **lowercase kebab-case** |
+| Suffix | `-review.md` |
 
-常见 `{tool}` 取值：
+Common `{tool}` values:
 
-| 工具 | `{tool}` | 显示名（写入报告） |
-| ---- | -------- | ------------------ |
+| Tool | `{tool}` | Display name (in report) |
+| ---- | -------- | ------------------------ |
 | Cursor | `cursor` | Cursor |
 | Codex / OMX | `codex` | Codex |
 | Claude Code | `claude` | Claude Code |
 | Antigravity | `antigravity` | Antigravity |
-| 其他 | 按平台名 kebab-case | 可读显示名 |
+| Other | Platform name in kebab-case | Readable display name |
 
-**不论哪个 AI 工具**，都必须在文件名与报告正文中**双重标注来源**（见模板「审查工具」字段）。若当前环境可知模型名称，**必须**写入「模型」字段。
+**Regardless of AI tool**, attribute source in **both** the filename and report body (see **审查工具** in template). If the current model name is known, **must** include the **模型** field.
 
-### 报告模板（`{tool}-review.md`）
+### Report Template (`{tool}-review.md`)
 
-参考：`.code-reviews/0-63288da/cursor-review.md`、`.code-reviews/1-ca46e25/cursor-review.md`。
+Reference: `.code-reviews/0-63288da/cursor-review.md`, `.code-reviews/1-ca46e25/cursor-review.md`.
 
 ```markdown
 # 代码审查 — {范围简述}
@@ -323,24 +323,24 @@ Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
 {未审查范围、建议验证命令、独立 lane 是否可用}
 ```
 
-### 聊天回复
+### Chat Reply
 
-写入文件后简短回复：结论、主要发现、报告路径（如 `.code-reviews/2-ca46e25/cursor-review.md`）。
+After writing the file, reply briefly with: verdict, key findings, report path (e.g. `.code-reviews/2-ca46e25/cursor-review.md`).
 
 ---
 
-## 与其他 OMX Skill 联用
+## Related OMX Skills
 
 ```
 /team "review recent auth changes"
-/ralph code-review then fix all issues   # Ralph 路径可自动修复；纯 code-review 只读
+/ralph code-review then fix all issues   # Ralph path may auto-fix; pure code-review is read-only
 /ultrawork review all files in src/
 ```
 
-**修复跟进 / 交叉复核**（对已有 `{tool}-review.md` 验证修复、采纳/驳回结论）不属于本 skill，请使用独立 skill **`code-review-followup`**（`.codex/skills/code-review-followup/`）。该 skill 负责写入 `{model}-followup.md`，其中 `{model}` 是本次实际回复的模型标识。
+**Follow-up / cross-validation** (verify fixes against an existing `{tool}-review.md`, accept/reject findings) is **not** this skill. Use **`code-review-followup`** (`.codex/skills/code-review-followup/`). That skill writes `{model}-followup.md`, where `{model}` is the identifier of the model that produced the follow-up.
 
-## 最佳实践
+## Best Practices
 
-- 早审、小步审；优先 CRITICAL/HIGH
-- 结合上下文——部分「问题」可能是 intentional tradeoff
-- 有 WATCH 项时在 merge 前处理或明确记录
+- Review early and in small batches; prioritize CRITICAL/HIGH
+- Consider context — some "issues" may be intentional tradeoffs
+- Resolve or explicitly record WATCH items before merge

@@ -1,0 +1,14 @@
+---
+description: Cross-tool AI guide entry
+alwaysApply: true
+---
+
+Follow docs/ai/core/ for universal rules (principles, verification, git protocol, project context).
+
+Read docs/ai/platforms.md for the cross-tool adapter map; Cursor-specific rules live in .cursor/rules/.
+
+When using .codex/ skills, agents, or prompts (e.g. code-review, git-commit), read docs/ai/oh-my-codex.md for OMX orchestration.
+
+Project wizard: AGENTS.md (single entry for all tools). CLAUDE.md and GEMINI.md redirect to AGENTS.md.
+
+When editing files under apps/, also read the nearest nested README.md in that package (e.g. `apps/web/README.md`).
