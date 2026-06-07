@@ -13,6 +13,9 @@ export interface GenerateInput {
    * Stage 1 keeps this field as a forward-compatible contract placeholder and does not execute tools.
    */
   tools?: Record<string, unknown>;
+  /**
+   * Optional per-call primary model override. It does not override the configured fallback model.
+   */
   model?: string;
   temperature?: number;
   maxTokens?: number;
@@ -30,6 +33,7 @@ export interface GenerateOutput {
   raw: unknown;
   toolCalls?: ModelToolCall[];
   usage?: GenerateUsage;
+  runtime?: ModelRuntimeInfo;
 }
 
 export interface ModelToolCall {
@@ -42,9 +46,30 @@ export interface GenerateStreamChunk {
   model?: string;
   raw: unknown;
   usage?: GenerateUsage;
+  runtime?: ModelRuntimeInfo;
 }
 
 export interface ChatModel {
   generate(input: GenerateInput): Promise<GenerateOutput>;
   stream(input: GenerateInput): AsyncIterable<GenerateStreamChunk>;
 }
+
+export interface ModelRuntimeInfo {
+  /**
+   * 本次最终使用的模型。它与 GenerateOutput.model 冗余，但便于调试面板结构化展示。
+   */
+  usedModel: string;
+  fallbackUsed: boolean;
+  primaryAttempts: number;
+  fallbackAttempts: number;
+  errors: ModelRuntimeErrorItem[];
+}
+
+export interface ModelRuntimeErrorItem {
+  model: string;
+  attempt: number;
+  phase: ModelAttemptPhase;
+  message: string;
+}
+
+export type ModelAttemptPhase = "primary" | "fallback";
