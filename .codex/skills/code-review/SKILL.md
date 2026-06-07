@@ -1,11 +1,11 @@
 ---
 name: code-review
-description: "[OMX] Comprehensive code review: OMX dual-lane (code-reviewer + architect), ying-companion project standards and AI editor rules, scope from user commit/paths else staged else unstaged; write numbered Chinese reports to docs/code-reviews/. Use for code review, PR review, or quality assessment."
+description: "[OMX] Comprehensive code review: OMX dual-lane (code-reviewer + architect), ying-companion project standards and AI editor rules, scope from user commit/paths else staged else unstaged; write numbered Chinese reports to .code-reviews/{n}-{slug}/ with tool-attributed filenames. Use for code review, PR review, or quality assessment."
 ---
 
 # Code Review
 
-OMX 双车道审查 + 本项目规范 + AI 编辑器规则。报告**全文中文**，写入 `docs/code-reviews/`。
+OMX 双车道审查 + 本项目规范 + AI 编辑器规则。报告**全文中文**，写入 `.code-reviews/`。
 
 ## 何时使用
 
@@ -13,13 +13,15 @@ OMX 双车道审查 + 本项目规范 + AI 编辑器规则。报告**全文中�
 - PR 合并前、重大功能完成后
 - 用户指定 commit、路径，或未指定时审查暂存/未暂存变更
 
+**不包含**：对已有 review 报告的修复跟进或交叉复核 → 使用 **`code-review-followup`** skill。
+
 ## 工作流总览
 
 1. **确定 scope**（优先级见下）
 2. **加载规范**（项目 + 编辑器规则）
 3. **并行双车道审查**（`code-reviewer` + `architect`）
 4. **按 OMX 规则合成结论**
-5. **写入中文报告**到 `docs/code-reviews/`
+5. **写入中文报告**到 `.code-reviews/{n}-{slug}/`
 
 ---
 
@@ -27,11 +29,12 @@ OMX 双车道审查 + 本项目规范 + AI 编辑器规则。报告**全文中�
 
 按顺序取**第一个**匹配项，确定后不再降级。
 
-| 优先级 | 条件 | Git 命令 | slug 示例 |
-| ------ | ---- | -------- | --------- |
-| 1 | 用户指定 commit 或路径/目录 | `git show <commit>` / `git diff <base>..<head>` / `git diff [--cached] -- <paths>` | `commit-a1b2c3d`, `packages-ai-core` |
-| 2 | 暂存区有变更 | `git diff --cached --stat` → 非空则 `git diff --cached --no-color` | `staged` |
-| 3 | 工作区有未暂存变更 | `git diff --stat` → 非空则 `git diff --no-color` | `unstaged` |
+| 优先级 | 条件 | Git 命令 | 文件夹 `{slug}` 示例 |
+| ------ | ---- | -------- | -------------------- |
+| 1a | 用户指定 commit / 短 SHA / HEAD（最新 commit） | `git show <commit>` / `git rev-parse HEAD` | `63288da`（完整 SHA 前 7 位）→ 文件夹 `0-63288da` |
+| 1b | 用户指定路径/目录 | `git diff [--cached] -- <paths>` | `packages-ai-core` → 文件夹 `2-packages-ai-core` |
+| 2 | 暂存区有变更 | `git diff --cached --stat` → 非空则 `git diff --cached --no-color` | `staged` → 文件夹 `2-staged` |
+| 3 | 工作区有未暂存变更 | `git diff --stat` → 非空则 `git diff --no-color` | `unstaged` → 文件夹 `2-unstaged` |
 
 三者皆空 → 告知用户无可审查内容并停止。
 
@@ -176,26 +179,69 @@ Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
 
 报告**全文中文**（标题、摘要、问题、检查项、备注）。路径、SHA、代码标识符保持原文。
 
-### 路径与文件名
+### 目录结构
 
-- 目录：`docs/code-reviews/`（不存在则创建）
-- 文件名：`{n}-{slug}.md`
-  - `{n}`：扫描 `^\d+-`，取 max+1；目录为空则从 `0` 开始
-  - `{slug}`：kebab-case 范围提示（≤40 字符）
+```
+.code-reviews/
+  {n}-{slug}/
+    {tool}-review.md       # 初次审查
+```
 
-### 报告模板
+- 根目录：`.code-reviews/`（不存在则创建）
+- 每个审查 scope 对应**一个子文件夹**；同一 scope 下不同 AI 工具各写独立文件，不覆盖彼此
+
+### 文件夹命名 `{n}-{slug}`
+
+| 部分 | 规则 |
+| ---- | ---- |
+| `{n}` | 扫描 `.code-reviews/` 下匹配 `^\d+-` 的文件夹，取 max+1；目录为空则从 `0` 开始 |
+| `{slug}` | 见下表 |
+
+| scope 类型 | `{slug}` 规则 | 示例 |
+| ---------- | ------------- | ---- |
+| 用户指定 commit、短 SHA、或 **HEAD / 最新 commit** | 完整 SHA 的**前 7 位小写** | `0-63288da`、`1-ca46e25` |
+| 已暂存 / 未暂存 / 路径范围（无 commit 上下文） | kebab-case 范围提示（≤40 字符） | `staged`、`packages-ai-core` |
+
+**commit 类 scope 必须**使用 `{n}-{7-char-sha}` 格式，与用户已归档的 `.code-reviews/0-63288da`、`.code-reviews/1-ca46e25` 保持一致。
+
+确定 slug 时：若 scope 对应某个 commit，先 `git rev-parse` 得到完整 SHA，再取前 7 位。
+
+### 文件名 `{tool}-review.md`
+
+| 部分 | 规则 |
+| ---- | ---- |
+| `{tool}` | 执行审查的 AI 工具标识，**小写 kebab-case** |
+| 后缀 | `-review.md` |
+
+常见 `{tool}` 取值：
+
+| 工具 | `{tool}` | 显示名（写入报告） |
+| ---- | -------- | ------------------ |
+| Cursor | `cursor` | Cursor |
+| Codex / OMX | `codex` | Codex |
+| Claude Code | `claude` | Claude Code |
+| Antigravity | `antigravity` | Antigravity |
+| 其他 | 按平台名 kebab-case | 可读显示名 |
+
+**不论哪个 AI 工具**，都必须在文件名与报告正文中**双重标注来源**（见模板「审查工具」字段）。若当前环境可知模型名称，**必须**写入「模型」字段。
+
+### 报告模板（`{tool}-review.md`）
+
+参考：`.code-reviews/0-63288da/cursor-review.md`、`.code-reviews/1-ca46e25/cursor-review.md`。
 
 ```markdown
 # 代码审查 — {范围简述}
 
 **日期：** {YYYY-MM-DD}
-**审查范围：** {用户指定 / 已暂存 / 未暂存}
+**审查工具：** {Cursor | Codex | Claude Code | …}
+**模型：** {当前模型名称；不可知则省略此行}
+**审查范围：** {用户指定 commit / 已暂存 / 未暂存 / 路径}
 **引用：** {commit SHA、路径、git 命令}
 **结论：** {批准 | 建议 | 需修改}
 
 ## 依据规范
 
-{实际读取的规范与规则文件列表}
+{实际读取的规范与规则文件列表；可用 markdown 链接或反引号路径}
 
 ## 摘要
 
@@ -212,7 +258,11 @@ Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
 
 ### 严重
 
-- [{file}:{line}] [规范: {path}] {问题} — {修复建议}
+无。（或列出）
+
+- [`{file}:{line}`] [规范: {path}] {问题描述}
+
+  **修复建议：** {具体建议；复杂修复可附代码块}
 
 ### 高
 
@@ -226,41 +276,47 @@ Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
 
 - ...
 
-（无则写「无」。项目规范类须带 `[规范: …]` 或 `[规则: …]`。）
+（无则写「无」。项目规范类须带 `[规范: …]` 或 `[规则: …]`。高级别问题可含**复现路径**、**当前影响**、**修复建议**分段。）
 
 ## 架构关注项
 
 {architect lane 的 WATCH/BLOCK 项；CLEAR 时写「无阻塞架构问题」}
 
-- [{file}:{line}] {顾虑} — {建议}
+- [`{file}:{line}`] **{WATCH|BLOCK}** — {顾虑与建议}
 
 ## 合成说明
 
 - code-reviewer：{建议}
 - 架构状态：{CLEAR/WATCH/BLOCK}
-- 最终结论：{批准/建议/需修改}（依据 OMX 合成规则）
+- 最终结论：**{批准|建议|需修改}**（依据 OMX 合成规则）
 
 ## 检查项
 
 ### 安全
+
 - [ ] 无硬编码密钥；输入校验；注入/XSS/CSRF；鉴权
 
 ### 代码质量
+
 - [ ] 复杂度与重复；命名；DRY
 
 ### 性能
+
 - [ ] N+1；缓存；算法；多余重渲染
 
 ### 项目规范
+
 - [ ] docs/ai/core/ 原则与工作约定
 - [ ] .cursor/rules/ 与相关 AGENTS.md
 - [ ] ESLint / Prettier / TypeScript
 
 ### 架构
+
 - [ ] 边界与接口明确；耦合风险已评估；状态为 CLEAR/WATCH/BLOCK
 
 ### 验证
-- [ ] 测试与验证说明（verification.md）
+
+- [ ] 测试与验证说明（verification.md）；已执行的命令与结果
 
 ## 备注
 
@@ -269,7 +325,7 @@ Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
 
 ### 聊天回复
 
-写入文件后简短回复：结论、主要发现、报告路径（如 `docs/code-reviews/2-staged.md`）。
+写入文件后简短回复：结论、主要发现、报告路径（如 `.code-reviews/2-ca46e25/cursor-review.md`）。
 
 ---
 
@@ -280,6 +336,8 @@ Output: CLEAR/WATCH/BLOCK、file:line、设计建议"
 /ralph code-review then fix all issues   # Ralph 路径可自动修复；纯 code-review 只读
 /ultrawork review all files in src/
 ```
+
+**修复跟进 / 交叉复核**（对已有 `{tool}-review.md` 验证修复、采纳/驳回结论）不属于本 skill，请使用独立 skill **`code-review-followup`**（`.codex/skills/code-review-followup/`）。该 skill 负责写入 `{model}-followup.md`，其中 `{model}` 是本次实际回复的模型标识。
 
 ## 最佳实践
 
