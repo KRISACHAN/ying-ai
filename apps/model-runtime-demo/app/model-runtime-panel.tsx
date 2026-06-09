@@ -47,8 +47,8 @@ export function ModelRuntimePanel() {
     <main className="shell">
       <section className="panel">
         <div className="heading">
-          <span>Model Runtime Demo</span>
-          <h1>AI Core 模型运行时输出</h1>
+          <span>Model Runtime + Core Abstractions Demo</span>
+          <h1>AI Core 调试输出</h1>
         </div>
 
         <button className="button" type="button" disabled={isLoading} onClick={runModel}>

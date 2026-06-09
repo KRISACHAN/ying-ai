@@ -1,3 +1,5 @@
+import type { CoreProvider } from "./provider";
+
 export type ChatMessageRole = "system" | "user" | "assistant" | "tool";
 
 export interface ChatMessage {
@@ -49,7 +51,7 @@ export interface GenerateStreamChunk {
   runtime?: ModelRuntimeInfo;
 }
 
-export interface ChatModel {
+export interface ChatModel extends CoreProvider {
   generate(input: GenerateInput): Promise<GenerateOutput>;
   stream(input: GenerateInput): AsyncIterable<GenerateStreamChunk>;
 }

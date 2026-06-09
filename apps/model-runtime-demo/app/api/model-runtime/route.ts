@@ -1,5 +1,7 @@
 import {
+  createCompanionCore,
   createModel,
+  type CompanionCoreInspection,
   ModelRuntimeError,
   type CreateModelOptions,
   type ModelRuntimeErrorItem,
@@ -14,6 +16,9 @@ export async function POST() {
       try {
         const config = loadModelConfig(process.env);
         const model = createModel(config);
+        const core = createCompanionCore({
+          model,
+        });
         let runtime: ModelRuntimeInfo | undefined;
 
         controller.enqueue(encoder.encode(`OPENAI_API_KEY: ${maskSecret(config.apiKey)}\n`));
@@ -30,6 +35,7 @@ export async function POST() {
             `OPENAI_FALLBACK_MAX_RETRIES: ${config.retry?.fallbackMaxRetries ?? 0}\n\n`,
           ),
         );
+        controller.enqueue(encoder.encode(`${formatCoreInspection(core.inspect())}\n\n`));
         controller.enqueue(encoder.encode("[Model Stream]\n"));
 
         for await (const chunk of model.stream({
@@ -121,6 +127,25 @@ function formatRuntimeInfo(runtime: ModelRuntimeInfo): string {
     "",
     "[Model Runtime Errors]",
     ...formatRuntimeErrors(runtime.errors),
+  ].join("\n");
+}
+
+function formatCoreInspection(inspection: CompanionCoreInspection): string {
+  const providers = inspection.providers;
+
+  return [
+    "[Core Inspection]",
+    "Core Initialized: true",
+    "",
+    "Providers:",
+    `model: ${providers.model.id}`,
+    `persona: ${providers.persona.id}`,
+    `memory: ${providers.memory.id}`,
+    `emotion: ${providers.emotion.id}`,
+    `tools: ${providers.tools.id}`,
+    `safety: ${providers.safety.id}`,
+    `workflow: ${providers.workflow.id}`,
+    `observer: ${providers.observer.id}`,
   ].join("\n");
 }
 

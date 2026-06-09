@@ -1,15 +1,21 @@
-export type {
-  ChatMessage,
-  ChatMessageRole,
-  ChatModel,
-  GenerateInput,
-  GenerateOutput,
-  GenerateStreamChunk,
-  GenerateUsage,
-  ModelToolCall,
-  ModelRuntimeErrorItem,
-  ModelRuntimeInfo,
-  ModelAttemptPhase,
-} from "./abstractions/model";
+export * from "./abstractions/provider";
+export * from "./abstractions/core-context";
+export * from "./abstractions/observer";
+export * from "./abstractions/persona";
+export * from "./abstractions/memory";
+export * from "./abstractions/emotion";
+export * from "./abstractions/tool";
+export * from "./abstractions/safety";
+export * from "./abstractions/workflow";
+export * from "./abstractions/model";
+export * from "./core/companion-core";
+export * from "./core/companion-core-factory";
 export { ModelRuntimeError } from "./errors/model-runtime-error";
 export { createModel, type CreateModelOptions } from "./factories/model.factory";
+export * from "./implementations/persona/default-persona-provider";
+export * from "./implementations/memory/disabled-memory-provider";
+export * from "./implementations/emotion/disabled-emotion-engine";
+export * from "./implementations/tool/empty-tool-registry";
+export * from "./implementations/safety/passthrough-safety-provider";
+export * from "./implementations/workflow/disabled-chat-workflow";
+export * from "./implementations/observer/noop-core-observer";

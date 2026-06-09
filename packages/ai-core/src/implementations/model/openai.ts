@@ -30,6 +30,12 @@ const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MAX_ERROR_MESSAGE_LENGTH = 240;
 
 export class OpenAICompatibleModel implements ChatModel {
+  public readonly meta = {
+    id: "model.openai-compatible",
+    kind: "model",
+    name: "OpenAI Compatible Model",
+  } as const;
+
   private readonly config: OpenAICompatibleConfig;
   private readonly provider: ReturnType<typeof createOpenAICompatible>;
 

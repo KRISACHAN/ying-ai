@@ -1,0 +1,45 @@
+import type { CompanionCoreContext } from "../abstractions/core-context";
+import type { CoreProviderMeta } from "../abstractions/provider";
+import type { ChatWorkflowInput, ChatWorkflowOutput } from "../abstractions/workflow";
+
+export interface CompanionCoreInspection {
+  providers: {
+    model: CoreProviderMeta;
+    persona: CoreProviderMeta;
+    memory: CoreProviderMeta;
+    emotion: CoreProviderMeta;
+    tools: CoreProviderMeta;
+    safety: CoreProviderMeta;
+    workflow: CoreProviderMeta;
+    observer: CoreProviderMeta;
+  };
+}
+
+export class CompanionCore {
+  public constructor(public readonly context: CompanionCoreContext) {}
+
+  public getProviders(): CompanionCoreContext {
+    return this.context;
+  }
+
+  public inspect(): CompanionCoreInspection {
+    return {
+      providers: {
+        model: this.context.model.meta,
+        persona: this.context.persona.meta,
+        memory: this.context.memory.meta,
+        emotion: this.context.emotion.meta,
+        tools: this.context.tools.meta,
+        safety: this.context.safety.meta,
+        workflow: this.context.workflow.meta,
+        observer: this.context.observer.meta,
+      },
+    };
+  }
+
+  public async executeWorkflow(input: ChatWorkflowInput): Promise<ChatWorkflowOutput> {
+    return this.context.workflow.execute(input, {
+      core: this.context,
+    });
+  }
+}
