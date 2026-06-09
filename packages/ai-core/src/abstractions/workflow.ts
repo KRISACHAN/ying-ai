@@ -1,4 +1,4 @@
-import type { CompanionCoreContext } from "./core-context";
+import type { ChatWorkflowCoreContext } from "./core-context";
 import type { EmotionState } from "./emotion";
 import type { Memory } from "./memory";
 import type { ChatMessage, GenerateOutput } from "./model";
@@ -32,7 +32,7 @@ export interface ChatWorkflowOutput {
 }
 
 export interface ChatWorkflowExecutionContext {
-  core: CompanionCoreContext;
+  core: ChatWorkflowCoreContext;
 }
 
 export interface ChatWorkflow extends CoreProvider {

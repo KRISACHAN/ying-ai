@@ -17,3 +17,7 @@ export interface CompanionCoreContext {
   workflow: ChatWorkflow;
   observer: CoreObserver;
 }
+
+export type CompanionCoreProviderView = Readonly<CompanionCoreContext>;
+
+export type ChatWorkflowCoreContext = Readonly<Omit<CompanionCoreContext, "workflow">>;

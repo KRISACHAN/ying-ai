@@ -1,4 +1,8 @@
-import type { CompanionCoreContext } from "../abstractions/core-context";
+import type {
+  ChatWorkflowCoreContext,
+  CompanionCoreContext,
+  CompanionCoreProviderView,
+} from "../abstractions/core-context";
 import type { CoreProviderMeta } from "../abstractions/provider";
 import type { ChatWorkflowInput, ChatWorkflowOutput } from "../abstractions/workflow";
 
@@ -16,9 +20,13 @@ export interface CompanionCoreInspection {
 }
 
 export class CompanionCore {
-  public constructor(public readonly context: CompanionCoreContext) {}
+  public readonly context: CompanionCoreProviderView;
 
-  public getProviders(): CompanionCoreContext {
+  public constructor(context: CompanionCoreContext) {
+    this.context = Object.freeze({ ...context });
+  }
+
+  public getProviders(): CompanionCoreProviderView {
     return this.context;
   }
 
@@ -38,8 +46,10 @@ export class CompanionCore {
   }
 
   public async executeWorkflow(input: ChatWorkflowInput): Promise<ChatWorkflowOutput> {
-    return this.context.workflow.execute(input, {
-      core: this.context,
+    const { workflow, ...core } = this.context;
+
+    return workflow.execute(input, {
+      core: core satisfies ChatWorkflowCoreContext,
     });
   }
 }
