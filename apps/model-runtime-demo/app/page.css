@@ -22,9 +22,11 @@ body {
 }
 
 .shell {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
   min-height: 100vh;
-  place-items: center;
   padding: 32px;
 }
 
@@ -77,4 +79,60 @@ body {
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.hint {
+  margin: 0 0 16px;
+  color: #5b6472;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #eef1f5;
+  font-size: 12px;
+}
+
+.chat-input {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #d9dee7;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.meta-line {
+  margin: 16px 0 0;
+  color: #5b6472;
+  font-size: 13px;
+}
+
+.result-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.debug-block .output {
+  min-height: 0;
+  margin-top: 8px;
+}
+
+.section-title {
+  margin: 16px 0 0;
+  color: #1c2430;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.output-error {
+  min-height: 0;
+  background: #2d1418;
+  color: #ffb4ba;
 }

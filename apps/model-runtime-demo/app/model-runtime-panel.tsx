@@ -44,19 +44,17 @@ export function ModelRuntimePanel() {
   }
 
   return (
-    <main className="shell">
-      <section className="panel">
-        <div className="heading">
-          <span>Model Runtime + Core Abstractions Demo</span>
-          <h1>AI Core 调试输出</h1>
-        </div>
+    <section className="panel">
+      <div className="heading">
+        <span>Model Runtime + Core Abstractions Demo</span>
+        <h1>AI Core 调试输出</h1>
+      </div>
 
-        <button className="button" type="button" disabled={isLoading} onClick={runModel}>
-          {isLoading ? "调用中" : "调用模型"}
-        </button>
+      <button className="button" type="button" disabled={isLoading} onClick={runModel}>
+        {isLoading ? "调用中" : "调用模型"}
+      </button>
 
-        <pre className="output">{output}</pre>
-      </section>
-    </main>
+      <pre className="output">{output}</pre>
+    </section>
   );
 }

@@ -3,10 +3,11 @@ import {
   createModel,
   type CompanionCoreInspection,
   ModelRuntimeError,
-  type CreateModelOptions,
   type ModelRuntimeErrorItem,
   type ModelRuntimeInfo,
 } from "@ying-companion/ai-core";
+
+import { loadModelConfig, maskSecret } from "../../lib/model-config";
 
 export async function POST() {
   const encoder = new TextEncoder();
@@ -64,57 +65,6 @@ export async function POST() {
       "Content-Type": "text/plain; charset=utf-8",
     },
   });
-}
-
-function loadModelConfig(env: NodeJS.ProcessEnv): CreateModelOptions {
-  const options: CreateModelOptions = {
-    apiKey: readRequiredEnv(env, "OPENAI_API_KEY"),
-    model: readRequiredEnv(env, "OPENAI_MODEL"),
-    retry: {
-      primaryMaxRetries: readRetryEnv(env, "OPENAI_PRIMARY_MAX_RETRIES"),
-      fallbackMaxRetries: readRetryEnv(env, "OPENAI_FALLBACK_MAX_RETRIES"),
-    },
-  };
-  const baseUrl = readOptionalEnv(env, "OPENAI_BASE_URL");
-  const fallbackModel = readOptionalEnv(env, "OPENAI_FALLBACK_MODEL");
-
-  if (baseUrl !== undefined) {
-    options.baseUrl = baseUrl;
-  }
-
-  if (fallbackModel !== undefined) {
-    options.fallbackModel = fallbackModel;
-  }
-
-  return options;
-}
-
-function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
-  const value = env[key]?.trim();
-  return value === "" ? undefined : value;
-}
-
-function readRequiredEnv(env: NodeJS.ProcessEnv, key: string): string {
-  const value = env[key]?.trim();
-
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-
-  return value;
-}
-
-function maskSecret(value: string): string {
-  if (value.length <= 8) {
-    return "********";
-  }
-
-  return `${value.slice(0, 4)}...${value.slice(-4)}`;
-}
-
-function readRetryEnv(env: NodeJS.ProcessEnv, key: string): number {
-  const value = parseInt(env[key] ?? "0", 10);
-  return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 function formatRuntimeInfo(runtime: ModelRuntimeInfo): string {

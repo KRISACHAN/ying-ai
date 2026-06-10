@@ -13,7 +13,7 @@ import { NoopCoreObserver } from "../implementations/observer/noop-core-observer
 import { DefaultPersonaProvider } from "../implementations/persona/default-persona-provider";
 import { PassthroughSafetyProvider } from "../implementations/safety/passthrough-safety-provider";
 import { EmptyToolRegistry } from "../implementations/tool/empty-tool-registry";
-import { DisabledChatWorkflow } from "../implementations/workflow/disabled-chat-workflow";
+import { SimpleChatWorkflow } from "../implementations/workflow/simple-chat-workflow";
 import { CompanionCore } from "./companion-core";
 
 export interface CreateCompanionCoreOptions {
@@ -35,7 +35,7 @@ export function createCompanionCore(options: CreateCompanionCoreOptions): Compan
     emotion: options.emotion ?? new DisabledEmotionEngine(),
     tools: options.tools ?? new EmptyToolRegistry(),
     safety: options.safety ?? new PassthroughSafetyProvider(),
-    workflow: options.workflow ?? new DisabledChatWorkflow(),
+    workflow: options.workflow ?? new SimpleChatWorkflow(),
     observer: options.observer ?? new NoopCoreObserver(),
   };
 

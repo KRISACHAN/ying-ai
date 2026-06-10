@@ -1,5 +1,11 @@
+import { ChatPanel } from "./chat-panel";
 import { ModelRuntimePanel } from "./model-runtime-panel";
 
 export default function Page() {
-  return <ModelRuntimePanel />;
+  return (
+    <main className="shell">
+      <ModelRuntimePanel />
+      <ChatPanel />
+    </main>
+  );
 }

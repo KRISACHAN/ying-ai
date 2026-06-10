@@ -1,6 +1,6 @@
 # @ying-companion/model-runtime-demo
 
-阶段 1 Model Runtime 与阶段 2 Core Abstractions 的 Next.js 调试应用，只负责输出环境变量读取结果、Core 初始化信息、模型响应、重试与降级结果。
+阶段 1 Model Runtime、阶段 2 Core Abstractions 与阶段 3 Simple Chat Workflow 的 Next.js 调试应用，只负责输出环境变量读取结果、Core 初始化信息、模型响应、重试与降级结果，以及聊天主链路的可观测输出。
 
 ## 环境变量
 
@@ -22,4 +22,7 @@ cp apps/model-runtime-demo/.env.example apps/model-runtime-demo/.env
 pnpm --filter @ying-companion/model-runtime-demo dev
 ```
 
-打开 Next.js 输出的本地地址，点击「调用模型」查看 Core Provider inspection、流式输出、最终使用模型、是否降级、尝试次数与错误摘要。
+打开 Next.js 输出的本地地址：
+
+- 「AI Core 调试输出」点击「调用模型」查看 Core Provider inspection、流式输出、最终使用模型、是否降级、尝试次数与错误摘要。
+- 「聊天主链路调试」输入消息后发送，经服务端 `app/api/chat` 路由调用 `core.executeWorkflow()`，展示最终回复、Persona / Safety / Metadata / 模型原始输出，以及服务端收集后回传的 Observer 事件。history 由页面维护并随请求传入，Core 不保存，刷新即丢失。

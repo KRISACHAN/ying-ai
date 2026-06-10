@@ -18,4 +18,5 @@ export * from "./implementations/emotion/disabled-emotion-engine";
 export * from "./implementations/tool/empty-tool-registry";
 export * from "./implementations/safety/passthrough-safety-provider";
 export * from "./implementations/workflow/disabled-chat-workflow";
+export * from "./implementations/workflow/simple-chat-workflow";
 export * from "./implementations/observer/noop-core-observer";
