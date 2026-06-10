@@ -161,13 +161,19 @@ async function safeEmit(observer: CoreObserver, event: CoreEvent): Promise<void>
 
 /**
  * 轻量清洗宿主传入的短期历史：
- * - 过滤 tool 角色（阶段 3 不执行工具）；
+ * - 只保留 system / user / assistant 角色（白名单，过滤 tool 及未知角色）；
  * - 过滤空白内容；
  * - 不修改原始数组。
  */
+const ALLOWED_HISTORY_ROLES: ReadonlySet<ChatMessage["role"]> = new Set([
+  "system",
+  "user",
+  "assistant",
+]);
+
 function sanitizeHistory(history: ChatMessage[] | undefined): ChatMessage[] {
   return (history ?? []).filter((message) => {
-    if (message.role === "tool") {
+    if (!ALLOWED_HISTORY_ROLES.has(message.role)) {
       return false;
     }
 

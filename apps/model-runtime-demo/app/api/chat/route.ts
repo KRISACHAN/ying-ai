@@ -3,7 +3,6 @@ import {
   createModel,
   DefaultPersonaProvider,
   ModelRuntimeError,
-  SimpleChatWorkflow,
   type ChatMessage,
   type ChatWorkflowOutput,
   type CoreEvent,
@@ -11,6 +10,10 @@ import {
 } from "@ying-companion/ai-core";
 
 import { loadModelConfig } from "../../lib/model-config";
+
+// demo 级防护：限制单条消息长度与历史条数，避免不可控 token 成本。
+const MAX_MESSAGE_LENGTH = 8000;
+const MAX_HISTORY_LENGTH = 50;
 
 interface ChatRequestBody {
   message: string;
@@ -51,14 +54,57 @@ class CollectingObserver implements CoreObserver {
   }
 }
 
+/**
+ * 校验客户端请求体；非法返回错误文案，合法返回 null。
+ * 防止 message/history 类型非法导致下游 TypeError 或不可控成本。
+ */
+function validateRequestBody(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) {
+    return "请求体必须是 JSON 对象";
+  }
+
+  const body = raw as Record<string, unknown>;
+
+  if (typeof body.message !== "string" || body.message.trim() === "") {
+    return "message 不能为空，且必须是字符串";
+  }
+  if (body.message.length > MAX_MESSAGE_LENGTH) {
+    return `message 长度不能超过 ${MAX_MESSAGE_LENGTH} 字符`;
+  }
+  if (body.history !== undefined) {
+    if (!Array.isArray(body.history)) {
+      return "history 必须是数组";
+    }
+    if (body.history.length > MAX_HISTORY_LENGTH) {
+      return `history 长度不能超过 ${MAX_HISTORY_LENGTH} 条`;
+    }
+  }
+  if (body.sessionId !== undefined && typeof body.sessionId !== "string") {
+    return "sessionId 必须是字符串";
+  }
+
+  return null;
+}
+
 export async function POST(request: Request): Promise<Response> {
   const observer = new CollectingObserver();
 
   try {
-    const body = (await request.json()) as ChatRequestBody;
+    const raw: unknown = await request.json();
+    const validationError = validateRequestBody(raw);
+
+    if (validationError !== null) {
+      return jsonResponse(
+        { ok: false, error: { message: validationError }, observerEvents: [] },
+        400,
+      );
+    }
+
+    const body = raw as ChatRequestBody;
 
     const config = loadModelConfig(process.env);
     const model = createModel(config);
+    // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
     const core = createCompanionCore({
       model,
       observer,
@@ -71,7 +117,6 @@ export async function POST(request: Request): Promise<Response> {
         personality: "温柔、真诚、愿意倾听",
         speakingStyle: "自然、亲近、不过度夸张",
       }),
-      workflow: new SimpleChatWorkflow(),
     });
 
     const output = await core.executeWorkflow({
@@ -113,8 +158,9 @@ function toSafeMessage(error: unknown): string {
   return error instanceof Error ? error.message : "聊天调用失败";
 }
 
-function jsonResponse(body: ChatResponseBody): Response {
+function jsonResponse(body: ChatResponseBody, status = 200): Response {
   return new Response(JSON.stringify(body), {
+    status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
     },

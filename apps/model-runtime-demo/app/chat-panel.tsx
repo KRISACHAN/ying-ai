@@ -49,6 +49,7 @@ export function ChatPanel() {
       setEvents(body.observerEvents ?? []);
 
       if (!body.ok || body.output === undefined) {
+        setResult(null);
         setError(body.error?.message ?? "聊天调用失败");
         return;
       }
@@ -62,6 +63,7 @@ export function ChatPanel() {
       ]);
       setInput("");
     } catch (caught) {
+      setResult(null);
       setError(caught instanceof Error ? caught.message : "聊天调用失败");
     } finally {
       setIsLoading(false);
