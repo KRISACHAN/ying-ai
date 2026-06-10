@@ -115,6 +115,7 @@ const result = await core.executeWorkflow({
 {
   text: "...模型回复...",
   model: "...最终使用的模型...",
+  raw: { ... },
   persona: { ... },
   safety: {
     input: { allowed: true },
@@ -318,6 +319,8 @@ workflow:error
 
 这里不是因为这些能力不重要，而是为了避免范围再次膨胀。
 
+说明：stage-02 §二十三 约定阶段 3「**可以**调用 Memory.recall / Emotion.analyze / Tool.list（拿空实现结果）」，「可以」并非「必须」；本阶段为收敛范围，选择完全不调用这些插槽，二者不冲突。
+
 后续阶段会分别接入：
 
 ```txt
@@ -462,15 +465,15 @@ export class SimpleChatWorkflow implements ChatWorkflow {
 
 `execute()` 内部必须按以下顺序执行：
 
-1. 校验 `input.message`；
-2. emit `workflow:start`；
+1. emit `workflow:start`；
+2. 校验 `input.message`；为空或纯空白时 emit `workflow:error` 后抛出错误，且不再调用 Persona / Safety / Model；
 3. emit `persona:load:start`；
 4. 调用 `context.core.persona.load(...)`；
 5. emit `persona:load:end`；
 6. emit `safety:input:start`；
 7. 调用 `context.core.safety.guardInput(...)`；
 8. emit `safety:input:end`；
-9. 如果 input safety 不允许，中断并返回安全拒绝结果或抛出安全错误；
+9. 如果 input safety 不允许，emit `workflow:error` 后抛出安全错误（本阶段统一抛错，不返回伪回复，详见 §6.7）；
 10. 组装 messages；
 11. emit `workflow:step`，标记 `model:generate:start`；
 12. 调用 `context.core.model.generate({ messages })`；
@@ -478,7 +481,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
 14. emit `safety:output:start`；
 15. 调用 `context.core.safety.guardOutput(...)`；
 16. emit `safety:output:end`；
-17. 如果 output safety 不允许，中断并返回安全拒绝结果或抛出安全错误；
+17. 如果 output safety 不允许，emit `workflow:error` 后抛出安全错误（不返回未通过检查的模型文本，详见 §6.7 / §11.5）；
 18. 组装 `ChatWorkflowOutput`；
 19. emit `workflow:end`；
 20. 返回结果。
@@ -535,6 +538,8 @@ Output rejected by SafetyProvider
 ### 6.8 Observer 安全调用
 
 `CoreObserver.emit()` 不应该影响主链路。
+
+其中 `observer` 来自 `context.core.observer`（stage-02 补丁后 `context.core` 为 `ChatWorkflowCoreContext`，不含 `workflow` 自身，但仍包含 `observer`）。
 
 因此 `SimpleChatWorkflow` 内部必须使用安全封装：
 
@@ -806,6 +811,37 @@ export * from "./implementations/workflow/disabled-chat-workflow";
 Model Runtime + Core Abstractions + Simple Chat Workflow
 ```
 
+#### 9.1.1 客户端 / 服务端边界（必须遵守）
+
+`createModel()` 依赖宿主从 `process.env` 读取的 API Key，**必须在服务端执行**；因此聊天主链路也必须在服务端运行，不能在客户端组件里 `import { createModel }` 或 `createCompanionCore`。
+
+约定如下：
+
+1. 新增一个服务端路由，例如 `apps/model-runtime-demo/app/api/chat/route.ts`（与 stage-01 的 `app/api/model-runtime/route.ts` 同级）；
+2. 客户端维护短期 `history`，每次发送时把 `message` 与完整 `history` POST 给该路由；
+3. 路由内部 `createModel` → `createCompanionCore` → `core.executeWorkflow`，并把结果以 JSON 返回；
+4. Core 实例可在路由内按请求创建，stage-03 不要求跨请求复用（复用属于后续宿主优化，且要满足 stage-02 §4.3.1 的隔离约定）；
+5. 客户端只负责渲染返回的 JSON 与维护 history，不直接触碰 model 或 Core。
+
+建议请求 / 响应结构：
+
+```ts
+// 请求体
+interface ChatRequestBody {
+  message: string;
+  history: ChatMessage[];
+  sessionId?: string;
+}
+
+// 响应体（非流式，一次性返回）
+interface ChatResponseBody {
+  ok: boolean;
+  output?: ChatWorkflowOutput;
+  observerEvents?: CoreEvent[]; // 见 §10.4
+  error?: { message: string; phase?: string };
+}
+```
+
 ### 9.2 demo 职责
 
 Demo 可以做：
@@ -1002,6 +1038,18 @@ Observer payload 不要包含：
 
 如果要展示完整 input/output 文本，建议只在 demo 页面使用本地状态展示，不通过通用 observer payload 强制携带。
 
+### 10.4 非流式下的事件回传
+
+由于阶段 3 主链路是非流式 `generate`，`executeWorkflow` 在**服务端**一次性执行完毕，所有 observer 事件也都在服务端产生。
+
+因此 demo 要在页面看到事件，必须：
+
+1. 在服务端路由内注入一个「收集型 observer」，把每个 `CoreEvent` push 进一个数组，并随 `createCompanionCore({ model, observer, persona })` 传入；
+2. 请求结束后，把该数组随 `ChatResponseBody.observerEvents` 一并返回（注意 `CoreEvent.timestamp` 需序列化为字符串）；
+3. 客户端拿到后渲染，而不是期望客户端能直接监听服务端事件。
+
+注意：收集型 observer 同样要遵守 §10.3 脱敏要求，且其 `emit` 不得抛错影响主链路。
+
 ---
 
 ## 十一、错误处理策略
@@ -1027,6 +1075,8 @@ workflow:error
 ```
 
 不要调用 Persona / Safety / Model。
+
+注意：按 §6.5 新顺序，`workflow:start` 先于 message 校验发出，因此空消息的事件序列为 `workflow:start` → `workflow:error`，不会出现没有 start 的孤立 error。
 
 ### 11.2 Persona 加载失败
 
@@ -1267,14 +1317,14 @@ import { SimpleChatWorkflow } from "@ying-companion/ai-core";
 
 #### 怎么做
 
-1. 创建可记录事件的 observer 实现，建议放在 demo 内部；
-2. 使用 `createModel()` 创建模型；
-3. 使用 `createCompanionCore()` 创建 core；
-4. 通过页面状态维护 `history`；
-5. 发送消息时调用 `core.executeWorkflow({ sessionId, message, history })`；
+1. 新增服务端路由 `app/api/chat/route.ts`（见 §9.1.1）；客户端通过 fetch 调用它，不在客户端创建 model / core；
+2. 在该路由内创建「收集型 observer」（见 §10.4），随 `createCompanionCore({ model, observer, persona })` 注入；
+3. 路由内使用 `createModel()` 创建模型、`createCompanionCore()` 创建 core；
+4. 路由内调用 `core.executeWorkflow({ sessionId, message, history })`，把 `output` 与收集到的 `observerEvents` 一起以 JSON 返回；
+5. 客户端通过页面状态维护 `history`，发送消息时把 `message` 与 `history` POST 给路由；
 6. 成功后把用户消息和助手回复追加到 history；
 7. 展示 `result.text`、`result.modelOutput`、`result.safety`、`result.persona`、`result.metadata`；
-8. 展示 observer events。
+8. 展示 `observerEvents`。
 
 #### 完成标准
 
@@ -1352,6 +1402,23 @@ pnpm --filter @ying-companion/ai-core build
 ```txt
 构建成功
 无导出错误
+```
+
+### 13.2.1 lint 与格式检查
+
+与 stage-02 补丁保持一致的验收门槛，执行：
+
+```bash
+pnpm --filter @ying-companion/ai-core lint
+pnpm --filter @ying-companion/model-runtime-demo lint
+pnpm exec prettier --check packages/ai-core/src apps/model-runtime-demo/app
+```
+
+预期：
+
+```txt
+lint 通过
+prettier 格式检查通过
 ```
 
 ### 13.3 demo 启动
@@ -1500,7 +1567,11 @@ result.metadata.historyCount === 0
 38. `@ying-companion/ai-core` 可以正常 `build`；
 39. `@ying-companion/model-runtime-demo` 可以启动并人工验证；
 40. 阶段 1 的 generate / stream 调试能力不被破坏；
-41. 阶段 2 的 `core.inspect()` 能力不被破坏。
+41. 阶段 2 的 `core.inspect()` 能力不被破坏；
+42. demo 聊天链路通过服务端路由（如 `app/api/chat/route.ts`）执行，客户端不直接创建 model / core；
+43. demo 通过响应体把 observer 事件回传并展示，而非期望客户端直接监听服务端事件；
+44. Safety 拒绝统一抛错，不返回伪回复或未通过检查的模型文本；
+45. `ai-core` 与 demo 的 lint / prettier 检查通过。
 
 ---
 
