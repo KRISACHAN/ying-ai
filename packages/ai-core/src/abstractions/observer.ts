@@ -6,6 +6,8 @@ export type CoreEventType =
   | "persona:load:end"
   | "memory:recall:start"
   | "memory:recall:end"
+  | "memory:extract:start"
+  | "memory:extract:end"
   | "memory:save:start"
   | "memory:save:end"
   | "emotion:analyze:start"

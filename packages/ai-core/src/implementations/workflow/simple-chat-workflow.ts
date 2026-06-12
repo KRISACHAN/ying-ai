@@ -1,4 +1,11 @@
 import type { ChatMessage } from "../../abstractions/model";
+import {
+  resolveMemoryScope,
+  type ExtractedMemory,
+  type MemoryRecord,
+  type MemoryScope,
+  type RecalledMemory,
+} from "../../abstractions/memory";
 import type { CoreEvent, CoreObserver } from "../../abstractions/observer";
 import type { CompanionGender, CompanionPersona } from "../../abstractions/persona";
 import type {
@@ -7,12 +14,15 @@ import type {
   ChatWorkflowInput,
   ChatWorkflowOutput,
 } from "../../abstractions/workflow";
+import { formatMemoriesForPrompt } from "../memory/prompt-formatter";
 
 /**
- * 阶段 3 最小聊天主链路：Persona → Safety(input) → Model → Safety(output)。
+ * 阶段 4 聊天主链路：Persona → Safety(input) → Memory(recall) → Model
+ * → Safety(output) → Memory(extract/save)。
  *
- * 约束（见 03-chat-main-pipeline.md）：
- * - 不调用真实 Memory / Emotion / Tool，不执行模型返回的 toolCalls；
+ * 约束：
+ * - Memory 失败不得打断主聊天链路；
+ * - 不调用真实 Emotion / Tool，不执行模型返回的 toolCalls；
  * - 不保存 history，history 由宿主通过 ChatWorkflowInput.history 传入；
  * - 不读取环境变量、不写 console；
  * - Observer 事件失败不得打断主链路；
@@ -30,8 +40,9 @@ export class SimpleChatWorkflow implements ChatWorkflow {
     input: ChatWorkflowInput,
     context: ChatWorkflowExecutionContext,
   ): Promise<ChatWorkflowOutput> {
-    const { observer, persona, safety, model } = context.core;
+    const { observer, persona, safety, model, memory, memoryExtractor } = context.core;
     const sessionId = input.sessionId;
+    const scope = resolveMemoryScope(input);
 
     await safeEmit(observer, {
       type: "workflow:start",
@@ -75,8 +86,18 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       }
 
       const sanitizedHistory = sanitizeHistory(input.history);
+      const recalledMemories = await recallMemories({
+        observer,
+        memory,
+        scope,
+        query: input.message,
+        limit: input.memoryOptions?.limit ?? 5,
+        minImportance: input.memoryOptions?.minImportance ?? 3,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+      });
+      const memoryContext = formatMemoriesForPrompt(recalledMemories);
       const messages: ChatMessage[] = [
-        { role: "system", content: buildPersonaSystemPrompt(loadedPersona) },
+        { role: "system", content: buildPersonaSystemPrompt(loadedPersona, memoryContext) },
         ...sanitizedHistory,
         { role: "user", content: input.message },
       ];
@@ -116,16 +137,33 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         throw new Error("Output rejected by SafetyProvider");
       }
 
+      const memoryResult = await extractAndSaveMemories({
+        observer,
+        memory,
+        memoryExtractor,
+        scope,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        userMessage: input.message,
+        assistantMessage: modelOutput.text,
+        history: sanitizedHistory,
+        ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
+        ...(input.messageIds !== undefined ? { messageIds: input.messageIds } : {}),
+      });
+
       const output: ChatWorkflowOutput = {
         text: modelOutput.text,
         model: modelOutput.model,
         raw: modelOutput.raw,
         persona: loadedPersona,
+        memories: recalledMemories,
         safety: { input: inputSafety, output: outputSafety },
         metadata: {
           historyCount: sanitizedHistory.length,
           messageCount: messages.length,
           toolCallsIgnored: modelOutput.toolCalls?.length ?? 0,
+          extractedMemories: memoryResult.extracted,
+          savedMemories: memoryResult.saved,
+          skippedMemories: memoryResult.skipped,
         },
         modelOutput,
       };
@@ -181,7 +219,10 @@ function sanitizeHistory(history: ChatMessage[] | undefined): ChatMessage[] {
   });
 }
 
-function buildPersonaSystemPrompt(persona: CompanionPersona): string {
+function buildPersonaSystemPrompt(
+  persona: CompanionPersona,
+  memoryContext: string | undefined,
+): string {
   const lines: string[] = [
     "你是一个 AI 伴侣角色，请始终以该角色身份与用户对话。",
     "",
@@ -206,6 +247,10 @@ function buildPersonaSystemPrompt(persona: CompanionPersona): string {
     lines.push("", "额外角色指令：", persona.systemPrompt);
   }
 
+  if (memoryContext !== undefined) {
+    lines.push("", memoryContext);
+  }
+
   lines.push(
     "",
     "回复要求：",
@@ -213,8 +258,13 @@ function buildPersonaSystemPrompt(persona: CompanionPersona): string {
     "2. 不要声称自己拥有真实人类身份；",
     "3. 不要编造你无法知道的长期记忆；",
     "4. 如果上下文不足，可以温和询问用户；",
-    "5. 当前阶段没有长期记忆能力，只能依据本轮输入与传入的短期历史回答。",
   );
+
+  if (memoryContext === undefined) {
+    lines.push("5. 只能依据本轮输入与传入的短期历史回答。");
+  } else {
+    lines.push("5. 可以自然参考长期上下文，但不要暴露长期记忆系统。");
+  }
 
   return lines.join("\n");
 }
@@ -237,4 +287,169 @@ function formatGender(gender: CompanionGender): string {
  */
 function toSafeMessage(error: unknown): string {
   return error instanceof Error ? error.message : "SimpleChatWorkflow execution failed";
+}
+
+interface RecallMemoriesOptions {
+  observer: CoreObserver;
+  memory: ChatWorkflowExecutionContext["core"]["memory"];
+  scope: MemoryScope;
+  query: string;
+  limit: number;
+  minImportance: 1 | 2 | 3 | 4 | 5;
+  sessionId?: string;
+}
+
+async function recallMemories(options: RecallMemoriesOptions): Promise<RecalledMemory[]> {
+  await safeEmit(options.observer, {
+    type: "memory:recall:start",
+    timestamp: new Date(),
+    payload: {
+      sessionId: options.sessionId,
+      scope: options.scope,
+      query: options.query,
+      limit: options.limit,
+      minImportance: options.minImportance,
+    },
+  });
+
+  try {
+    const result = await options.memory.recall({
+      scope: options.scope,
+      query: options.query,
+      limit: options.limit,
+      minImportance: options.minImportance,
+    });
+
+    await safeEmit(options.observer, {
+      type: "memory:recall:end",
+      timestamp: new Date(),
+      payload: {
+        ok: true,
+        query: options.query,
+        count: result.memories.length,
+        memories: result.memories.map(toMemoryDebugPayload),
+      },
+    });
+
+    return result.memories;
+  } catch (error) {
+    await safeEmit(options.observer, {
+      type: "memory:recall:end",
+      timestamp: new Date(),
+      payload: { ok: false, message: toSafeMessage(error) },
+    });
+
+    return [];
+  }
+}
+
+interface ExtractAndSaveOptions {
+  observer: CoreObserver;
+  memory: ChatWorkflowExecutionContext["core"]["memory"];
+  memoryExtractor: ChatWorkflowExecutionContext["core"]["memoryExtractor"];
+  scope: MemoryScope;
+  sessionId?: string;
+  userMessage: string;
+  assistantMessage: string;
+  history: ChatMessage[];
+  conversationId?: string;
+  messageIds?: string[];
+}
+
+interface ExtractAndSaveResult {
+  extracted: ExtractedMemory[];
+  saved: MemoryRecord[];
+  skipped: ExtractedMemory[];
+}
+
+async function extractAndSaveMemories(
+  options: ExtractAndSaveOptions,
+): Promise<ExtractAndSaveResult> {
+  await safeEmit(options.observer, {
+    type: "memory:extract:start",
+    timestamp: new Date(),
+    payload: { sessionId: options.sessionId, scope: options.scope },
+  });
+
+  let extracted: ExtractedMemory[] = [];
+
+  try {
+    const result = await options.memoryExtractor.extract({
+      scope: options.scope,
+      userMessage: options.userMessage,
+      assistantMessage: options.assistantMessage,
+      history: options.history.slice(-6),
+    });
+    extracted = result.memories;
+
+    await safeEmit(options.observer, {
+      type: "memory:extract:end",
+      timestamp: new Date(),
+      payload: { ok: true, count: extracted.length, memories: extracted },
+    });
+  } catch (error) {
+    await safeEmit(options.observer, {
+      type: "memory:extract:end",
+      timestamp: new Date(),
+      payload: { ok: false, message: toSafeMessage(error) },
+    });
+
+    return { extracted: [], saved: [], skipped: [] };
+  }
+
+  const memoriesToSave = extracted.filter((memory) => memory.importance >= 3);
+  const preSaveSkipped = extracted.filter((memory) => memory.importance < 3);
+
+  await safeEmit(options.observer, {
+    type: "memory:save:start",
+    timestamp: new Date(),
+    payload: {
+      sessionId: options.sessionId,
+      scope: options.scope,
+      count: memoriesToSave.length,
+    },
+  });
+
+  try {
+    const saveResult = await options.memory.save({
+      scope: options.scope,
+      memories: memoriesToSave,
+      source: {
+        ...(options.conversationId !== undefined ? { conversationId: options.conversationId } : {}),
+        ...(options.messageIds !== undefined ? { messageIds: options.messageIds } : {}),
+      },
+    });
+    const skipped = [...preSaveSkipped, ...(saveResult.skipped ?? [])];
+
+    await safeEmit(options.observer, {
+      type: "memory:save:end",
+      timestamp: new Date(),
+      payload: {
+        ok: true,
+        savedCount: saveResult.saved.length,
+        skippedCount: skipped.length,
+        saved: saveResult.saved.map(toMemoryDebugPayload),
+      },
+    });
+
+    return { extracted, saved: saveResult.saved, skipped };
+  } catch (error) {
+    await safeEmit(options.observer, {
+      type: "memory:save:end",
+      timestamp: new Date(),
+      payload: { ok: false, message: toSafeMessage(error) },
+    });
+
+    return { extracted, saved: [], skipped: preSaveSkipped };
+  }
+}
+
+function toMemoryDebugPayload(memory: RecalledMemory | MemoryRecord): Record<string, unknown> {
+  return {
+    id: memory.id,
+    type: memory.type,
+    content: memory.content,
+    importance: memory.importance,
+    ...("score" in memory && memory.score !== undefined ? { score: memory.score } : {}),
+  };
 }

@@ -2,6 +2,7 @@ import {
   createCompanionCore,
   createModel,
   DefaultPersonaProvider,
+  InMemoryMemoryProvider,
   ModelRuntimeError,
   type ChatMessage,
   type ChatWorkflowOutput,
@@ -14,6 +15,7 @@ import { loadModelConfig } from "../../lib/model-config";
 // demo 级防护：限制单条消息长度与历史条数，避免不可控 token 成本。
 const MAX_MESSAGE_LENGTH = 8000;
 const MAX_HISTORY_LENGTH = 50;
+const demoMemory = new InMemoryMemoryProvider();
 
 interface ChatRequestBody {
   message: string;
@@ -108,6 +110,7 @@ export async function POST(request: Request): Promise<Response> {
     const core = createCompanionCore({
       model,
       observer,
+      memory: demoMemory,
       // 仅 demo 默认值：性别可改，不代表产品固定角色（见阶段 2 §八）。
       persona: new DefaultPersonaProvider({
         id: "debug-companion",
@@ -123,11 +126,20 @@ export async function POST(request: Request): Promise<Response> {
       sessionId: body.sessionId ?? "demo-session",
       message: body.message,
       history: body.history ?? [],
+      conversationId: body.sessionId ?? "demo-session",
     });
+    const inspection = core.inspect();
 
     return jsonResponse({
       ok: true,
-      output,
+      output: {
+        ...output,
+        metadata: {
+          ...output.metadata,
+          memoryProvider: inspection.providers.memory,
+          memoryExtractor: inspection.providers.memoryExtractor,
+        },
+      },
       observerEvents: serializeEvents(observer.events),
     });
   } catch (error) {

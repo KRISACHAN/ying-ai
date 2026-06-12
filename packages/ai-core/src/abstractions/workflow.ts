@@ -1,6 +1,12 @@
 import type { ChatWorkflowCoreContext } from "./core-context";
 import type { EmotionState } from "./emotion";
-import type { Memory } from "./memory";
+import type {
+  ExtractedMemory,
+  MemoryImportance,
+  MemoryRecord,
+  MemoryScope,
+  RecalledMemory,
+} from "./memory";
 import type { ChatMessage, GenerateOutput } from "./model";
 import type { CompanionPersona } from "./persona";
 import type { CoreProvider } from "./provider";
@@ -13,6 +19,13 @@ export interface ChatWorkflowInput {
   history?: ChatMessage[];
   emotion?: EmotionState;
   metadata?: Record<string, unknown>;
+  scope?: MemoryScope;
+  conversationId?: string;
+  messageIds?: string[];
+  memoryOptions?: {
+    limit?: number;
+    minImportance?: MemoryImportance;
+  };
 }
 
 export interface ChatWorkflowOutput {
@@ -20,14 +33,18 @@ export interface ChatWorkflowOutput {
   model?: string;
   raw?: unknown;
   persona?: CompanionPersona;
-  memories?: Memory[];
+  memories?: RecalledMemory[];
   emotion?: EmotionState;
   toolResults?: ToolResult[];
   safety?: {
     input?: SafetyCheckResult;
     output?: SafetyCheckResult;
   };
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> & {
+    extractedMemories?: ExtractedMemory[];
+    savedMemories?: MemoryRecord[];
+    skippedMemories?: ExtractedMemory[];
+  };
   modelOutput?: GenerateOutput;
 }
 

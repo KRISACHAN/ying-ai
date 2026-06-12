@@ -91,6 +91,7 @@ function formatCoreInspection(inspection: CompanionCoreInspection): string {
     `model: ${providers.model.id}`,
     `persona: ${providers.persona.id}`,
     `memory: ${providers.memory.id}`,
+    `memory extractor: ${providers.memoryExtractor.id}`,
     `emotion: ${providers.emotion.id}`,
     `tools: ${providers.tools.id}`,
     `safety: ${providers.safety.id}`,

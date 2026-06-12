@@ -1,14 +1,16 @@
 import type { CompanionCoreContext } from "../abstractions/core-context";
 import type { EmotionEngine } from "../abstractions/emotion";
 import type { ChatModel } from "../abstractions/model";
-import type { MemoryProvider } from "../abstractions/memory";
+import type { MemoryExtractor, MemoryProvider } from "../abstractions/memory";
 import type { CoreObserver } from "../abstractions/observer";
 import type { PersonaProvider } from "../abstractions/persona";
 import type { SafetyProvider } from "../abstractions/safety";
 import type { ToolRegistry } from "../abstractions/tool";
 import type { ChatWorkflow } from "../abstractions/workflow";
 import { DisabledEmotionEngine } from "../implementations/emotion/disabled-emotion-engine";
-import { DisabledMemoryProvider } from "../implementations/memory/disabled-memory-provider";
+import { ModelMemoryExtractor } from "../implementations/memory/model-memory-extractor";
+import { NoopMemoryExtractor } from "../implementations/memory/noop-memory-extractor";
+import { NoopMemoryProvider } from "../implementations/memory/noop-memory-provider";
 import { NoopCoreObserver } from "../implementations/observer/noop-core-observer";
 import { DefaultPersonaProvider } from "../implementations/persona/default-persona-provider";
 import { PassthroughSafetyProvider } from "../implementations/safety/passthrough-safety-provider";
@@ -20,6 +22,7 @@ export interface CreateCompanionCoreOptions {
   model: ChatModel;
   persona?: PersonaProvider;
   memory?: MemoryProvider;
+  memoryExtractor?: MemoryExtractor;
   emotion?: EmotionEngine;
   tools?: ToolRegistry;
   safety?: SafetyProvider;
@@ -31,7 +34,12 @@ export function createCompanionCore(options: CreateCompanionCoreOptions): Compan
   const context: CompanionCoreContext = {
     model: options.model,
     persona: options.persona ?? new DefaultPersonaProvider(),
-    memory: options.memory ?? new DisabledMemoryProvider(),
+    memory: options.memory ?? new NoopMemoryProvider(),
+    memoryExtractor:
+      options.memoryExtractor ??
+      (options.memory !== undefined
+        ? new ModelMemoryExtractor({ model: options.model })
+        : new NoopMemoryExtractor()),
     emotion: options.emotion ?? new DisabledEmotionEngine(),
     tools: options.tools ?? new EmptyToolRegistry(),
     safety: options.safety ?? new PassthroughSafetyProvider(),
@@ -55,6 +63,7 @@ function safeEmitCoreInit(context: CompanionCoreContext): void {
             model: context.model.meta,
             persona: context.persona.meta,
             memory: context.memory.meta,
+            memoryExtractor: context.memoryExtractor.meta,
             emotion: context.emotion.meta,
             tools: context.tools.meta,
             safety: context.safety.meta,

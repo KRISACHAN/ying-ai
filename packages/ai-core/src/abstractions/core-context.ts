@@ -1,5 +1,5 @@
 import type { EmotionEngine } from "./emotion";
-import type { MemoryProvider } from "./memory";
+import type { MemoryExtractor, MemoryProvider } from "./memory";
 import type { ChatModel } from "./model";
 import type { CoreObserver } from "./observer";
 import type { PersonaProvider } from "./persona";
@@ -11,6 +11,7 @@ export interface CompanionCoreContext {
   model: ChatModel;
   persona: PersonaProvider;
   memory: MemoryProvider;
+  memoryExtractor: MemoryExtractor;
   emotion: EmotionEngine;
   tools: ToolRegistry;
   safety: SafetyProvider;

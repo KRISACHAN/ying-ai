@@ -85,8 +85,8 @@ export function ChatPanel() {
       </div>
 
       <p className="hint">
-        通过 <code>core.executeWorkflow()</code> 走 Persona → Safety → Model → Safety
-        最小闭环。history 仅由本页面维护并随请求传入，Core 不保存（刷新即丢失）。
+        通过 <code>core.executeWorkflow()</code> 走 Persona → Safety → Memory → Model → Safety →
+        Memory 闭环。history 由页面维护，长期记忆由 demo 服务端内存 provider 维护（重启即丢失）。
       </p>
 
       <textarea
@@ -110,6 +110,10 @@ export function ChatPanel() {
       {result !== null ? (
         <div className="result-grid">
           <DebugBlock title="Final Output" value={result.text} />
+          <DebugBlock title="Recalled Memories" value={result.memories} />
+          <DebugBlock title="Extracted Memories" value={result.metadata?.extractedMemories} />
+          <DebugBlock title="Saved Memories" value={result.metadata?.savedMemories} />
+          <DebugBlock title="Skipped Memories" value={result.metadata?.skippedMemories} />
           <DebugBlock title="Safety Result" value={result.safety} />
           <DebugBlock title="Persona Result" value={result.persona} />
           <DebugBlock title="Metadata" value={result.metadata} />
