@@ -63,6 +63,14 @@ Memory.recall 在模型生成之前执行
 Memory.extract / Memory.save 在模型生成之后执行
 ```
 
+与阶段 7 完整 Workflow 的关系：
+
+```txt
+阶段 4 延续阶段 3 的顺序：Persona.load → Safety.guardInput → Memory.recall → …
+阶段 7 可能引入 Emotion / Tool，并允许 Persona.load 与 Memory.recall 并行以压缩延迟
+本阶段接口设计不应假设 Persona 与 Recall 必须串行
+```
+
 ---
 
 ## 2. 阶段目标
@@ -143,7 +151,9 @@ AI 回复：
 9. LangChain；
 10. LangGraph；
 11. 远程 Tool Call；
-12. 将数据库依赖放进 `packages/ai-core`。
+12. 将数据库依赖放进 `packages/ai-core`；
+13. 流式聊天主链路（若后续支持 `stream`，extract / save 在流结束后执行，本阶段 demo 仍用非流式 `generate`）；
+14. Docker / docker-compose（本项目不提供容器化方案，数据库由开发者本机或已有实例承载）。
 
 上下文摘要能力放到后续独立任务中实现，本阶段只需要保证长期记忆接口不会阻碍后续扩展。
 
@@ -498,14 +508,51 @@ export interface MemorySaveResult {
 ## 7.6 MemoryProvider
 
 ```ts
-export interface MemoryProvider {
-  meta: CoreProviderMeta;
-
+export interface MemoryProvider extends CoreProvider {
   recall(input: MemoryRecallInput): Promise<MemoryRecallResult>;
 
   save(input: MemorySaveInput): Promise<MemorySaveResult>;
 }
 ```
+
+---
+
+## 7.7 与阶段 2 抽象的演进
+
+阶段 2 已在 `packages/ai-core/src/abstractions/memory.ts` 预留了简化版接口。阶段 4 直接演进该文件，不保留旧签名。
+
+字段对照：
+
+```txt
+阶段 2                    阶段 4
+─────────────────────────────────────────
+Memory                    MemoryRecord（持久化实体）
+ExtractedMemory           新增（抽取中间态，无 id）
+RecalledMemory            新增（召回结果，含 score）
+sessionId                 MemoryScope（推荐显式传入）
+message（recall 入参）    query
+topK                      limit
+importance?: number       importance: MemoryImportance（1|2|3|4|5）
+recall → Memory[]         recall → MemoryRecallResult
+save → void               save → MemorySaveResult
+DisabledMemoryProvider    NoopMemoryProvider（重命名并替换默认实现）
+```
+
+`MemoryScope` 兼容垫片：
+
+宿主或 Workflow 在 `scope` 未传时，从 `sessionId` 推导：
+
+```ts
+function resolveMemoryScope(input: { scope?: MemoryScope; sessionId?: string }): MemoryScope {
+  if (input.scope) return input.scope;
+  if (input.sessionId) {
+    return { ownerType: "session", ownerId: input.sessionId };
+  }
+  return { ownerType: "session", ownerId: "default" };
+}
+```
+
+阶段 3 的 `ChatWorkflowInput.sessionId` 保留，demo 无需立刻改请求体；新字段 `scope` 优先级更高。
 
 ---
 
@@ -525,15 +572,19 @@ save 永远不保存
 不抛错
 ```
 
-示例：
+阶段 2 的 `DisabledMemoryProvider` 在本阶段重命名为 `NoopMemoryProvider`，并替换 `createCompanionCore` 的默认注入。
+
+`meta` 必须符合 `CoreProviderMeta`（`id` / `kind` / `name`，可选 `description` / `version`）：
 
 ```ts
 export class NoopMemoryProvider implements MemoryProvider {
-  meta = {
-    name: "noop-memory-provider",
+  readonly meta = {
+    id: "memory.noop",
+    kind: "memory",
+    name: "Noop Memory Provider",
+    description: "Disabled long-term memory; recall and save are no-ops",
     version: "1.0.0",
-    capabilities: ["memory:disabled"],
-  };
+  } as const;
 
   async recall(): Promise<MemoryRecallResult> {
     return { memories: [] };
@@ -570,11 +621,12 @@ export class NoopMemoryProvider implements MemoryProvider {
 先验证 observer 事件是否正确
 ```
 
-注意：
+召回语义（与 Postgres 实现的差异）：
 
 ```txt
-InMemoryMemoryProvider 不是正式 RAG 实现
-不能替代 PostgreSQL + pgvector
+recall 使用简单 content 子串 / 关键词匹配，不做语义检索
+结果按 importance 降序排列，无向量 score
+仅用于验证 workflow 接线与 Observer，不能替代 PostgreSQL + pgvector
 ```
 
 ---
@@ -726,6 +778,22 @@ const MemoryExtractionResultSchema = z.object({
 重试后仍失败则跳过本轮记忆保存
 不能影响主聊天回复返回
 ```
+
+---
+
+## 9.7 抽取运行时策略
+
+单轮对话除主模型外，还可能触发抽取模型调用与 embedding 调用。V1 默认策略：
+
+```txt
+抽取模型：默认与主模型相同；宿主可通过 createCompanionCore / MemoryExtractor 配置更轻量的模型
+最大重试次数：1（Zod 校验失败后重试一次）
+抽取超时：15s；超时则跳过本轮抽取与保存
+非阻塞：抽取与保存均在主回复返回给宿主之后执行，或至少在 Workflow 已确定 output.text 之后执行
+embedding：同一轮多条记忆尽量批量 embed（由 PostgresMemoryProvider 内部处理）
+```
+
+用户已看到的聊天回复不受抽取失败影响；但若 save 较慢，可能影响「下一轮能否立刻召回刚写入的记忆」，demo UI 应能观察到 save 完成时机。
 
 ---
 
@@ -905,10 +973,10 @@ ON companion_memories (type);
 CREATE INDEX IF NOT EXISTS companion_memories_importance_idx
 ON companion_memories (importance);
 
-CREATE INDEX IF NOT EXISTS companion_memories_embedding_idx
-ON companion_memories
-USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
+-- 向量索引：数据量较小时可暂缓，见下方分阶段说明
+-- CREATE INDEX IF NOT EXISTS companion_memories_embedding_hnsw_idx
+-- ON companion_memories
+-- USING hnsw (embedding vector_cosine_ops);
 ```
 
 说明：
@@ -924,7 +992,20 @@ importance index
   方便过滤低价值记忆。
 
 embedding index
-  用于向量召回。
+  用于向量召回；见下方分阶段策略
+```
+
+分阶段索引策略：
+
+```txt
+Phase 1（V1 默认，数据 < ~1000 条）
+  仅 scope / type / importance 的 B-tree 索引
+  召回在 scope 过滤后按 cosine distance 顺序扫描，足够快
+
+Phase 2（数据量上升后）
+  增加 HNSW 或 IVFFlat 向量索引
+  IVFFlat 需要足够行数才有意义；HNSW 对小到中等数据集通常更省心
+  选定 embedding 模型后固定 vector 维度，避免频繁 migration
 ```
 
 ---
@@ -965,6 +1046,14 @@ content 完全相同
 ```
 
 V1 暂不做复杂冲突解决。
+
+已知局限（V1 可接受，不在本阶段解决）：
+
+```txt
+近义重复会各自入库，例如：
+  「用户喜欢五月天」与「用户特别喜欢五月天乐队」
+仅 content 完全相同的记录会被 skipped
+```
 
 ---
 
@@ -1087,6 +1176,56 @@ Prompt 中必须约束模型：
 
 阶段 4 需要修改 `SimpleChatWorkflow`。
 
+## 13.0 ChatWorkflowInput / Output 变更
+
+在 `packages/ai-core/src/abstractions/workflow.ts` 扩展：
+
+```ts
+export interface ChatWorkflowInput {
+  sessionId?: string; // 保留；无 scope 时用于推导 MemoryScope
+  message: string;
+  history?: ChatMessage[];
+  emotion?: EmotionState;
+  metadata?: Record<string, unknown>;
+
+  scope?: MemoryScope; // 推荐；优先级高于 sessionId
+  conversationId?: string; // 写入 MemorySource
+  messageIds?: string[]; // 写入 MemorySource
+  memoryOptions?: {
+    limit?: number; // 默认 5
+    minImportance?: MemoryImportance; // 默认 3
+  };
+}
+```
+
+`ChatWorkflowOutput` 演进：
+
+```ts
+export interface ChatWorkflowOutput {
+  // 现有字段保留 …
+  memories?: RecalledMemory[]; // 本轮召回到的长期记忆（替代阶段 2 的 Memory[]）
+  metadata?: Record<string, unknown> & {
+    extractedMemories?: ExtractedMemory[];
+    savedMemories?: MemoryRecord[];
+    skippedMemories?: ExtractedMemory[];
+    historyCount?: number;
+    messageCount?: number;
+    // …
+  };
+}
+```
+
+Workflow 内部统一通过 `resolveMemoryScope(input)` 获取 scope，宿主 demo 可继续只传 `sessionId`。
+
+Persona 系统 Prompt 必须条件化：阶段 3 在 `buildPersonaSystemPrompt` 中写死了「当前阶段没有长期记忆能力」。阶段 4 接入后：
+
+```txt
+无召回记忆 → 不注入长期记忆块，可保留「仅依据本轮与短期历史」的约束
+有召回记忆 → 注入 Section 12 的长期上下文块 + Section 12.3 使用规则，删除「无长期记忆能力」表述
+```
+
+---
+
 ## 13.1 生成前召回
 
 在模型生成前执行：
@@ -1107,7 +1246,7 @@ minImportance：默认 3
 召回失败时：
 
 ```txt
-记录 observer error
+emit memory:recall:end，payload { ok: false, message }
 使用空 memories 继续生成
 ```
 
@@ -1120,8 +1259,10 @@ minImportance：默认 3
 伪代码：
 
 ```ts
+const scope = resolveMemoryScope(input);
+
 const recallResult = await memory.recall({
-  scope: input.scope,
+  scope,
   query: input.message,
   limit: input.memoryOptions?.limit ?? 5,
   minImportance: input.memoryOptions?.minImportance ?? 3,
@@ -1152,8 +1293,10 @@ Memory.save
 伪代码：
 
 ```ts
+const scope = resolveMemoryScope(input);
+
 const extraction = await memoryExtractor.extract({
-  scope: input.scope,
+  scope,
   userMessage: input.message,
   assistantMessage: modelOutput.text,
   history: input.history?.slice(-6),
@@ -1162,7 +1305,7 @@ const extraction = await memoryExtractor.extract({
 const memoriesToSave = extraction.memories.filter((memory) => memory.importance >= 3);
 
 await memory.save({
-  scope: input.scope,
+  scope,
   memories: memoriesToSave,
   source: {
     conversationId: input.conversationId,
@@ -1170,6 +1313,8 @@ await memory.save({
   },
 });
 ```
+
+记忆相关步骤的错误处理与 Observer 一致：同步异常与异步 rejection 均吞掉，不向上抛出，不打断已确定的 `output.text`。
 
 注意：
 
@@ -1186,38 +1331,48 @@ await memory.save({
 
 ## 14.1 必须事件
 
+沿用阶段 2 的冒号命名（与 `persona:load:start`、`safety:input:start` 一致）。在 `CoreEventType` 中扩展：
+
 ```txt
-memory.recall.start
-memory.recall.success
-memory.recall.error
+memory:recall:start
+memory:recall:end       // payload 含 ok、count、memories 或 error
 
-memory.extract.start
-memory.extract.success
-memory.extract.error
+memory:extract:start    // 阶段 4 新增
+memory:extract:end
 
-memory.save.start
-memory.save.success
-memory.save.error
+memory:save:start
+memory:save:end         // payload 含 savedCount、skippedCount 或 error
 ```
+
+`:end` 事件通过 payload 区分成功与失败，例如：
+
+```ts
+// 成功
+{ ok: true, query: "...", count: 2, memories: [...] }
+// 失败
+{ ok: false, message: "recall failed: ..." }
+```
+
+不新增独立的 `:success` / `:error` 类型名，避免 `CoreEventType` 膨胀。
 
 ---
 
 ## 14.2 可选事件
 
 ```txt
-memory.embedding.start
-memory.embedding.success
-memory.embedding.error
+memory:embedding:start
+memory:embedding:end
 ```
 
-如果 embedding 完全封装在 `PostgresMemoryProvider` 内部，可以通过 provider 返回 debug 信息，或者由 provider 主动触发 observer。
+如果 embedding 完全封装在 `PostgresMemoryProvider` 内部，可以通过 provider 返回 debug 信息，或者由 provider 在实现内 emit 上述事件。
 
 ---
 
-## 14.3 recall success payload
+## 14.3 recall end payload（ok: true）
 
 ```ts
-interface MemoryRecallSuccessPayload {
+interface MemoryRecallEndPayload {
+  ok: true;
   query: string;
   count: number;
   memories: Array<{
@@ -1232,10 +1387,11 @@ interface MemoryRecallSuccessPayload {
 
 ---
 
-## 14.4 extract success payload
+## 14.4 extract end payload（ok: true）
 
 ```ts
-interface MemoryExtractSuccessPayload {
+interface MemoryExtractEndPayload {
+  ok: true;
   count: number;
   memories: ExtractedMemory[];
 }
@@ -1243,10 +1399,11 @@ interface MemoryExtractSuccessPayload {
 
 ---
 
-## 14.5 save success payload
+## 14.5 save end payload（ok: true）
 
 ```ts
-interface MemorySaveSuccessPayload {
+interface MemorySaveEndPayload {
+  ok: true;
   savedCount: number;
   skippedCount: number;
   saved: Array<{
@@ -1257,6 +1414,8 @@ interface MemorySaveSuccessPayload {
   }>;
 }
 ```
+
+失败时统一 `{ ok: false, message: string }`，message 为安全摘要，不透传底层堆栈。
 
 ---
 
@@ -1419,16 +1578,22 @@ importance: 5
 建议按这个顺序做：
 
 ```txt
-1. 先完成 ai-core 内的 Memory 类型与 Provider 抽象
-2. 接入 NoopMemoryProvider，确保默认聊天不受影响
-3. 接入 InMemoryMemoryProvider，验证 recall / save 调用链路
-4. 实现 MemoryExtractor，验证结构化抽取
-5. 修改 SimpleChatWorkflow，接入 recall 与 prompt 注入
-6. 修改 SimpleChatWorkflow，接入 extract 与 save
-7. 接入 Observer 事件
-8. 调试 UI 展示 memory 过程
-9. 实现 packages/memory-postgres
-10. 接入 PostgreSQL + pgvector 完整联调
+PR 1
+  1. 演进 memory.ts 类型与 MemoryProvider 抽象（含 resolveMemoryScope）
+  2. NoopMemoryProvider 替换 DisabledMemoryProvider
+  3. InMemoryMemoryProvider
+  4. MemoryExtractor + Prompt Formatter（暂不改 Workflow）
+
+PR 2
+  5. SimpleChatWorkflow 接入 recall / extract / save
+  6. Persona Prompt 条件化
+  7. Observer 事件（memory:extract:* 等）
+
+PR 3
+  8. model-runtime-demo 记忆面板与 API 字段扩展
+
+PR 4
+  9. PostgreSQL + pgvector 完整联调 + Section 16 验证场景
 ```
 
 这样可以先保证 Core 链路稳定，再接入真实数据库和向量检索。
@@ -1463,6 +1628,10 @@ importance: 5
 [ ] 长期记忆可持久化
 [ ] 长期记忆可语义召回
 [ ] 不同 scope 的记忆不会互相污染
+[ ] 仅传 sessionId、不传 scope 时 recall / save 仍正常（resolveMemoryScope 垫片）
+[ ] 有召回记忆时 Persona Prompt 不再声称「无长期记忆能力」
+[ ] Observer 事件命名与阶段 2 冒号风格一致（memory:recall:start 等）
+[ ] memory:extract:start / memory:extract:end 已接入
 ```
 
 ---
@@ -1473,14 +1642,17 @@ importance: 5
 
 ```txt
 packages/ai-core
-  长期记忆类型
-  MemoryProvider 抽象
-  NoopMemoryProvider
+  长期记忆类型（MemoryScope / MemoryRecord / ExtractedMemory / RecalledMemory）
+  MemoryProvider 抽象演进（替代阶段 2 简化版）
+  resolveMemoryScope 工具函数
+  NoopMemoryProvider（替代 DisabledMemoryProvider）
   InMemoryMemoryProvider
   MemoryExtractor
   Memory Prompt Formatter
-  SimpleChatWorkflow memory recall/save 接入
-  Memory Observer Events
+  ChatWorkflowInput / Output 扩展
+  SimpleChatWorkflow recall / extract / save 接入
+  Persona Prompt 条件化（有记忆时注入 Section 12）
+  Memory Observer Events（含 memory:extract:*）
 
 packages/memory-postgres
   PostgreSQL MemoryProvider
