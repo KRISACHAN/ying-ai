@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @ying-companion/ai-core build && next dev",
-    "build": "pnpm --filter @ying-companion/ai-core build && next build",
+    "dev": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres build && next dev",
+    "build": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres build && next build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern next-env.d.ts",
     "clean": "rm -rf .next .turbo"
   },
   "dependencies": {
     "@ying-companion/ai-core": "workspace:*",
+    "@ying-companion/memory-postgres": "workspace:*",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

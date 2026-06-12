@@ -5,17 +5,26 @@ import {
   InMemoryMemoryProvider,
   ModelRuntimeError,
   type ChatMessage,
+  type CreateModelOptions,
   type ChatWorkflowOutput,
   type CoreEvent,
   type CoreObserver,
+  type MemoryProvider,
 } from "@ying-companion/ai-core";
+import { OpenAIEmbeddingProvider, PostgresMemoryProvider } from "@ying-companion/memory-postgres";
 
-import { loadModelConfig } from "../../lib/model-config";
+import { loadModelConfig, readOptionalEnv } from "../../lib/model-config";
 
 // demo 级防护：限制单条消息长度与历史条数，避免不可控 token 成本。
 const MAX_MESSAGE_LENGTH = 8000;
 const MAX_HISTORY_LENGTH = 50;
-const demoMemory = new InMemoryMemoryProvider();
+const inMemoryDemoMemory = new InMemoryMemoryProvider();
+let postgresDemoMemory:
+  | {
+      key: string;
+      provider: PostgresMemoryProvider;
+    }
+  | undefined;
 
 interface ChatRequestBody {
   message: string;
@@ -106,11 +115,12 @@ export async function POST(request: Request): Promise<Response> {
 
     const config = loadModelConfig(process.env);
     const model = createModel(config);
+    const memory = createDemoMemoryProvider(process.env, config);
     // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
     const core = createCompanionCore({
       model,
       observer,
-      memory: demoMemory,
+      memory,
       // 仅 demo 默认值：性别可改，不代表产品固定角色（见阶段 2 §八）。
       persona: new DefaultPersonaProvider({
         id: "debug-companion",
@@ -149,6 +159,46 @@ export async function POST(request: Request): Promise<Response> {
       observerEvents: serializeEvents(observer.events),
     });
   }
+}
+
+function createDemoMemoryProvider(
+  env: NodeJS.ProcessEnv,
+  modelConfig: CreateModelOptions,
+): MemoryProvider {
+  const connectionString = readOptionalEnv(env, "DATABASE_URL");
+
+  if (connectionString === undefined) {
+    return inMemoryDemoMemory;
+  }
+
+  const embeddingModel = readOptionalEnv(env, "OPENAI_EMBEDDING_MODEL") ?? "text-embedding-3-small";
+  const tableName = readOptionalEnv(env, "MEMORY_POSTGRES_TABLE");
+  const key = [
+    connectionString,
+    modelConfig.apiKey,
+    modelConfig.baseUrl ?? "",
+    embeddingModel,
+    tableName ?? "",
+  ].join("\n");
+
+  if (postgresDemoMemory?.key === key) {
+    return postgresDemoMemory.provider;
+  }
+
+  const embeddingProvider = new OpenAIEmbeddingProvider({
+    apiKey: modelConfig.apiKey,
+    model: embeddingModel,
+    ...(modelConfig.baseUrl !== undefined ? { baseUrl: modelConfig.baseUrl } : {}),
+  });
+  const provider = new PostgresMemoryProvider({
+    connectionString,
+    embeddingProvider,
+    ...(tableName !== undefined ? { tableName } : {}),
+  });
+
+  postgresDemoMemory = { key, provider };
+
+  return provider;
 }
 
 function serializeEvents(events: CoreEvent[]): SerializedCoreEvent[] {

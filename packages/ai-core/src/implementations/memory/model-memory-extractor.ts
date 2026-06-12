@@ -24,6 +24,7 @@ export interface ModelMemoryExtractorOptions {
   model: ChatModel;
   retryCount?: number;
   maxHistoryMessages?: number;
+  timeoutMs?: number;
 }
 
 export class ModelMemoryExtractor implements MemoryExtractor {
@@ -38,11 +39,13 @@ export class ModelMemoryExtractor implements MemoryExtractor {
   private readonly model: ChatModel;
   private readonly retryCount: number;
   private readonly maxHistoryMessages: number;
+  private readonly timeoutMs: number;
 
   public constructor(options: ModelMemoryExtractorOptions) {
     this.model = options.model;
     this.retryCount = options.retryCount ?? 1;
     this.maxHistoryMessages = options.maxHistoryMessages ?? 6;
+    this.timeoutMs = options.timeoutMs ?? 15_000;
   }
 
   public async extract(input: MemoryExtractionInput): Promise<MemoryExtractionResult> {
@@ -50,10 +53,13 @@ export class ModelMemoryExtractor implements MemoryExtractor {
 
     for (let attempt = 0; attempt <= this.retryCount; attempt += 1) {
       try {
-        const output = await this.model.generate({
-          messages: buildExtractionMessages(input, attempt > 0, this.maxHistoryMessages),
-          temperature: 0,
-        });
+        const output = await withTimeout(
+          this.model.generate({
+            messages: buildExtractionMessages(input, attempt > 0, this.maxHistoryMessages),
+            temperature: 0,
+          }),
+          this.timeoutMs,
+        );
         const json = parseJsonObject(output.text);
         const parsed = MemoryExtractionResultSchema.parse(json);
 
@@ -73,6 +79,29 @@ export class ModelMemoryExtractor implements MemoryExtractor {
 
     throw lastError instanceof Error ? lastError : new Error("Memory extraction failed");
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (timeoutMs <= 0) {
+    return promise;
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Memory extraction timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 function buildExtractionMessages(
