@@ -10,6 +10,7 @@ import type { CoreEvent, CoreObserver } from "../../abstractions/observer";
 import type { CompanionGender, CompanionPersona } from "../../abstractions/persona";
 import type {
   ChatWorkflow,
+  ChatWorkflowDebugContext,
   ChatWorkflowExecutionContext,
   ChatWorkflowInput,
   ChatWorkflowOutput,
@@ -86,7 +87,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       }
 
       const sanitizedHistory = sanitizeHistory(input.history);
-      const recalledMemories = await recallMemories({
+      const recall = await recallMemories({
         observer,
         memory,
         scope,
@@ -95,9 +96,11 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         minImportance: input.memoryOptions?.minImportance ?? 3,
         ...(sessionId !== undefined ? { sessionId } : {}),
       });
+      const recalledMemories = recall.memories;
       const memoryContext = formatMemoriesForPrompt(recalledMemories);
+      const systemPrompt = buildPersonaSystemPrompt(loadedPersona, memoryContext);
       const messages: ChatMessage[] = [
-        { role: "system", content: buildPersonaSystemPrompt(loadedPersona, memoryContext) },
+        { role: "system", content: systemPrompt },
         ...sanitizedHistory,
         { role: "user", content: input.message },
       ];
@@ -150,6 +153,16 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         ...(input.messageIds !== undefined ? { messageIds: input.messageIds } : {}),
       });
 
+      const embeddingVectorLength =
+        recall.embeddingVectorLength ?? memoryResult.embeddingVectorLength;
+      const debugContext: ChatWorkflowDebugContext = {
+        scope,
+        ...(memoryContext !== undefined ? { memoryContext } : {}),
+        systemPrompt,
+        messages,
+        ...(embeddingVectorLength !== undefined ? { embeddingVectorLength } : {}),
+      };
+
       const output: ChatWorkflowOutput = {
         text: modelOutput.text,
         model: modelOutput.model,
@@ -164,6 +177,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
           extractedMemories: memoryResult.extracted,
           savedMemories: memoryResult.saved,
           skippedMemories: memoryResult.skipped,
+          debugContext,
         },
         modelOutput,
       };
@@ -299,7 +313,12 @@ interface RecallMemoriesOptions {
   sessionId?: string;
 }
 
-async function recallMemories(options: RecallMemoriesOptions): Promise<RecalledMemory[]> {
+interface RecallMemoriesResult {
+  memories: RecalledMemory[];
+  embeddingVectorLength?: number;
+}
+
+async function recallMemories(options: RecallMemoriesOptions): Promise<RecallMemoriesResult> {
   await safeEmit(options.observer, {
     type: "memory:recall:start",
     timestamp: new Date(),
@@ -328,10 +347,18 @@ async function recallMemories(options: RecallMemoriesOptions): Promise<RecalledM
         query: options.query,
         count: result.memories.length,
         memories: result.memories.map(toMemoryDebugPayload),
+        ...(result.embeddingVectorLength !== undefined
+          ? { embeddingVectorLength: result.embeddingVectorLength }
+          : {}),
       },
     });
 
-    return result.memories;
+    return {
+      memories: result.memories,
+      ...(result.embeddingVectorLength !== undefined
+        ? { embeddingVectorLength: result.embeddingVectorLength }
+        : {}),
+    };
   } catch (error) {
     await safeEmit(options.observer, {
       type: "memory:recall:end",
@@ -339,7 +366,7 @@ async function recallMemories(options: RecallMemoriesOptions): Promise<RecalledM
       payload: { ok: false, message: toSafeMessage(error) },
     });
 
-    return [];
+    return { memories: [] };
   }
 }
 
@@ -360,6 +387,7 @@ interface ExtractAndSaveResult {
   extracted: ExtractedMemory[];
   saved: MemoryRecord[];
   skipped: ExtractedMemory[];
+  embeddingVectorLength?: number;
 }
 
 async function extractAndSaveMemories(
@@ -429,10 +457,20 @@ async function extractAndSaveMemories(
         savedCount: saveResult.saved.length,
         skippedCount: skipped.length,
         saved: saveResult.saved.map(toMemoryDebugPayload),
+        ...(saveResult.embeddingVectorLength !== undefined
+          ? { embeddingVectorLength: saveResult.embeddingVectorLength }
+          : {}),
       },
     });
 
-    return { extracted, saved: saveResult.saved, skipped };
+    return {
+      extracted,
+      saved: saveResult.saved,
+      skipped,
+      ...(saveResult.embeddingVectorLength !== undefined
+        ? { embeddingVectorLength: saveResult.embeddingVectorLength }
+        : {}),
+    };
   } catch (error) {
     await safeEmit(options.observer, {
       type: "memory:save:end",

@@ -53,6 +53,12 @@ export interface RecalledMemory extends MemoryRecord {
 
 export interface MemoryRecallResult {
   memories: RecalledMemory[];
+  /**
+   * 可选调试信息：本次 recall 使用的 query embedding 维度。
+   * 仅供宿主调试展示（patch-0 §5.4），不属于业务契约；
+   * 进程内 / Noop provider 可不返回。
+   */
+  embeddingVectorLength?: number;
 }
 
 export interface MemorySaveInput {
@@ -65,6 +71,11 @@ export interface MemorySaveInput {
 export interface MemorySaveResult {
   saved: MemoryRecord[];
   skipped?: ExtractedMemory[];
+  /**
+   * 可选调试信息：本次 save 中最后一次 content embedding 的维度。
+   * 仅供宿主调试展示（patch-0 §5.4），不属于业务契约。
+   */
+  embeddingVectorLength?: number;
 }
 
 export interface MemoryExtractionInput {

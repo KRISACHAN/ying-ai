@@ -28,6 +28,23 @@ export interface ChatWorkflowInput {
   };
 }
 
+/**
+ * 仅供宿主调试展示的上下文快照（patch-0 §5.4）。
+ * 让 Demo 的 Prompt / Context Debug Panel 能 100% 还原本轮实际发给模型的内容，
+ * 不属于业务 API 契约。
+ */
+export interface ChatWorkflowDebugContext {
+  scope: MemoryScope;
+  /** formatMemoriesForPrompt 结果；无召回时为 undefined。 */
+  memoryContext?: string;
+  /** buildPersonaSystemPrompt 完整结果。 */
+  systemPrompt: string;
+  /** 最终传入 model.generate 的 messages。 */
+  messages: ChatMessage[];
+  /** 本轮 recall 或 save 中最后一次 embedding 的 vector.length。 */
+  embeddingVectorLength?: number;
+}
+
 export interface ChatWorkflowOutput {
   text: string;
   model?: string;
@@ -44,6 +61,7 @@ export interface ChatWorkflowOutput {
     extractedMemories?: ExtractedMemory[];
     savedMemories?: MemoryRecord[];
     skippedMemories?: ExtractedMemory[];
+    debugContext?: ChatWorkflowDebugContext;
   };
   modelOutput?: GenerateOutput;
 }

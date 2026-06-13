@@ -2,34 +2,33 @@ import {
   createCompanionCore,
   createModel,
   DefaultPersonaProvider,
-  InMemoryMemoryProvider,
   ModelRuntimeError,
   type ChatMessage,
-  type CreateModelOptions,
   type ChatWorkflowOutput,
   type CoreEvent,
   type CoreObserver,
-  type MemoryProvider,
+  type MemoryScope,
 } from "@ying-companion/ai-core";
-import { OpenAIEmbeddingProvider, PostgresMemoryProvider } from "@ying-companion/memory-postgres";
 
-import { loadModelConfig, readOptionalEnv } from "../../lib/model-config";
+import { loadModelConfig } from "../../lib/model-config";
+import { resolveChatMemoryRuntime, type MemoryDatabaseStatus } from "../../lib/memory-config";
 
 // demo 级防护：限制单条消息长度与历史条数，避免不可控 token 成本。
 const MAX_MESSAGE_LENGTH = 8000;
 const MAX_HISTORY_LENGTH = 50;
-const inMemoryDemoMemory = new InMemoryMemoryProvider();
-let postgresDemoMemory:
-  | {
-      key: string;
-      provider: PostgresMemoryProvider;
-    }
-  | undefined;
+const DEFAULT_COMPANION_ID = "debug-companion";
+
+interface ChatRequestScope {
+  ownerType?: MemoryScope["ownerType"];
+  ownerId?: string;
+  companionId?: string;
+}
 
 interface ChatRequestBody {
   message: string;
   history?: ChatMessage[];
   sessionId?: string;
+  scope?: ChatRequestScope;
 }
 
 interface SerializedCoreEvent {
@@ -42,6 +41,8 @@ interface ChatResponseBody {
   ok: boolean;
   output?: ChatWorkflowOutput;
   observerEvents: SerializedCoreEvent[];
+  memoryStatus?: MemoryDatabaseStatus;
+  memoryReason?: string;
   error?: { message: string };
 }
 
@@ -93,6 +94,22 @@ function validateRequestBody(raw: unknown): string | null {
   if (body.sessionId !== undefined && typeof body.sessionId !== "string") {
     return "sessionId 必须是字符串";
   }
+  if (body.scope !== undefined) {
+    if (typeof body.scope !== "object" || body.scope === null) {
+      return "scope 必须是对象";
+    }
+    const scope = body.scope as Record<string, unknown>;
+    const allowedOwnerTypes = ["anonymous", "user", "session", "custom"];
+    if (scope.ownerType !== undefined && !allowedOwnerTypes.includes(scope.ownerType as string)) {
+      return "scope.ownerType 非法";
+    }
+    if (scope.ownerId !== undefined && typeof scope.ownerId !== "string") {
+      return "scope.ownerId 必须是字符串";
+    }
+    if (scope.companionId !== undefined && typeof scope.companionId !== "string") {
+      return "scope.companionId 必须是字符串";
+    }
+  }
 
   return null;
 }
@@ -115,12 +132,13 @@ export async function POST(request: Request): Promise<Response> {
 
     const config = loadModelConfig(process.env);
     const model = createModel(config);
-    const memory = createDemoMemoryProvider(process.env, config);
+    // patch-0 §8.2：按 health 严格选择 Postgres / InMemory / Noop。
+    const memoryRuntime = await resolveChatMemoryRuntime(process.env, config);
     // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
     const core = createCompanionCore({
       model,
       observer,
-      memory,
+      memory: memoryRuntime.provider,
       // 仅 demo 默认值：性别可改，不代表产品固定角色（见阶段 2 §八）。
       persona: new DefaultPersonaProvider({
         id: "debug-companion",
@@ -132,11 +150,20 @@ export async function POST(request: Request): Promise<Response> {
       }),
     });
 
+    // patch-0 §9.2 / §10：宿主显式构造 scope（含 companionId），优先级高于 sessionId。
+    const sessionId = body.sessionId ?? "demo-session";
+    const scope: MemoryScope = {
+      ownerType: body.scope?.ownerType ?? "session",
+      ownerId: body.scope?.ownerId ?? sessionId,
+      companionId: body.scope?.companionId ?? DEFAULT_COMPANION_ID,
+    };
+
     const output = await core.executeWorkflow({
-      sessionId: body.sessionId ?? "demo-session",
+      sessionId,
       message: body.message,
       history: body.history ?? [],
-      conversationId: body.sessionId ?? "demo-session",
+      scope,
+      conversationId: sessionId,
     });
     const inspection = core.inspect();
 
@@ -151,6 +178,8 @@ export async function POST(request: Request): Promise<Response> {
         },
       },
       observerEvents: serializeEvents(observer.events),
+      memoryStatus: memoryRuntime.status,
+      ...(memoryRuntime.reason !== undefined ? { memoryReason: memoryRuntime.reason } : {}),
     });
   } catch (error) {
     return jsonResponse({
@@ -159,46 +188,6 @@ export async function POST(request: Request): Promise<Response> {
       observerEvents: serializeEvents(observer.events),
     });
   }
-}
-
-function createDemoMemoryProvider(
-  env: NodeJS.ProcessEnv,
-  modelConfig: CreateModelOptions,
-): MemoryProvider {
-  const connectionString = readOptionalEnv(env, "DATABASE_URL");
-
-  if (connectionString === undefined) {
-    return inMemoryDemoMemory;
-  }
-
-  const embeddingModel = readOptionalEnv(env, "OPENAI_EMBEDDING_MODEL") ?? "text-embedding-3-small";
-  const tableName = readOptionalEnv(env, "MEMORY_POSTGRES_TABLE");
-  const key = [
-    connectionString,
-    modelConfig.apiKey,
-    modelConfig.baseUrl ?? "",
-    embeddingModel,
-    tableName ?? "",
-  ].join("\n");
-
-  if (postgresDemoMemory?.key === key) {
-    return postgresDemoMemory.provider;
-  }
-
-  const embeddingProvider = new OpenAIEmbeddingProvider({
-    apiKey: modelConfig.apiKey,
-    model: embeddingModel,
-    ...(modelConfig.baseUrl !== undefined ? { baseUrl: modelConfig.baseUrl } : {}),
-  });
-  const provider = new PostgresMemoryProvider({
-    connectionString,
-    embeddingProvider,
-    ...(tableName !== undefined ? { tableName } : {}),
-  });
-
-  postgresDemoMemory = { key, provider };
-
-  return provider;
 }
 
 function serializeEvents(events: CoreEvent[]): SerializedCoreEvent[] {

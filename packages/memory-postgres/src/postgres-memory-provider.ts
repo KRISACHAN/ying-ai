@@ -23,6 +23,19 @@ export interface PostgresMemoryProviderOptions {
   pool?: Pool;
 }
 
+/**
+ * 数据库健康检查结果（patch-0 §11.4）。
+ * 供宿主在 /api/memory-health 与 Memory DB Panel 中展示，
+ * 不在 chat 请求路径中做重型检测。
+ */
+export interface MemoryDatabaseHealth {
+  ok: boolean;
+  databaseConnected: boolean;
+  pgvectorEnabled: boolean;
+  tableReady: boolean;
+  error?: string;
+}
+
 interface MemoryRow {
   id: string;
   owner_type: MemoryScope["ownerType"];
@@ -102,7 +115,10 @@ export class PostgresMemoryProvider implements MemoryProvider {
       ],
     );
 
-    return { memories: result.rows.map(rowToRecalledMemory) };
+    return {
+      memories: result.rows.map(rowToRecalledMemory),
+      embeddingVectorLength: embedding.vector.length,
+    };
   }
 
   public async save(input: MemorySaveInput): Promise<MemorySaveResult> {
@@ -111,6 +127,7 @@ export class PostgresMemoryProvider implements MemoryProvider {
     try {
       const saved: MemoryRecord[] = [];
       const skipped: ExtractedMemory[] = [];
+      let embeddingVectorLength: number | undefined;
 
       await client.query("BEGIN");
 
@@ -128,6 +145,7 @@ export class PostgresMemoryProvider implements MemoryProvider {
         }
 
         const embedding = await this.embeddingProvider.embed({ text: memory.content });
+        embeddingVectorLength = embedding.vector.length;
         const id = createMemoryId();
         const result = await client.query<MemoryRow>(
           `
@@ -186,7 +204,11 @@ export class PostgresMemoryProvider implements MemoryProvider {
 
       await client.query("COMMIT");
 
-      return { saved, skipped };
+      return {
+        saved,
+        skipped,
+        ...(embeddingVectorLength !== undefined ? { embeddingVectorLength } : {}),
+      };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {
         // keep original save error
@@ -194,6 +216,47 @@ export class PostgresMemoryProvider implements MemoryProvider {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * 轻量健康检查（patch-0 §11.4）：连接、pgvector 扩展、目标表是否就绪。
+   * 任一失败时返回 ok=false 并附带 error，不抛出，便于宿主严格 fallback。
+   */
+  public async healthCheck(): Promise<MemoryDatabaseHealth> {
+    let databaseConnected = false;
+    let pgvectorEnabled = false;
+    let tableReady = false;
+
+    try {
+      const ping = await this.pool.query<{ ok: number }>("SELECT 1 AS ok");
+      databaseConnected = ping.rows[0]?.ok === 1;
+
+      const extension = await this.pool.query<{ extname: string }>(
+        "SELECT extname FROM pg_extension WHERE extname = 'vector'",
+      );
+      pgvectorEnabled = extension.rows.length > 0;
+
+      const table = await this.pool.query<{ exists: boolean }>(
+        "SELECT to_regclass($1) IS NOT NULL AS exists",
+        [this.tableName],
+      );
+      tableReady = table.rows[0]?.exists ?? false;
+
+      return {
+        ok: databaseConnected && pgvectorEnabled && tableReady,
+        databaseConnected,
+        pgvectorEnabled,
+        tableReady,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        databaseConnected,
+        pgvectorEnabled,
+        tableReady,
+        error: error instanceof Error ? error.message : "memory health check failed",
+      };
     }
   }
 
