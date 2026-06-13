@@ -132,8 +132,9 @@ export async function POST(request: Request): Promise<Response> {
 
     const config = loadModelConfig(process.env);
     const model = createModel(config);
-    // patch-0 §8.2：按 health 严格选择 Postgres / InMemory / Noop。
-    const memoryRuntime = await resolveChatMemoryRuntime(process.env, config);
+    // patch-0 §8.2 / §11.4：按 health snapshot 严格选择 Postgres / InMemory / Unavailable。
+    // chat 热路径不探测 DB，仅读 /api/memory-health 写入的 snapshot。
+    const memoryRuntime = await resolveChatMemoryRuntime(process.env);
     // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
     const core = createCompanionCore({
       model,

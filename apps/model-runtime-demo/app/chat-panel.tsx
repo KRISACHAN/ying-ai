@@ -401,7 +401,7 @@ function renderStatus(status: MemoryDatabaseStatus | undefined): string {
     case "disabled":
       return "disabled（InMemory）";
     case "error":
-      return "error（Noop 严格回退）";
+      return "error（Unavailable 严格回退，observer 可见 DB 错误）";
     default:
       return "unknown";
   }

@@ -1,4 +1,3 @@
-import { loadModelConfig } from "../../lib/model-config";
 import { inspectMemoryHealth, type MemoryDatabaseStatus } from "../../lib/memory-config";
 
 import type { MemoryDatabaseHealth } from "@ying-companion/memory-postgres";
@@ -26,8 +25,9 @@ interface MemoryHealthResponse {
  */
 export async function GET(): Promise<Response> {
   try {
-    const modelConfig = loadModelConfig(process.env);
-    const runtime = await inspectMemoryHealth(process.env, modelConfig);
+    // health 只需 DB / embedding 相关 env，不依赖完整模型生成配置；
+    // 这样即便 OPENAI_MODEL / OPENAI_API_KEY 缺失，仍能报告 DB / pgvector / 表状态。
+    const runtime = await inspectMemoryHealth(process.env);
 
     const body: MemoryHealthResponse = {
       ok: runtime.status === "connected",

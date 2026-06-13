@@ -781,3 +781,118 @@ packages/ai-core
 让阶段 4 的长期记忆系统在 apps/model-runtime-demo 中通过真实 PostgreSQL + pgvector 跑起来，
 并能从 health、scope、Prompt、Observer 多维度清楚验证；不是重做 Memory Core。
 ```
+
+---
+
+## 19. 实现实况补充（落地后回填，含 code review 修复）
+
+> 本节记录实际实现与 §1–§18 设计的**差异与细化**，以代码为准。前文保留为原始设计意图；本节为落地后（含 codex review 复核与修复，详见 `.code-reviews/5-22f9fab/`）的真实状态。
+
+### 19.1 §8.2 情况 3 fallback：`UnavailableMemoryProvider` 取代 `NoopMemoryProvider`
+
+原 §8.2 / §13.2 写「health 失败 → 使用 `NoopMemoryProvider`」。落地后改用 demo 级 `UnavailableMemoryProvider`（定义在 `apps/model-runtime-demo/app/lib/memory-config.ts`，**不进 ai-core**）。
+
+原因：`NoopMemoryProvider.recall/save` 返回成功的空结果，`SimpleChatWorkflow` 会走成功路径并发出 `memory:*:end { ok:true }`，与 §14.6「DB 失败时 observer 显示 error」冲突——调试者无法从 workflow 事件区分「配置故障」与「确实没有记忆」。
+
+实际行为：
+
+```txt
+情况 3：DATABASE_URL 存在，healthCheck 失败
+  → 使用 UnavailableMemoryProvider（recall/save 抛出缓存的 health error）
+  → SimpleChatWorkflow 走现有 catch，发出 memory:recall:end / memory:save:end { ok:false }
+  → 页面 Memory DB Panel：status=error + lastError；Observer Events 本轮 memory:*:end ok=false
+  → 聊天仍可用（链路不被打断），但 recall/save 无效果
+```
+
+provider meta：
+
+```ts
+meta = {
+  id: "memory.unavailable",
+  kind: "memory",
+  name: "Unavailable Memory Provider",
+  description: "Strict fallback that surfaces the database health error on every operation",
+  version: "1.0.0",
+};
+```
+
+§13.2 中「MemoryProvider: Noop（严格 fallback）」应理解为「严格 fallback（实现为 Unavailable，observer 可见 error）」。
+
+### 19.2 §8 / §11.4 health 检查位置：进程级 snapshot，chat 热路径不探测 DB
+
+原 §8.1 流程把 `healthCheck` 放在「创建 CompanionCore 前」，易被实现成每次聊天请求都探测 DB。落地后明确拆分（§11.4「不在 chat 请求路径里做重型检测」为硬约束）：
+
+```txt
+GET /api/memory-health
+  → inspectMemoryHealth()：执行实时 healthCheck()（SELECT 1 / pg_extension / to_regclass）
+  → 写入进程级 healthSnapshot { key, status, health, reason }
+
+POST /api/chat
+  → resolveChatMemoryRuntime()：只读 healthSnapshot，绝不调用 healthCheck()
+    - 缺 DATABASE_URL        → InMemory
+    - snapshot.status=error  → UnavailableMemoryProvider（key 匹配时）
+    - snapshot.status=connected → PostgresMemoryProvider
+    - 无 snapshot / key 不匹配（冷启动或 env 变更）
+        → 乐观使用 PostgresMemoryProvider，真实 recall/save 错误经 observer 暴露，
+          页面下次刷新 /api/memory-health 后 snapshot 即对齐
+```
+
+snapshot 的 `key` 由 `DATABASE_URL / apiKey / baseUrl / embeddingModel / tableName` 组合而成；env 变化时 key 失配，旧 snapshot 不再被信任。
+
+health 刷新时机（替换原 §8.2 末尾「重启 dev server 再验」的最小说法）：
+
+```txt
+页面加载（Memory DB Panel useEffect）调用 GET /api/memory-health
+每轮聊天发送成功后，前端再次调用 GET /api/memory-health 刷新 snapshot
+切换 DATABASE_URL 相关 env 后仍建议重启 dev server
+```
+
+### 19.3 §11.4 / 低优先级修复：health 端点不依赖完整模型生成配置
+
+`/api/memory-health` 不再经 `loadModelConfig`（后者要求 `OPENAI_API_KEY` / `OPENAI_MODEL` 必填）。新增 `readMemoryEnvConfig()` 只读 DB / embedding 相关变量：
+
+```txt
+DATABASE_URL（决定 disabled / 是否构造 Postgres）
+OPENAI_EMBEDDING_MODEL（缺省 text-embedding-3-small，仅用于展示与构造 embedding provider）
+MEMORY_POSTGRES_TABLE（缺省 companion_memories）
+OPENAI_API_KEY / OPENAI_BASE_URL（可选；缺失时 embedding provider 用占位 apiKey，
+  health 探测本身不发 embedding 请求，仅 chat/save 真正调用时才需要有效 key）
+```
+
+效果：即便模型生成配置（`OPENAI_MODEL` 等）缺失，health 端点仍能报告 DB / pgvector / 表状态，而不是 500。
+
+### 19.4 连接池生命周期：替换 runtime 前 dispose 旧 pool
+
+`resolvePostgresRuntime()` 按 `key` 复用 `PostgresMemoryProvider`；当 key 变化（切库 / 改 table / 改 embedding model / dev 热重载）需重建时，**先 `await postgresRuntime.provider.dispose().catch(() => {})`** 释放旧连接池再构造新实例（best-effort，dispose 失败不阻断新 runtime）。避免同进程内悄悄覆盖未释放的 pool。
+
+### 19.5 与 §5.4 一致的 `embeddingVectorLength` 取数路径
+
+`metadata.debugContext.embeddingVectorLength` 的实际来源：`PostgresMemoryProvider.recall/save` 在成功路径上把 `EmbedResult.vector.length` 通过 `MemoryRecallResult.embeddingVectorLength` / `MemorySaveResult.embeddingVectorLength`（ai-core 抽象上新增的可选 debug 字段）返回；`SimpleChatWorkflow` 优先取 recall 的长度，无召回时回退到 save 的长度，写入 `debugContext`，并同时扩展 `memory:recall:end` / `memory:save:end` 的现有 payload（**未新增** `memory:embedding:*` 事件，符合 §4.2.8）。InMemory / Unavailable provider 不返回该字段，面板显示 `—`。
+
+### 19.6 落地交付物对照（替换 §17 中的 fallback 措辞）
+
+```txt
+apps/model-runtime-demo
+  app/api/memory-health/route.ts            # GET，实时 healthCheck + 写 snapshot，不依赖模型配置
+  app/api/chat/route.ts                     # 显式传 scope；只读 snapshot 选 provider
+  app/lib/memory-config.ts                  # snapshot 机制 + UnavailableMemoryProvider + dispose 旧 pool
+  app/chat-panel.tsx                        # Memory DB / Prompt Debug / Observer 面板 + scope 切换
+  fallback：Postgres / InMemory / Unavailable（非 Noop）
+
+packages/memory-postgres
+  healthCheck()（SELECT 1 / pg_extension / to_regclass），MemoryDatabaseHealth 类型
+  recall/save 返回 embeddingVectorLength（debug 用）
+
+packages/ai-core
+  ChatWorkflowDebugContext + metadata.debugContext（无 DB 依赖）
+  MemoryRecallResult / MemorySaveResult 增加可选 embeddingVectorLength
+  resolveMemoryScope 签名未改
+```
+
+### 19.7 仍未覆盖（保留项）
+
+```txt
+自动化测试：仓库暂无测试框架（无 vitest / jest），fallback / snapshot / debugContext 暂靠
+  typecheck + lint + build + 手工验收保证；待框架就绪补窄回归测试。
+§14.3–§14.6 真实 PostgreSQL + pgvector 手工验收：需本地 DB 环境跑通保存 / 召回 / 隔离 / 失败不阻塞。
+```

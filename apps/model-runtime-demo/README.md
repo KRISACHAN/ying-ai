@@ -22,14 +22,14 @@ MEMORY_POSTGRES_TABLE=companion_memories
 
 - `DATABASE_URL` 缺失：使用进程内 `InMemoryMemoryProvider`（重启丢失），面板显示 `disabled`；
 - `DATABASE_URL` 存在且 health 通过：使用 `PostgresMemoryProvider`，面板显示 `connected` / pgvector enabled；
-- `DATABASE_URL` 存在但 health 失败（连接 / pgvector / 表缺失）：严格使用 `NoopMemoryProvider`，面板显示 `error` 与具体原因，聊天仍可用但 recall/save 无效果。
+- `DATABASE_URL` 存在但 health 失败（连接 / pgvector / 表缺失）：严格使用 demo 级 `UnavailableMemoryProvider`（recall/save 抛出 health error），面板显示 `error` 与具体原因，聊天仍可用，且 Observer Events 中本轮 `memory:*:end` 显示 `ok:false`，便于区分配置故障与「确实没有记忆」。
 
 使用 PostgreSQL 前先执行
 `packages/memory-postgres/migrations/0001_create_companion_memories.sql`，确保 `pgvector` 可用、
 `companion_memories` 表存在，且 embedding 维度与 `OPENAI_EMBEDDING_MODEL` 一致
 （`text-embedding-3-small` → `vector(1536)`）。
 
-health 状态由 `GET /api/memory-health` 在页面加载与每轮聊天后刷新，不在 chat 请求路径中做重型检测。
+health 状态由 `GET /api/memory-health` 在页面加载与每轮聊天后刷新，并写入进程级 snapshot；chat 请求路径只读该 snapshot 选择 provider，不再探测 DB（patch-0 §8/§11.4）。冷启动尚无 snapshot 时，chat 会乐观使用 Postgres，真实 recall/save 错误经 Observer 暴露，页面下次刷新 health 后即对齐。
 
 ## 本地运行
 
