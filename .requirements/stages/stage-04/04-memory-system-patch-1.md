@@ -66,7 +66,7 @@ Prompt 中保留 summary + recent history
 ```txt
 阶段 3：
   短期上下文
-  ChatInput.history
+  ChatWorkflowInput.history
   最近 n 条消息
 
 阶段 4：
@@ -112,10 +112,12 @@ packages/ai-core
   MemoryProvider
   MemoryExtractor
   SimpleChatWorkflow
-  PromptContext.build 或等价 Prompt 组装能力
+  buildPersonaSystemPrompt + formatMemoriesForPrompt（内联于 SimpleChatWorkflow，无独立 PromptContext 模块）
+  ChatWorkflowDebugContext + metadata.debugContext（patch-0）
   CoreObserver
   ChatWorkflowOutput.metadata
   memory:recall:* / memory:extract:* / memory:save:* Observer 事件
+  CompanionCore / createCompanionCore / inspect()
 
 packages/memory-postgres
   PostgresMemoryProvider
@@ -133,15 +135,16 @@ apps/model-runtime-demo
 本 patch 主要新增：
 
 ```txt
-1. ConversationSummary 领域类型
-2. SummaryProvider 抽象
-3. NoopSummaryProvider
-4. InMemorySummaryProvider 或 demo 级实现
-5. SummaryExtractor / SummaryUpdater
-6. SimpleChatWorkflow summary load / inject / update
-7. summary:* Observer 事件
-8. Demo 页面展示 Conversation Summary 与 Recent History 截断效果
-9. Prompt Debug Panel 展示 summary 注入结果
+1. ConversationSummary / SummaryScope 领域类型
+2. SummaryProvider 抽象 + resolveSummaryScope
+3. NoopSummaryProvider + InMemorySummaryProvider
+4. ModelSummaryUpdater（对齐 ModelMemoryExtractor：Zod + retry + 超时）
+5. formatSummaryForPrompt + history split / trim 工具函数
+6. CompanionCoreContext / createCompanionCore / inspect() 注入 summary + summaryUpdater
+7. SimpleChatWorkflow summary load / inject / update / save
+8. 扩展 ChatWorkflowDebugContext（summaryContext / recentHistory / summarizedMessages）
+9. summary:* Observer 事件
+10. Demo 扩展 Prompt / Context Debug Panel（使用 workflow 显式 debug 字段，不从 messages 反推）
 ```
 
 ---
@@ -207,7 +210,10 @@ AI 回复应该能基于摘要回答，而不是完全依赖完整 history。
 9. 在 `ChatWorkflowOutput.metadata` 中暴露 summary 调试字段；
 10. 通过 `CoreObserver` 暴露 summary 相关事件；
 11. 在 `apps/model-runtime-demo` 中展示 summary、recent history、prompt preview；
-12. 提供可控的阈值配置，例如 recent history 保留条数、触发摘要更新的消息数量。
+12. 提供可控的阈值配置，例如 recent history 保留条数、触发摘要更新的消息数量；
+13. 实现 `resolveSummaryScope()`：无有效 scope 时禁用 summary，**禁止**写入 `resolveMemoryScope` 的 `"default"` 垫片；
+14. 在 `CompanionCoreContext`、`createCompanionCore`、`inspect()` 中注入 `summary` 与 `summaryUpdater`；
+15. 扩展 patch-0 的 `ChatWorkflowDebugContext`，不新建 `promptDebug` 等平行 debug 结构。
 
 ---
 
@@ -271,7 +277,7 @@ ConversationSummary ≠ Long-term Memory
 ```txt
 SummaryProvider 单独抽象
 SummaryUpdater 单独实现
-PromptContext 同时消费 summary 与 memories
+buildPersonaSystemPrompt / formatSummaryForPrompt 同时消费 summary 与 memories
 ```
 
 ---
@@ -408,6 +414,56 @@ export interface SummaryScope extends MemoryScope {
 
 ---
 
+## 6.1 resolveSummaryScope
+
+Summary 作用域解析**必须独立于** `resolveMemoryScope()`，且不得复用其 `"default"` 垫片。
+
+```ts
+export function resolveSummaryScope(input: {
+  summaryScope?: SummaryScope;
+  scope?: MemoryScope;
+  sessionId?: string;
+  conversationId?: string;
+}): SummaryScope | undefined {
+  if (input.summaryScope !== undefined) {
+    return input.summaryScope;
+  }
+
+  if (input.scope !== undefined) {
+    return {
+      ...input.scope,
+      ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
+    };
+  }
+
+  if (input.sessionId !== undefined && input.sessionId.trim() !== "") {
+    return {
+      ownerType: "session",
+      ownerId: input.sessionId,
+      ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
+    };
+  }
+
+  return undefined;
+}
+```
+
+行为约定：
+
+```txt
+resolveSummaryScope 返回 undefined：
+  视为 summary 未启用（等同 summaryOptions.enabled=false 或 NoopSummaryProvider）
+  不 load / update / save
+  不向任何 provider 写入 ownerId="default"
+
+resolveSummaryScope 返回有效 SummaryScope：
+  且 summaryOptions.enabled=true 时，才执行 summary 链路
+```
+
+说明：`Memory.recall` 仍可使用 `resolveMemoryScope()`（含 `"default"` 垫片）；Summary 与 Memory 的 scope 解析**分开**，避免无 session 时误写摘要。
+
+---
+
 ## 7. 核心类型设计
 
 ## 7.1 ConversationSummary
@@ -526,6 +582,18 @@ export interface SummaryUpdateResult {
 
 ---
 
+## 7.9 SummaryUpdater
+
+```ts
+export interface SummaryUpdater extends CoreProvider {
+  update(input: SummaryUpdateInput): Promise<SummaryUpdateResult>;
+}
+```
+
+`ModelSummaryUpdater` 与 `NoopSummaryUpdater` 为默认实现（§8.3、§8.3.1）。
+
+---
+
 ## 8. 默认实现
 
 ## 8.1 NoopSummaryProvider
@@ -601,6 +669,87 @@ InMemorySummaryProvider 不是正式持久化实现。
 
 ---
 
+## 8.3 ModelSummaryUpdater
+
+实现方式对齐现有 `ModelMemoryExtractor`：
+
+```txt
+- 独立类，实现 SummaryUpdater 接口（或等价 update 方法）
+- 使用 ChatModel.generate + JSON 输出
+- Zod 校验（§9.6）
+- retryCount / timeoutMs 可配置，默认与 memory extractor 同级
+- 校验或超时失败：抛错由 workflow 捕获，跳过本轮 update，不阻塞主回复
+```
+
+不在 `SummaryProvider` 内嵌模型调用逻辑；Provider 只负责 load/save，Updater 只负责生成新摘要内容。
+
+---
+
+## 8.3.1 NoopSummaryUpdater
+
+与 `NoopSummaryProvider` 配对，默认实现：
+
+```txt
+update 直接返回 { skipped: true, reason: "provider_noop", ... }
+不调用模型
+不抛错
+```
+
+当 `summaryOptions.enabled=false`、`resolveSummaryScope` 返回 `undefined`、或宿主未注入自定义 summary 时，workflow 应短路 summary 链路，无需调用 updater。
+
+---
+
+## 8.4 CompanionCore 注入
+
+按现有 `memory` / `memoryExtractor` 模式，Summary 也必须进入 Core 插槽，而不是只在 workflow 内 new 实例。
+
+### CompanionCoreContext 扩展
+
+```ts
+export interface CompanionCoreContext {
+  // 已有字段省略
+  summary: SummaryProvider;
+  summaryUpdater: SummaryUpdater;
+}
+```
+
+`ChatWorkflowCoreContext` 同步包含上述字段（与 `memory` / `memoryExtractor` 一致）。
+
+### createCompanionCore 默认值
+
+```ts
+export interface CreateCompanionCoreOptions {
+  // 已有字段省略
+  summary?: SummaryProvider;
+  summaryUpdater?: SummaryUpdater;
+}
+
+// 默认：
+summary: options.summary ?? new NoopSummaryProvider();
+summaryUpdater: options.summaryUpdater ??
+  (options.summary !== undefined
+    ? new ModelSummaryUpdater({ model: options.model })
+    : new NoopSummaryUpdater());
+```
+
+说明：仅注入自定义 `summary` 而未注入 `summaryUpdater` 时，应自动绑定 `ModelSummaryUpdater`；二者均为默认 Noop 时，summary 链路完全关闭。
+
+### inspect() 扩展
+
+```ts
+export interface CompanionCoreInspection {
+  providers: {
+    // 已有字段省略
+    summary: CoreProviderMeta;
+    summaryUpdater: CoreProviderMeta;
+  };
+}
+```
+
+`core:init` 事件的 `providers` payload 同步扩展，便于 Demo 展示当前 summary 实现。
+
+---
+
 ## 9. SummaryUpdater 设计
 
 ## 9.1 更新时机
@@ -633,7 +782,7 @@ Summary 失败不影响 Memory
 Memory 失败不影响 Summary
 ```
 
-如果现有 Workflow 中 memory extract/save 已经稳定，也可以保持现有顺序，只要确保 summary update 失败不影响主回复即可。
+本 patch **固定**上述顺序；`messagesToSummarize` 必须在合并本轮 `user` + `assistant` 之后再计算（§9.4 生成后步骤），不得在未生成本轮回复前更新摘要。
 
 ---
 
@@ -725,6 +874,20 @@ history + current user message + assistant message
   用 messagesToSummarize 更新 summary
 ```
 
+V1 行为说明（触发前 prompt 仍会随轮次变长，属预期）：
+
+```txt
+总消息数 <= summarizeTriggerMessageCount 时：
+  Prompt 仍使用宿主传入的完整 history（仅 sanitize，不 trim）
+  这是 V1 简单策略，优先保证「未达阈值前行为与 patch 前一致」
+
+总消息数 > summarizeTriggerMessageCount 后：
+  生成前 Prompt 使用 recentMessageLimit 截断后的 recentHistory
+  生成后旧消息进入 messagesToSummarize 并滚动更新 summary
+
+若后续需要更早控 token，可另开 patch 增加「未触发也按 recentMessageLimit 截断」——本 patch 不做。
+```
+
 注意：
 
 ```txt
@@ -798,6 +961,38 @@ const SummaryUpdateSchema = z.object({
 重试后仍失败则跳过本轮 summary 更新
 不能影响主聊天回复返回
 ```
+
+---
+
+## 9.7 Memory extract 与 summary 的分工
+
+启用 summary 后，**Memory extract 的输入策略与 Prompt 截断解耦**：
+
+```txt
+Prompt 生成：
+  触发后使用 recentHistory + Conversation Summary（会话脉络）
+
+Memory.extract：
+  V1 仍使用 input.history 最近 N 条（与现网 ModelMemoryExtractor.maxHistoryMessages 一致，默认 6）
+  不把已压缩进 summary 的旧消息再传给 extractor
+  不把 summary 文本当作 extract 输入
+```
+
+职责划分：
+
+```txt
+Conversation Summary → 当前会话进度、阶段、近期讨论脉络（会话内）
+Long-term Memory     → 跨轮次重要事实、偏好、关系（经 extract + save + recall）
+```
+
+因此 §15.3「五月天偏好 + 项目进度」场景依赖：
+
+```txt
+「我喜欢五月天」→ Memory.extract/save → 后续 recall
+多轮阶段对话     → Summary.update → 后续 load 注入 Prompt
+```
+
+实现时**不要**指望 extractor 从已被 trim 出 Prompt 的旧 history 里再抽出偏好；长期事实必须走 Memory 链路。
 
 ---
 
@@ -891,7 +1086,7 @@ Summary.load
 ↓
 Memory.recall
 ↓
-PromptContext.build
+buildMessages（persona + summary + memories + recentHistory + currentMessage）
 ↓
 Model.generate
 ```
@@ -913,52 +1108,74 @@ Prompt 不应该无限使用完整 history。
 伪代码：
 
 ```ts
-const summaryResult = await summaryProvider.load({
-  scope: input.summaryScope,
-});
+const summaryScope = resolveSummaryScope(input);
+const summaryEnabled = input.summaryOptions?.enabled === true && summaryScope !== undefined;
 
-const recentHistory = trimRecentHistory(input.history, {
-  limit: input.summaryOptions?.recentMessageLimit ?? 12,
-});
+let loadedSummary: ConversationSummary | null = null;
+if (summaryEnabled) {
+  const summaryResult = await summaryProvider.load({ scope: summaryScope });
+  loadedSummary = summaryResult.summary ?? null;
+}
 
-const messages = buildMessages({
-  persona,
-  summary: summaryResult.summary,
-  memories: recallResult.memories,
-  history: recentHistory,
-  currentMessage: input.message,
-});
+const sanitizedHistory = sanitizeHistory(input.history);
+const allMessagesBeforeGenerate = [...sanitizedHistory, { role: "user", content: input.message }];
+
+// 仅当「已启用 summary」且「消息数超过触发阈值」时才 trim；否则保持完整 history（§9.4）
+const recentHistory =
+  summaryEnabled &&
+  allMessagesBeforeGenerate.length > (input.summaryOptions?.summarizeTriggerMessageCount ?? 16)
+    ? trimRecentHistory(sanitizedHistory, {
+        limit: input.summaryOptions?.recentMessageLimit ?? 12,
+      })
+    : sanitizedHistory;
+
+const summaryContext = formatSummaryForPrompt(loadedSummary);
+const memoryContext = formatMemoriesForPrompt(recallResult.memories);
+const systemPrompt = buildPersonaSystemPrompt(persona, { summaryContext, memoryContext });
+const messages: ChatMessage[] = [
+  { role: "system", content: systemPrompt },
+  ...recentHistory,
+  { role: "user", content: input.message },
+];
 ```
+
+`buildPersonaSystemPrompt` 需扩展为按 §10.1 顺序拼接 Persona → Summary → Memories 区块；可抽 `formatSummaryForPrompt`，风格对齐 `formatMemoriesForPrompt`。
 
 ---
 
 ## 11.3 生成后更新 summary
 
-模型生成成功后：
+模型生成成功后（仅当 `summaryEnabled` 为 true 时执行）：
 
 ```ts
-const allMessagesForSummary = [
-  ...(input.history ?? []),
-  { role: "user", content: input.message },
-  { role: "assistant", content: modelOutput.text },
-];
+if (!summaryEnabled || summaryScope === undefined) {
+  // metadata.summarySkipped = true, reason = disabled | no_scope
+} else {
+  const allMessagesForSummary = [
+    ...(input.history ?? []),
+    { role: "user", content: input.message },
+    { role: "assistant", content: modelOutput.text },
+  ];
 
-const { messagesToSummarize, recentHistory } = splitForSummary(allMessagesForSummary, {
-  recentMessageLimit,
-  summarizeTriggerMessageCount,
-});
-
-if (messagesToSummarize.length > 0) {
-  const updated = await summaryUpdater.update({
-    scope,
-    currentSummary: summaryResult.summary,
-    messagesToSummarize,
+  const { messagesToSummarize } = splitForSummary(allMessagesForSummary, {
+    recentMessageLimit,
+    summarizeTriggerMessageCount,
   });
 
-  await summaryProvider.save({
-    scope,
-    summary: updated.summary,
-  });
+  if (messagesToSummarize.length > 0) {
+    const updated = await summaryUpdater.update({
+      scope: summaryScope,
+      currentSummary: loadedSummary,
+      messagesToSummarize,
+    });
+
+    if (!updated.skipped) {
+      await summaryProvider.save({
+        scope: summaryScope,
+        summary: updated.summary,
+      });
+    }
+  }
 }
 ```
 
@@ -970,97 +1187,82 @@ summary update/save 失败不影响 output.text
 
 ---
 
-## 12. ChatInput / Output 扩展
+## 12. ChatWorkflowInput / Output 扩展
 
-## 12.1 ChatInput 扩展
+## 12.1 ChatWorkflowInput 扩展
 
-建议增加：
+在现有 `ChatWorkflowInput`（`abstractions/workflow.ts`）上增加：
 
 ```ts
-export interface ChatInput {
-  // 已有字段省略
+export interface ChatWorkflowInput {
+  // 已有字段：sessionId, message, history, scope, conversationId, memoryOptions, ...
 
   summaryScope?: SummaryScope;
-
   summaryOptions?: SummaryOptions;
 }
 ```
 
-如果不传 `summaryScope`，可以从已有 `scope` / `sessionId` 推导。
-
-推荐规则：
-
-```txt
-如果 input.summaryScope 存在：
-  使用 input.summaryScope
-
-否则如果 input.scope 存在：
-  使用 input.scope + conversationId
-
-否则如果 input.sessionId 存在：
-  ownerType = "session"
-  ownerId = input.sessionId
-
-否则：
-  NoopSummaryProvider 生效，不更新 summary
-```
-
-不要为了方便把缺失 scope 的摘要写入 `"default"`。
+Scope 解析统一走 `resolveSummaryScope()`（§6.1），**不要**在 workflow 内手写分支，也**不要**复用 `resolveMemoryScope()` 的 `"default"` 结果作为 summary scope。
 
 ---
 
-## 12.2 ChatWorkflowOutput.metadata 扩展
+## 12.2 ChatWorkflowDebugContext 扩展（patch-0 延续）
 
-建议增加：
+patch-0 已定义 `ChatWorkflowDebugContext` 与 `metadata.debugContext`。本 patch **只扩展该结构**，禁止新建 `promptDebug` 等平行字段。
 
 ```ts
-metadata?: {
-  // 已有字段省略
+export interface ChatWorkflowDebugContext {
+  scope: MemoryScope;
+  memoryContext?: string;
+  systemPrompt: string;
+  messages: ChatMessage[];
+  embeddingVectorLength?: number;
 
+  // patch-1 新增
+  summaryContext?: string; // formatSummaryForPrompt 结果；无摘要时为 undefined
+  recentHistory?: ChatMessage[]; // 最终注入 Prompt 的 history（显式快照，供 Demo 展示）
+  summarizedMessages?: ChatMessage[]; // 本轮送去 update 的旧消息；未触发时为 [] 或 undefined
+}
+```
+
+---
+
+## 12.3 ChatWorkflowOutput.metadata 扩展
+
+```ts
+metadata?: Record<string, unknown> & {
+  // patch-0 已有
+  extractedMemories?: ExtractedMemory[];
+  savedMemories?: MemoryRecord[];
+  skippedMemories?: ExtractedMemory[];
+  debugContext?: ChatWorkflowDebugContext;
+
+  // patch-1 新增（便于面板直接读取，不必从 debugContext 拆）
   summary?: ConversationSummary | null;
   updatedSummary?: ConversationSummary | null;
   summarySkipped?: boolean;
   summarySkipReason?: string;
-
-  recentHistory?: ChatMessage[];
-  summarizedMessages?: ChatMessage[];
-
-  promptDebug?: {
-    persona?: string;
-    summary?: string;
-    memories?: string;
-    history?: ChatMessage[];
-    finalMessages?: ChatMessage[];
-  };
-}
+};
 ```
 
-说明：
+字段说明：
 
 ```txt
-summary：
-  生成前加载到的摘要。
+debugContext.summaryContext / recentHistory / summarizedMessages：
+  Prompt Preview 与截断验证的唯一数据源；Demo 不得从 messages 反推 recent history。
 
-updatedSummary：
-  本轮生成后更新出的摘要。
+metadata.summary：
+  生成前 load 到的摘要。
 
-summarySkipped：
-  本轮是否跳过摘要更新。
+metadata.updatedSummary：
+  本轮生成后 save 的摘要（未更新时为 null 或省略）。
 
-summarySkipReason：
-  跳过原因，例如 disabled / below_threshold / no_messages_to_summarize / provider_noop。
-
-recentHistory：
-  最终注入 Prompt 的 recent history。
-
-summarizedMessages：
-  本轮被送去更新摘要的消息。
-
-promptDebug：
-  给 Demo Prompt Preview 使用。
+metadata.summarySkipped / summarySkipReason：
+  跳过原因：disabled / no_scope / below_threshold / no_messages_to_summarize /
+  provider_noop / update_failed / save_failed
 ```
 
-如果 patch-0 已经定义过 `promptDebug`，本 patch 应扩展现有字段，不要重复创建另一个 debug 结构。
+`summaryOptions.enabled=false` 或未解析出 `summaryScope` 时：`debugContext` 与 patch 前一致（无 `summaryContext`；`recentHistory` 可省略，Demo 回退展示完整 sanitize 后 history）。
 
 ---
 
@@ -1187,6 +1389,7 @@ No summary yet
 
 ```txt
 disabled
+no_scope
 below_threshold
 no_messages_to_summarize
 provider_noop
@@ -1198,13 +1401,14 @@ save_failed
 
 ## 14.3 Recent History
 
-展示最终注入 Prompt 的 recent history。
+**必须**优先读取 `metadata.debugContext.recentHistory`（或 workflow 显式写入的等价字段），**禁止**仅从 `debugContext.messages` 反推 recent history（patch-0 的反推逻辑在启用 summary 后会失真）。
 
 目的：
 
 ```txt
 确认完整 history 没有无限塞进 Prompt
-确认 recentMessageLimit 生效
+确认 recentMessageLimit 在超过触发阈值后生效
+确认触发前仍使用完整 history 时 Demo 也能如实展示
 ```
 
 ---
@@ -1224,14 +1428,15 @@ save_failed
 
 ## 14.5 Prompt Preview
 
-Prompt Preview 必须能看到：
+在现有 Prompt / Context Debug Panel 上扩展，数据来源：
 
 ```txt
-Persona 区块
-Conversation Summary 区块
-Long-term Memories 区块
-Recent History 区块
-Current User Message
+Persona 区块          → debugContext.systemPrompt 中的角色部分，或拆分展示
+Conversation Summary  → debugContext.summaryContext（有则展示，无则省略整块）
+Long-term Memories    → debugContext.memoryContext（patch-0 已有）
+Recent History        → debugContext.recentHistory（显式字段，§14.3）
+Current User Message  → 当前轮 input.message 或 messages 最后一条 user
+Final messages        → debugContext.messages（完整发给模型的数组，patch-0 已有）
 ```
 
 如果某区块为空，应省略该区块，不要显示“无”。
@@ -1314,10 +1519,11 @@ Demo 显示 summary 包含阶段进度。
 预期：
 
 ```txt
+首轮「我喜欢五月天」经 Memory.extract/save 落库（不靠 summary）
 Long-term Memories 召回“用户喜欢五月天”
-Conversation Summary 包含项目进度
+Conversation Summary 包含项目进度（不靠 memory extract 从旧 history 抽）
 AI 回复同时结合五月天偏好和当前项目进度
-Prompt Preview 中能分别看到 Summary 与 Long-term Memories
+Prompt Preview 中能分别看到 summaryContext 与 memoryContext
 ```
 
 ---
@@ -1342,18 +1548,18 @@ summarySkipReason = update_failed 或 save_failed
 建议按以下顺序执行：
 
 ```txt
-1. 在 ai-core 定义 ConversationSummary / SummaryScope / SummaryProvider 类型
-2. 实现 NoopSummaryProvider
-3. 实现 InMemorySummaryProvider
-4. 实现 SummaryUpdater 与 Zod schema
-5. 实现 history split / trim 工具函数
-6. 在 SimpleChatWorkflow 中接入 Summary.load
-7. 在 PromptContext 中注入 Conversation Summary
-8. 在 SimpleChatWorkflow 生成后接入 Summary.update / save
-9. 增加 summary:* Observer 事件
-10. 扩展 ChatWorkflowOutput.metadata
-11. 扩展 model-runtime-demo 的 Context / Prompt Debug Panel
-12. 跑通本地验证场景
+1. 定义 ConversationSummary / SummaryScope / SummaryProvider / SummaryOptions 类型
+2. 实现 resolveSummaryScope（§6.1）
+3. 实现 NoopSummaryProvider + InMemorySummaryProvider
+4. 实现 ModelSummaryUpdater + Zod schema + formatSummaryForPrompt
+5. 实现 history split / trim 纯函数（与 workflow 解耦，便于单测）
+6. 扩展 CompanionCoreContext / createCompanionCore / inspect() / core:init
+7. 扩展 buildPersonaSystemPrompt，按 §10.1 注入 summary + memories
+8. SimpleChatWorkflow：生成前 Summary.load + 条件 trim；生成后 update/save
+9. 扩展 ChatWorkflowDebugContext + metadata.summary* 字段
+10. 增加 summary:* Observer 事件
+11. 扩展 model-runtime-demo：summaryOptions 开关 + Prompt Debug Panel（§14.3 显式字段）
+12. 跑通 §15 本地验证场景
 ```
 
 重点：
@@ -1374,7 +1580,9 @@ summarySkipReason = update_failed 或 save_failed
 [ ] SummaryProvider 与 MemoryProvider 分离
 [ ] 默认 NoopSummaryProvider 不影响现有聊天
 [ ] InMemorySummaryProvider 可保存与读取 summary
-[ ] summaryOptions.enabled=false 时行为与 patch 前一致
+[ ] resolveSummaryScope 无有效 scope 时不读写摘要，且不写入 ownerId="default"
+[ ] summaryOptions.enabled=false 时行为与 patch 前一致（debugContext.messages 与 historyCount 同 patch 前）
+[ ] CompanionCore.inspect() 暴露 summary / summaryUpdater provider meta
 [ ] summaryOptions.enabled=true 时可触发摘要
 [ ] recentMessageLimit 生效
 [ ] summarizeTriggerMessageCount 生效
@@ -1384,7 +1592,10 @@ summarySkipReason = update_failed 或 save_failed
 [ ] SummaryUpdater 输出错误时走模型重试机制
 [ ] 重试失败后跳过本轮 summary update
 [ ] summary load/update/save 失败不阻塞聊天
-[ ] ChatWorkflowOutput.metadata 暴露 summary / recentHistory / summarizedMessages
+[ ] ChatWorkflowOutput.metadata 暴露 summary / updatedSummary / summarySkipped
+[ ] ChatWorkflowDebugContext 暴露 summaryContext / recentHistory / summarizedMessages
+[ ] Demo Recent History 使用 debugContext.recentHistory，不从 messages 反推
+[ ] Memory extract 仍使用 input.history 最近 N 条，不依赖 summary 压缩后的 Prompt history
 [ ] CoreObserver 输出 summary:* 事件
 [ ] Demo 页面可展示 Conversation Summary
 [ ] Demo 页面可展示 Updated Summary
@@ -1403,31 +1614,55 @@ summarySkipReason = update_failed 或 save_failed
 
 ```txt
 packages/ai-core
-  ConversationSummary 类型
-  SummaryScope 类型
-  SummaryProvider 抽象
-  NoopSummaryProvider
-  InMemorySummaryProvider
-  SummaryUpdater
-  Summary Prompt Formatter
-  history split / trim 工具
-  SimpleChatWorkflow summary load / inject / update / save 接入
+  abstractions/summary.ts（或等价）ConversationSummary / SummaryScope / SummaryProvider / SummaryUpdater
+  resolveSummaryScope
+  NoopSummaryProvider / InMemorySummaryProvider / NoopSummaryUpdater
+  ModelSummaryUpdater + Zod schema
+  formatSummaryForPrompt + history split / trim 工具
+  buildPersonaSystemPrompt 扩展（summary + memories 顺序）
+  CompanionCoreContext / createCompanionCore / inspect() 注入 summary + summaryUpdater
+  SimpleChatWorkflow summary load / inject / update / save
+  ChatWorkflowDebugContext 扩展 + metadata.summary* 字段
   summary:* Observer Events
-  ChatWorkflowOutput.metadata summary debug 字段
 
 apps/model-runtime-demo
-  summaryOptions 开关与阈值配置
-  Conversation Summary 展示
-  Updated Summary 展示
-  Recent History 展示
-  Summarized Messages 展示
-  Prompt Preview 展示 summary 区块
+  summaryOptions 开关与阈值配置（默认 enabled: false）
+  Prompt / Context Debug Panel 扩展（summaryContext / recentHistory / summarizedMessages）
+  Conversation Summary / Updated Summary / skip reason 展示
   Summary Observer Events 展示
 ```
 
 ---
 
-## 19. 一句话总结
+## 19. 与阶段 7 的关系
+
+阶段 7（`03-plan.md`）完整 Workflow 尚未写入 Summary 步骤。本 patch 落地后，阶段 7 文档应补充：
+
+```txt
+Safety.guardInput
+↓
+Summary.load（可与 Memory.recall、Persona.load 并行，阶段 7 再优化）
+↓
+Memory.recall
+↓
+Emotion.analyze（阶段 5）
+↓
+Model.generate（Persona + Summary + Memories + Recent History）
+↓
+Tool loop（阶段 6）
+↓
+Safety.guardOutput
+↓
+Summary.update / save
+↓
+Memory.extract / save
+```
+
+本 patch 不实现 Emotion / Tool，但接口与调用点应为阶段 7 预留，避免后续破坏性改造。
+
+---
+
+## 20. 一句话总结
 
 `patch-1` 只解决一件事：
 
