@@ -133,6 +133,17 @@ function validateRequestBody(raw: unknown): string | null {
         return `summaryOptions.${field} 必须是正整数`;
       }
     }
+    const recentMessageLimit = summaryOptions.recentMessageLimit as number | undefined;
+    const summarizeTriggerMessageCount = summaryOptions.summarizeTriggerMessageCount as
+      | number
+      | undefined;
+    if (
+      recentMessageLimit !== undefined &&
+      summarizeTriggerMessageCount !== undefined &&
+      recentMessageLimit >= summarizeTriggerMessageCount
+    ) {
+      return "summaryOptions.recentMessageLimit 必须小于 summaryOptions.summarizeTriggerMessageCount";
+    }
   }
 
   return null;
@@ -187,6 +198,23 @@ export async function POST(request: Request): Promise<Response> {
       ...DEFAULT_SUMMARY_OPTIONS,
       ...(body.summaryOptions ?? {}),
     };
+    if (
+      summaryOptions.recentMessageLimit !== undefined &&
+      summaryOptions.summarizeTriggerMessageCount !== undefined &&
+      summaryOptions.recentMessageLimit >= summaryOptions.summarizeTriggerMessageCount
+    ) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: {
+            message:
+              "summaryOptions.recentMessageLimit 必须小于 summaryOptions.summarizeTriggerMessageCount",
+          },
+          observerEvents: serializeEvents(observer.events),
+        },
+        400,
+      );
+    }
 
     const output = await core.executeWorkflow({
       sessionId,

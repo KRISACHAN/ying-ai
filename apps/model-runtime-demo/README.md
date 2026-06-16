@@ -43,5 +43,6 @@ pnpm --filter @ying-companion/model-runtime-demo dev
 - 「AI Core 调试输出」点击「调用模型」查看 Core Provider inspection、流式输出、最终使用模型、是否降级、尝试次数与错误摘要。
 - 「聊天主链路调试」输入消息后发送，经服务端 `app/api/chat` 路由调用 `core.executeWorkflow()`，展示最终回复、长期记忆召回 / 抽取 / 保存结果、Persona / Safety / 模型原始输出，以及服务端收集后回传的 Observer 事件。history 由页面维护并随请求传入，Core 不保存。
   - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
-  - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，100% 还原本轮发给模型的 system prompt、长期记忆块、Recent History 与当前用户输入。
+  - **滚动摘要控件**：默认关闭（`summaryOptions.enabled=false`）。启用后使用 demo 进程内 `InMemorySummaryProvider` 保存当前会话摘要，重启、热重载、多 worker 下不保证保留或一致，不是生产持久化方案。`recentMessageLimit` 必须小于 `summarizeTriggerMessageCount`，用于验证旧消息压缩成 summary、Prompt 只保留 summary + recent history。
+  - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，100% 还原本轮发给模型的 system prompt、Conversation Summary、长期记忆块、Recent History 与当前用户输入。滚动摘要开启后重点查看 `summaryContext`、`recentHistory`、`summarizedMessages`、Conversation Summary、Updated Summary 与 Summary Events。
   - **scope 切换**：页面可改 `sessionId` 与 `companionId`，请求体显式传 `scope`，用于验证记忆隔离（不同 ownerId / companionId 不互相召回）。

@@ -41,6 +41,14 @@ export function splitForSummary(
   });
   const summarizeCount = Math.max(0, messages.length - recentHistory.length);
 
+  if (summarizeCount === 0) {
+    return {
+      recentHistory: messages,
+      messagesToSummarize: [],
+      triggered: false,
+    };
+  }
+
   return {
     recentHistory,
     messagesToSummarize: messages.slice(0, summarizeCount),

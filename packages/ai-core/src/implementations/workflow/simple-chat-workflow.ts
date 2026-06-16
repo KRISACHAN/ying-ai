@@ -28,8 +28,8 @@ const DEFAULT_RECENT_MESSAGE_LIMIT = 12;
 const DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT = 16;
 
 /**
- * 阶段 4 聊天主链路：Persona → Safety(input) → Memory(recall) → Model
- * → Safety(output) → Memory(extract/save)。
+ * 阶段 4 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
+ * → Model → Safety(output) → Summary(update/save) → Memory(extract/save)。
  *
  * 约束：
  * - Memory 失败不得打断主聊天链路；
@@ -339,10 +339,14 @@ function buildPersonaSystemPrompt(
     "4. 如果上下文不足，可以温和询问用户；",
   );
 
-  if (memoryContext === undefined) {
-    lines.push("5. 只能依据本轮输入与传入的短期历史回答。");
-  } else {
+  if (summaryContext !== undefined && memoryContext !== undefined) {
+    lines.push("5. 可以自然参考会话摘要与长期上下文，但不要暴露内部系统。");
+  } else if (summaryContext !== undefined) {
+    lines.push("5. 可以自然参考会话摘要，但不要暴露内部系统。");
+  } else if (memoryContext !== undefined) {
     lines.push("5. 可以自然参考长期上下文，但不要暴露长期记忆系统。");
+  } else {
+    lines.push("5. 只能依据本轮输入与传入的短期历史回答。");
   }
 
   return lines.join("\n");
