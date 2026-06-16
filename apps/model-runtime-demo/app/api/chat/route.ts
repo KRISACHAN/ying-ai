@@ -2,12 +2,14 @@ import {
   createCompanionCore,
   createModel,
   DefaultPersonaProvider,
+  InMemorySummaryProvider,
   ModelRuntimeError,
   type ChatMessage,
   type ChatWorkflowOutput,
   type CoreEvent,
   type CoreObserver,
   type MemoryScope,
+  type SummaryOptions,
 } from "@ying-companion/ai-core";
 
 import { loadModelConfig } from "../../lib/model-config";
@@ -17,6 +19,12 @@ import { resolveChatMemoryRuntime, type MemoryDatabaseStatus } from "../../lib/m
 const MAX_MESSAGE_LENGTH = 8000;
 const MAX_HISTORY_LENGTH = 50;
 const DEFAULT_COMPANION_ID = "debug-companion";
+const DEFAULT_SUMMARY_OPTIONS: Required<SummaryOptions> = {
+  enabled: false,
+  recentMessageLimit: 10,
+  summarizeTriggerMessageCount: 14,
+};
+const demoSummaryProvider = new InMemorySummaryProvider();
 
 interface ChatRequestScope {
   ownerType?: MemoryScope["ownerType"];
@@ -29,6 +37,7 @@ interface ChatRequestBody {
   history?: ChatMessage[];
   sessionId?: string;
   scope?: ChatRequestScope;
+  summaryOptions?: SummaryOptions;
 }
 
 interface SerializedCoreEvent {
@@ -110,6 +119,21 @@ function validateRequestBody(raw: unknown): string | null {
       return "scope.companionId 必须是字符串";
     }
   }
+  if (body.summaryOptions !== undefined) {
+    if (typeof body.summaryOptions !== "object" || body.summaryOptions === null) {
+      return "summaryOptions 必须是对象";
+    }
+    const summaryOptions = body.summaryOptions as Record<string, unknown>;
+    if (summaryOptions.enabled !== undefined && typeof summaryOptions.enabled !== "boolean") {
+      return "summaryOptions.enabled 必须是布尔值";
+    }
+    for (const field of ["recentMessageLimit", "summarizeTriggerMessageCount"]) {
+      const value = summaryOptions[field];
+      if (value !== undefined && (!Number.isInteger(value) || (value as number) < 1)) {
+        return `summaryOptions.${field} 必须是正整数`;
+      }
+    }
+  }
 
   return null;
 }
@@ -140,6 +164,7 @@ export async function POST(request: Request): Promise<Response> {
       model,
       observer,
       memory: memoryRuntime.provider,
+      summary: demoSummaryProvider,
       // 仅 demo 默认值：性别可改，不代表产品固定角色（见阶段 2 §八）。
       persona: new DefaultPersonaProvider({
         id: "debug-companion",
@@ -158,6 +183,10 @@ export async function POST(request: Request): Promise<Response> {
       ownerId: body.scope?.ownerId ?? sessionId,
       companionId: body.scope?.companionId ?? DEFAULT_COMPANION_ID,
     };
+    const summaryOptions: SummaryOptions = {
+      ...DEFAULT_SUMMARY_OPTIONS,
+      ...(body.summaryOptions ?? {}),
+    };
 
     const output = await core.executeWorkflow({
       sessionId,
@@ -165,6 +194,7 @@ export async function POST(request: Request): Promise<Response> {
       history: body.history ?? [],
       scope,
       conversationId: sessionId,
+      summaryOptions,
     });
     const inspection = core.inspect();
 
@@ -176,6 +206,8 @@ export async function POST(request: Request): Promise<Response> {
           ...output.metadata,
           memoryProvider: inspection.providers.memory,
           memoryExtractor: inspection.providers.memoryExtractor,
+          summaryProvider: inspection.providers.summary,
+          summaryUpdater: inspection.providers.summaryUpdater,
         },
       },
       observerEvents: serializeEvents(observer.events),

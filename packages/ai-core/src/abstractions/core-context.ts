@@ -4,6 +4,7 @@ import type { ChatModel } from "./model";
 import type { CoreObserver } from "./observer";
 import type { PersonaProvider } from "./persona";
 import type { SafetyProvider } from "./safety";
+import type { SummaryProvider, SummaryUpdater } from "./summary";
 import type { ToolRegistry } from "./tool";
 import type { ChatWorkflow } from "./workflow";
 
@@ -12,6 +13,8 @@ export interface CompanionCoreContext {
   persona: PersonaProvider;
   memory: MemoryProvider;
   memoryExtractor: MemoryExtractor;
+  summary: SummaryProvider;
+  summaryUpdater: SummaryUpdater;
   emotion: EmotionEngine;
   tools: ToolRegistry;
   safety: SafetyProvider;

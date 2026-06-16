@@ -5,6 +5,7 @@ import type { MemoryExtractor, MemoryProvider } from "../abstractions/memory";
 import type { CoreObserver } from "../abstractions/observer";
 import type { PersonaProvider } from "../abstractions/persona";
 import type { SafetyProvider } from "../abstractions/safety";
+import type { SummaryProvider, SummaryUpdater } from "../abstractions/summary";
 import type { ToolRegistry } from "../abstractions/tool";
 import type { ChatWorkflow } from "../abstractions/workflow";
 import { DisabledEmotionEngine } from "../implementations/emotion/disabled-emotion-engine";
@@ -14,6 +15,9 @@ import { NoopMemoryProvider } from "../implementations/memory/noop-memory-provid
 import { NoopCoreObserver } from "../implementations/observer/noop-core-observer";
 import { DefaultPersonaProvider } from "../implementations/persona/default-persona-provider";
 import { PassthroughSafetyProvider } from "../implementations/safety/passthrough-safety-provider";
+import { ModelSummaryUpdater } from "../implementations/summary/model-summary-updater";
+import { NoopSummaryProvider } from "../implementations/summary/noop-summary-provider";
+import { NoopSummaryUpdater } from "../implementations/summary/noop-summary-updater";
 import { EmptyToolRegistry } from "../implementations/tool/empty-tool-registry";
 import { SimpleChatWorkflow } from "../implementations/workflow/simple-chat-workflow";
 import { CompanionCore } from "./companion-core";
@@ -23,6 +27,8 @@ export interface CreateCompanionCoreOptions {
   persona?: PersonaProvider;
   memory?: MemoryProvider;
   memoryExtractor?: MemoryExtractor;
+  summary?: SummaryProvider;
+  summaryUpdater?: SummaryUpdater;
   emotion?: EmotionEngine;
   tools?: ToolRegistry;
   safety?: SafetyProvider;
@@ -40,6 +46,12 @@ export function createCompanionCore(options: CreateCompanionCoreOptions): Compan
       (options.memory !== undefined
         ? new ModelMemoryExtractor({ model: options.model })
         : new NoopMemoryExtractor()),
+    summary: options.summary ?? new NoopSummaryProvider(),
+    summaryUpdater:
+      options.summaryUpdater ??
+      (options.summary !== undefined
+        ? new ModelSummaryUpdater({ model: options.model })
+        : new NoopSummaryUpdater()),
     emotion: options.emotion ?? new DisabledEmotionEngine(),
     tools: options.tools ?? new EmptyToolRegistry(),
     safety: options.safety ?? new PassthroughSafetyProvider(),
@@ -64,6 +76,8 @@ function safeEmitCoreInit(context: CompanionCoreContext): void {
             persona: context.persona.meta,
             memory: context.memory.meta,
             memoryExtractor: context.memoryExtractor.meta,
+            summary: context.summary.meta,
+            summaryUpdater: context.summaryUpdater.meta,
             emotion: context.emotion.meta,
             tools: context.tools.meta,
             safety: context.safety.meta,

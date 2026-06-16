@@ -8,6 +8,11 @@ import {
 } from "../../abstractions/memory";
 import type { CoreEvent, CoreObserver } from "../../abstractions/observer";
 import type { CompanionGender, CompanionPersona } from "../../abstractions/persona";
+import {
+  resolveSummaryScope,
+  type ConversationSummary,
+  type SummaryScope,
+} from "../../abstractions/summary";
 import type {
   ChatWorkflow,
   ChatWorkflowDebugContext,
@@ -16,6 +21,11 @@ import type {
   ChatWorkflowOutput,
 } from "../../abstractions/workflow";
 import { formatMemoriesForPrompt } from "../memory/prompt-formatter";
+import { splitForSummary, trimRecentHistory } from "../summary/history-utils";
+import { formatSummaryForPrompt } from "../summary/prompt-formatter";
+
+const DEFAULT_RECENT_MESSAGE_LIMIT = 12;
+const DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT = 16;
 
 /**
  * 阶段 4 聊天主链路：Persona → Safety(input) → Memory(recall) → Model
@@ -41,7 +51,8 @@ export class SimpleChatWorkflow implements ChatWorkflow {
     input: ChatWorkflowInput,
     context: ChatWorkflowExecutionContext,
   ): Promise<ChatWorkflowOutput> {
-    const { observer, persona, safety, model, memory, memoryExtractor } = context.core;
+    const { observer, persona, safety, model, memory, memoryExtractor, summary, summaryUpdater } =
+      context.core;
     const sessionId = input.sessionId;
     const scope = resolveMemoryScope(input);
 
@@ -87,6 +98,29 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       }
 
       const sanitizedHistory = sanitizeHistory(input.history);
+      const summaryScope = resolveSummaryScope(input);
+      const summaryEnabled = input.summaryOptions?.enabled === true && summaryScope !== undefined;
+      const recentMessageLimit =
+        input.summaryOptions?.recentMessageLimit ?? DEFAULT_RECENT_MESSAGE_LIMIT;
+      const summarizeTriggerMessageCount =
+        input.summaryOptions?.summarizeTriggerMessageCount ??
+        DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT;
+      const summaryLoad = await loadSummary({
+        observer,
+        summary,
+        enabled: summaryEnabled,
+        ...(summaryScope !== undefined ? { scope: summaryScope } : {}),
+        ...(sessionId !== undefined ? { sessionId } : {}),
+      });
+      const loadedSummary = summaryLoad.summary;
+      const allMessagesBeforeGenerate: ChatMessage[] = [
+        ...sanitizedHistory,
+        { role: "user", content: input.message },
+      ];
+      const recentHistory =
+        summaryEnabled && allMessagesBeforeGenerate.length > summarizeTriggerMessageCount
+          ? trimRecentHistory(sanitizedHistory, { recentMessageLimit })
+          : sanitizedHistory;
       const recall = await recallMemories({
         observer,
         memory,
@@ -97,11 +131,15 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         ...(sessionId !== undefined ? { sessionId } : {}),
       });
       const recalledMemories = recall.memories;
+      const summaryContext = formatSummaryForPrompt(loadedSummary);
       const memoryContext = formatMemoriesForPrompt(recalledMemories);
-      const systemPrompt = buildPersonaSystemPrompt(loadedPersona, memoryContext);
+      const systemPrompt = buildPersonaSystemPrompt(loadedPersona, {
+        ...(summaryContext !== undefined ? { summaryContext } : {}),
+        ...(memoryContext !== undefined ? { memoryContext } : {}),
+      });
       const messages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
-        ...sanitizedHistory,
+        ...recentHistory,
         { role: "user", content: input.message },
       ];
 
@@ -140,6 +178,21 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         throw new Error("Output rejected by SafetyProvider");
       }
 
+      const summaryResult = await updateAndSaveSummary({
+        observer,
+        summary,
+        summaryUpdater,
+        enabled: summaryEnabled,
+        ...(summaryScope !== undefined ? { scope: summaryScope } : {}),
+        currentSummary: loadedSummary,
+        history: sanitizedHistory,
+        userMessage: input.message,
+        assistantMessage: modelOutput.text,
+        recentMessageLimit,
+        summarizeTriggerMessageCount,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+      });
+
       const memoryResult = await extractAndSaveMemories({
         observer,
         memory,
@@ -158,6 +211,9 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       const debugContext: ChatWorkflowDebugContext = {
         scope,
         ...(memoryContext !== undefined ? { memoryContext } : {}),
+        ...(summaryContext !== undefined ? { summaryContext } : {}),
+        recentHistory,
+        summarizedMessages: summaryResult.summarizedMessages,
         systemPrompt,
         messages,
         ...(embeddingVectorLength !== undefined ? { embeddingVectorLength } : {}),
@@ -178,6 +234,10 @@ export class SimpleChatWorkflow implements ChatWorkflow {
           savedMemories: memoryResult.saved,
           skippedMemories: memoryResult.skipped,
           debugContext,
+          summary: loadedSummary,
+          updatedSummary: summaryResult.updatedSummary,
+          summarySkipped: summaryResult.skipped,
+          summarySkipReason: summaryResult.reason,
         },
         modelOutput,
       };
@@ -235,8 +295,9 @@ function sanitizeHistory(history: ChatMessage[] | undefined): ChatMessage[] {
 
 function buildPersonaSystemPrompt(
   persona: CompanionPersona,
-  memoryContext: string | undefined,
+  context: { summaryContext?: string; memoryContext?: string },
 ): string {
+  const { summaryContext, memoryContext } = context;
   const lines: string[] = [
     "你是一个 AI 伴侣角色，请始终以该角色身份与用户对话。",
     "",
@@ -259,6 +320,10 @@ function buildPersonaSystemPrompt(
 
   if (persona.systemPrompt) {
     lines.push("", "额外角色指令：", persona.systemPrompt);
+  }
+
+  if (summaryContext !== undefined) {
+    lines.push("", summaryContext);
   }
 
   if (memoryContext !== undefined) {
@@ -301,6 +366,246 @@ function formatGender(gender: CompanionGender): string {
  */
 function toSafeMessage(error: unknown): string {
   return error instanceof Error ? error.message : "SimpleChatWorkflow execution failed";
+}
+
+interface LoadSummaryOptions {
+  observer: CoreObserver;
+  summary: ChatWorkflowExecutionContext["core"]["summary"];
+  enabled: boolean;
+  scope?: SummaryScope;
+  sessionId?: string;
+}
+
+interface LoadSummaryResult {
+  summary: ConversationSummary | null;
+  skipped: boolean;
+  reason?: string;
+}
+
+async function loadSummary(options: LoadSummaryOptions): Promise<LoadSummaryResult> {
+  if (!options.enabled || options.scope === undefined) {
+    return {
+      summary: null,
+      skipped: true,
+      reason: options.scope === undefined ? "no_scope" : "disabled",
+    };
+  }
+
+  await safeEmit(options.observer, {
+    type: "summary:load:start",
+    timestamp: new Date(),
+    payload: { sessionId: options.sessionId, scope: options.scope },
+  });
+
+  try {
+    const result = await options.summary.load({ scope: options.scope });
+    const loadedSummary = result.summary ?? null;
+
+    await safeEmit(options.observer, {
+      type: "summary:load:end",
+      timestamp: new Date(),
+      payload: {
+        ok: true,
+        scope: options.scope,
+        hasSummary: loadedSummary !== null,
+        ...(loadedSummary !== null ? { summaryLength: loadedSummary.content.length } : {}),
+      },
+    });
+
+    return { summary: loadedSummary, skipped: false };
+  } catch (error) {
+    await safeEmit(options.observer, {
+      type: "summary:load:end",
+      timestamp: new Date(),
+      payload: { ok: false, scope: options.scope, error: toSafeMessage(error) },
+    });
+
+    return { summary: null, skipped: true, reason: "load_failed" };
+  }
+}
+
+interface UpdateAndSaveSummaryOptions {
+  observer: CoreObserver;
+  summary: ChatWorkflowExecutionContext["core"]["summary"];
+  summaryUpdater: ChatWorkflowExecutionContext["core"]["summaryUpdater"];
+  enabled: boolean;
+  scope?: SummaryScope;
+  currentSummary: ConversationSummary | null;
+  history: ChatMessage[];
+  userMessage: string;
+  assistantMessage: string;
+  recentMessageLimit: number;
+  summarizeTriggerMessageCount: number;
+  sessionId?: string;
+}
+
+interface UpdateAndSaveSummaryResult {
+  updatedSummary: ConversationSummary | null;
+  summarizedMessages: ChatMessage[];
+  skipped: boolean;
+  reason: string;
+}
+
+async function updateAndSaveSummary(
+  options: UpdateAndSaveSummaryOptions,
+): Promise<UpdateAndSaveSummaryResult> {
+  if (!options.enabled || options.scope === undefined) {
+    return {
+      updatedSummary: null,
+      summarizedMessages: [],
+      skipped: true,
+      reason: options.scope === undefined ? "no_scope" : "disabled",
+    };
+  }
+
+  const allMessagesForSummary: ChatMessage[] = [
+    ...options.history,
+    { role: "user", content: options.userMessage },
+    { role: "assistant", content: options.assistantMessage },
+  ];
+  const split = splitForSummary(allMessagesForSummary, {
+    recentMessageLimit: options.recentMessageLimit,
+    summarizeTriggerMessageCount: options.summarizeTriggerMessageCount,
+  });
+
+  if (!split.triggered) {
+    return {
+      updatedSummary: null,
+      summarizedMessages: [],
+      skipped: true,
+      reason: "below_threshold",
+    };
+  }
+
+  if (split.messagesToSummarize.length === 0) {
+    return {
+      updatedSummary: null,
+      summarizedMessages: [],
+      skipped: true,
+      reason: "no_messages_to_summarize",
+    };
+  }
+
+  await safeEmit(options.observer, {
+    type: "summary:update:start",
+    timestamp: new Date(),
+    payload: {
+      sessionId: options.sessionId,
+      scope: options.scope,
+      previousSummaryLength: options.currentSummary?.content.length ?? 0,
+      messagesToSummarizeCount: split.messagesToSummarize.length,
+    },
+  });
+
+  let updatedSummary: ConversationSummary;
+
+  try {
+    const updateResult = await options.summaryUpdater.update({
+      scope: options.scope,
+      currentSummary: options.currentSummary,
+      messagesToSummarize: split.messagesToSummarize,
+    });
+
+    if (updateResult.skipped) {
+      const reason = updateResult.reason ?? "provider_noop";
+
+      await safeEmit(options.observer, {
+        type: "summary:update:end",
+        timestamp: new Date(),
+        payload: {
+          ok: true,
+          scope: options.scope,
+          skipped: true,
+          reason,
+          messagesToSummarizeCount: split.messagesToSummarize.length,
+        },
+      });
+
+      return {
+        updatedSummary: null,
+        summarizedMessages: split.messagesToSummarize,
+        skipped: true,
+        reason,
+      };
+    }
+
+    updatedSummary = updateResult.summary;
+
+    await safeEmit(options.observer, {
+      type: "summary:update:end",
+      timestamp: new Date(),
+      payload: {
+        ok: true,
+        scope: options.scope,
+        skipped: false,
+        reason: updateResult.reason,
+        previousSummaryLength: options.currentSummary?.content.length ?? 0,
+        nextSummaryLength: updatedSummary.content.length,
+        messagesToSummarizeCount: split.messagesToSummarize.length,
+      },
+    });
+  } catch (error) {
+    await safeEmit(options.observer, {
+      type: "summary:update:end",
+      timestamp: new Date(),
+      payload: {
+        ok: false,
+        scope: options.scope,
+        messagesToSummarizeCount: split.messagesToSummarize.length,
+        error: toSafeMessage(error),
+      },
+    });
+
+    return {
+      updatedSummary: null,
+      summarizedMessages: split.messagesToSummarize,
+      skipped: true,
+      reason: "update_failed",
+    };
+  }
+
+  await safeEmit(options.observer, {
+    type: "summary:save:start",
+    timestamp: new Date(),
+    payload: { sessionId: options.sessionId, scope: options.scope },
+  });
+
+  try {
+    const saveResult = await options.summary.save({
+      scope: options.scope,
+      summary: updatedSummary,
+    });
+
+    await safeEmit(options.observer, {
+      type: "summary:save:end",
+      timestamp: new Date(),
+      payload: {
+        ok: true,
+        scope: options.scope,
+        summaryLength: saveResult.summary.content.length,
+      },
+    });
+
+    return {
+      updatedSummary: saveResult.summary,
+      summarizedMessages: split.messagesToSummarize,
+      skipped: false,
+      reason: "updated",
+    };
+  } catch (error) {
+    await safeEmit(options.observer, {
+      type: "summary:save:end",
+      timestamp: new Date(),
+      payload: { ok: false, scope: options.scope, error: toSafeMessage(error) },
+    });
+
+    return {
+      updatedSummary: null,
+      summarizedMessages: split.messagesToSummarize,
+      skipped: true,
+      reason: "save_failed",
+    };
+  }
 }
 
 interface RecallMemoriesOptions {

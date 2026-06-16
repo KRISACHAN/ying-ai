@@ -6,7 +6,9 @@ import type {
   ChatMessage,
   ChatWorkflowDebugContext,
   ChatWorkflowOutput,
+  ConversationSummary,
   RecalledMemory,
+  SummaryOptions,
 } from "@ying-companion/ai-core";
 
 const DEFAULT_SESSION_ID = "demo-chat-session";
@@ -59,6 +61,9 @@ export function ChatPanel() {
   const [sessionId, setSessionId] = useState(DEFAULT_SESSION_ID);
   const [companionId, setCompanionId] = useState(DEFAULT_COMPANION_ID);
   const [history, setHistory] = useState<ChatMessage[]>([]);
+  const [summaryEnabled, setSummaryEnabled] = useState(false);
+  const [recentMessageLimit, setRecentMessageLimit] = useState(10);
+  const [summarizeTriggerMessageCount, setSummarizeTriggerMessageCount] = useState(14);
   const [result, setResult] = useState<ChatWorkflowOutput | null>(null);
   const [events, setEvents] = useState<SerializedCoreEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +108,7 @@ export function ChatPanel() {
             ownerId: sessionId,
             companionId,
           },
+          summaryOptions,
         }),
       });
 
@@ -149,6 +155,11 @@ export function ChatPanel() {
   }
 
   const debugContext = result?.metadata?.debugContext as ChatWorkflowDebugContext | undefined;
+  const summaryOptions: Required<SummaryOptions> = {
+    enabled: summaryEnabled,
+    recentMessageLimit,
+    summarizeTriggerMessageCount,
+  };
 
   return (
     <section className="panel">
@@ -200,6 +211,42 @@ export function ChatPanel() {
         ，避免旧 history 干扰召回验证。
       </p>
 
+      <div className="summary-controls">
+        <label className="summary-toggle">
+          <input
+            type="checkbox"
+            checked={summaryEnabled}
+            disabled={isLoading}
+            onChange={(event) => setSummaryEnabled(event.target.checked)}
+          />
+          <span>启用滚动摘要（InMemorySummaryProvider）</span>
+        </label>
+        <label className="scope-field">
+          <span>recentMessageLimit</span>
+          <input
+            className="scope-input"
+            type="number"
+            min={1}
+            value={recentMessageLimit}
+            disabled={isLoading}
+            onChange={(event) => setRecentMessageLimit(toPositiveInteger(event.target.value, 10))}
+          />
+        </label>
+        <label className="scope-field">
+          <span>summarizeTriggerMessageCount</span>
+          <input
+            className="scope-input"
+            type="number"
+            min={1}
+            value={summarizeTriggerMessageCount}
+            disabled={isLoading}
+            onChange={(event) =>
+              setSummarizeTriggerMessageCount(toPositiveInteger(event.target.value, 14))
+            }
+          />
+        </label>
+      </div>
+
       <textarea
         className="chat-input"
         placeholder="输入消息，⌘/Ctrl + Enter 发送"
@@ -220,7 +267,7 @@ export function ChatPanel() {
 
       <MemoryDbPanel health={health} result={result} onRefresh={() => void refreshHealth()} />
 
-      {result !== null ? <PromptDebugPanel debugContext={debugContext} /> : null}
+      {result !== null ? <PromptDebugPanel result={result} debugContext={debugContext} /> : null}
 
       {result !== null ? (
         <div className="result-grid">
@@ -229,6 +276,7 @@ export function ChatPanel() {
           <DebugBlock title="Extracted Memories" value={result.metadata?.extractedMemories} />
           <DebugBlock title="Saved Memories" value={result.metadata?.savedMemories} />
           <DebugBlock title="Skipped Memories" value={result.metadata?.skippedMemories} />
+          <DebugBlock title="Summary Metadata" value={pickSummaryMetadata(result)} />
           <DebugBlock title="Safety Result" value={result.safety} />
           <DebugBlock title="Persona Result" value={result.persona} />
           <DebugBlock title="Model Raw Output" value={result.modelOutput} />
@@ -307,8 +355,10 @@ function MemoryDbPanel({
 }
 
 function PromptDebugPanel({
+  result,
   debugContext,
 }: {
+  result: ChatWorkflowOutput;
   debugContext: ChatWorkflowDebugContext | undefined;
 }) {
   if (debugContext === undefined) {
@@ -321,63 +371,69 @@ function PromptDebugPanel({
   }
 
   const messages = debugContext.messages ?? [];
-  const recentHistory = messages.filter((message, index) => {
-    if (message.role === "system") {
-      return false;
-    }
-    // 排除最后一条 user（当前输入），其余视为 Recent History。
-    const isLastUser = index === messages.length - 1 && message.role === "user";
-    return !isLastUser;
-  });
+  const recentHistory = debugContext.recentHistory ?? [];
+  const summarizedMessages = debugContext.summarizedMessages ?? [];
   const currentUser = [...messages].reverse().find((message) => message.role === "user");
+  const loadedSummary = result.metadata?.summary as ConversationSummary | null | undefined;
+  const updatedSummary = result.metadata?.updatedSummary as ConversationSummary | null | undefined;
 
   return (
     <div className="debug-block">
       <p className="section-title">Prompt / Context Debug Panel</p>
       <p className="section-subtitle">scope</p>
       <pre className="output">{JSON.stringify(debugContext.scope, null, 2)}</pre>
-      <p className="section-subtitle">System Prompt（含 Persona + 长期记忆块）</p>
+      <p className="section-subtitle">Conversation Summary（生成前加载）</p>
+      <pre className="output">{formatSummary(loadedSummary)}</pre>
+      <p className="section-subtitle">Updated Summary（本轮生成后）</p>
+      <pre className="output">
+        {updatedSummary !== null && updatedSummary !== undefined
+          ? formatSummary(updatedSummary)
+          : `未更新：${String(result.metadata?.summarySkipReason ?? "unknown")}`}
+      </pre>
+      {debugContext.summaryContext !== undefined ? (
+        <>
+          <p className="section-subtitle">Conversation Summary Block（summaryContext）</p>
+          <pre className="output">{debugContext.summaryContext}</pre>
+        </>
+      ) : null}
+      <p className="section-subtitle">System Prompt（含 Persona + Summary + 长期记忆块）</p>
       <pre className="output">{debugContext.systemPrompt}</pre>
       <p className="section-subtitle">Long-term Memory Block（memoryContext）</p>
       <pre className="output">
         {debugContext.memoryContext ?? "（无召回，systemPrompt 不含记忆块）"}
       </pre>
-      <p className="section-subtitle">Recent History</p>
+      <p className="section-subtitle">Recent History（debugContext.recentHistory）</p>
       <pre className="output">
         {recentHistory.length === 0 ? "（空）" : JSON.stringify(recentHistory, null, 2)}
       </pre>
+      <p className="section-subtitle">Summarized Messages（本轮进入 update 的旧消息）</p>
+      <pre className="output">
+        {summarizedMessages.length === 0
+          ? "（未触发摘要更新）"
+          : JSON.stringify(summarizedMessages, null, 2)}
+      </pre>
       <p className="section-subtitle">Current User Message</p>
       <pre className="output">{currentUser?.content ?? "—"}</pre>
+      <p className="section-subtitle">Final Messages（实际传给模型）</p>
+      <pre className="output">{JSON.stringify(messages, null, 2)}</pre>
     </div>
   );
 }
 
 function ObserverEventsPanel({ events }: { events: SerializedCoreEvent[] }) {
   const memoryEvents = events.filter((event) => event.type.startsWith("memory:"));
+  const summaryEvents = events.filter((event) => event.type.startsWith("summary:"));
 
   return (
     <div className="debug-block">
       <p className="section-title">Observer Events</p>
+      <p className="section-subtitle">Summary Events（load / update / save）</p>
+      <pre className="output">
+        {summaryEvents.length === 0 ? "（无 summary 事件）" : formatEvents(summaryEvents)}
+      </pre>
       <p className="section-subtitle">Memory Events（recall / extract / save）</p>
       <pre className="output">
-        {memoryEvents.length === 0
-          ? "（无 memory 事件）"
-          : memoryEvents
-              .map((event) => {
-                const payload = event.payload as { ok?: boolean; message?: string } | undefined;
-                const status =
-                  payload?.ok === false
-                    ? `error: ${payload.message ?? "unknown"}`
-                    : payload?.ok === true
-                      ? "ok"
-                      : "";
-                return `[${event.timestamp}] ${event.type} ${status}\n${JSON.stringify(
-                  event.payload,
-                  null,
-                  2,
-                )}`;
-              })
-              .join("\n\n")}
+        {memoryEvents.length === 0 ? "（无 memory 事件）" : formatEvents(memoryEvents)}
       </pre>
       <p className="section-subtitle">All Events</p>
       <pre className="output">{JSON.stringify(events, null, 2)}</pre>
@@ -412,6 +468,63 @@ function renderBool(value: boolean | undefined): string {
     return "unknown";
   }
   return value ? "yes" : "no";
+}
+
+function toPositiveInteger(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatSummary(summary: ConversationSummary | null | undefined): string {
+  if (summary === null || summary === undefined || summary.content.trim() === "") {
+    return "No summary yet";
+  }
+
+  return JSON.stringify(
+    {
+      content: summary.content,
+      updatedAt: summary.updatedAt,
+      messageCount: summary.messageCount,
+      messageRange: summary.messageRange,
+      metadata: summary.metadata,
+    },
+    null,
+    2,
+  );
+}
+
+function pickSummaryMetadata(result: ChatWorkflowOutput): unknown {
+  return {
+    summaryProvider: result.metadata?.summaryProvider,
+    summaryUpdater: result.metadata?.summaryUpdater,
+    summarySkipped: result.metadata?.summarySkipped,
+    summarySkipReason: result.metadata?.summarySkipReason,
+    summary: result.metadata?.summary,
+    updatedSummary: result.metadata?.updatedSummary,
+  };
+}
+
+function formatEvents(events: SerializedCoreEvent[]): string {
+  return events
+    .map((event) => {
+      const payload = event.payload as
+        | { ok?: boolean; message?: string; error?: string }
+        | undefined;
+      const status =
+        payload?.ok === false
+          ? `error: ${payload.error ?? payload.message ?? "unknown"}`
+          : payload?.ok === true
+            ? "ok"
+            : "";
+
+      return `[${event.timestamp}] ${event.type} ${status}\n${JSON.stringify(
+        event.payload,
+        null,
+        2,
+      )}`;
+    })
+    .join("\n\n");
 }
 
 function DebugBlock({ title, value }: { title: string; value: unknown }) {

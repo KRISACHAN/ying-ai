@@ -3,6 +3,8 @@ export type CoreProviderKind =
   | "persona"
   | "memory"
   | "memory-extractor"
+  | "summary"
+  | "summary-updater"
   | "embedding"
   | "emotion"
   | "tool"

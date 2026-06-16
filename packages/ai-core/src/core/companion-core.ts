@@ -12,6 +12,8 @@ export interface CompanionCoreInspection {
     persona: CoreProviderMeta;
     memory: CoreProviderMeta;
     memoryExtractor: CoreProviderMeta;
+    summary: CoreProviderMeta;
+    summaryUpdater: CoreProviderMeta;
     emotion: CoreProviderMeta;
     tools: CoreProviderMeta;
     safety: CoreProviderMeta;
@@ -38,6 +40,8 @@ export class CompanionCore {
         persona: this.context.persona.meta,
         memory: this.context.memory.meta,
         memoryExtractor: this.context.memoryExtractor.meta,
+        summary: this.context.summary.meta,
+        summaryUpdater: this.context.summaryUpdater.meta,
         emotion: this.context.emotion.meta,
         tools: this.context.tools.meta,
         safety: this.context.safety.meta,
