@@ -127,7 +127,7 @@ export function ChatPanel() {
 
       const output = body.output;
       setResult(output);
-      setEmotion(output.emotion ?? null);
+      setEmotion(output.emotion !== undefined ? toPersistedEmotion(output.emotion) : null);
       setHistory((previous) => [
         ...previous,
         { role: "user", content: message },
@@ -580,6 +580,14 @@ function formatEmotionInline(emotion: EmotionState | null | undefined): string {
   }
 
   return `${emotion.current} / ${Number(emotion.intensity.toFixed(2))}`;
+}
+
+function toPersistedEmotion(emotion: EmotionState): EmotionState {
+  return {
+    current: emotion.current,
+    intensity: emotion.intensity,
+    ...(emotion.updatedAt !== undefined ? { updatedAt: emotion.updatedAt } : {}),
+  };
 }
 
 function formatEvents(events: SerializedCoreEvent[]): string {

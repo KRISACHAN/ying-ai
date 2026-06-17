@@ -212,12 +212,15 @@ flowchart TD
 
 **与当前 `SimpleChatWorkflow` 的差异：**
 
-| 步骤                | 目标态（阶段 7）                                               | 当前实现（阶段 4）                        |
-| ------------------- | -------------------------------------------------------------- | ----------------------------------------- |
-| `Emotion.analyze`   | ✅ 拼入 prompt                                                 | ❌ 未调用（`DisabledEmotionEngine` 占位） |
-| `Tool` 多步循环     | ✅ `tool_call → execute → re-generate`                         | ❌ 忽略 `toolCalls`                       |
-| `Persona.load` 时机 | 与 recall / emotion 可并行                                     | 串行，且在 Safety 之后                    |
-| 其余                | Safety / Summary / Memory recall / Model / Memory extract·save | ✅ 已实现                                 |
+| 步骤                | 目标态（阶段 7）                                               | 当前实现（阶段 5）                                   |
+| ------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
+| `Emotion.analyze`   | ✅ 拼入 prompt                                                 | ✅ 已接入；默认 `DisabledEmotionEngine` 返回 neutral |
+| `Tool` 多步循环     | ✅ `tool_call → execute → re-generate`                         | ❌ 忽略 `toolCalls`                                  |
+| `Persona.load` 时机 | 与 recall / emotion 可并行                                     | 串行，且在 Safety 之后                               |
+| 其余                | Safety / Summary / Memory recall / Model / Memory extract·save | ✅ 已实现                                            |
+
+> 默认 `createCompanionCore({ model })` 仍使用 `DisabledEmotionEngine`，不会额外触发情绪分析 LLM。
+> 宿主显式注入 `new ModelEmotionEngine({ model })` 后，Workflow 会分析意向情绪并把最终情绪拼入 prompt。
 
 ---
 
@@ -237,7 +240,8 @@ flowchart TD
    ├─ memory.recall({ scope, query })      → 宿主注入的 PostgresMemoryProvider
    │    └─ embeddingProvider.embed(query)  → 向量
    │    └─ SQL pgvector TopK               → RecalledMemory[]
-   ├─ emotion.analyze({ message, previous }) → EmotionState（阶段 5）
+   ├─ emotion.analyze({ message, history, persona, recalledMemories, previous })
+   │                                      → EmotionState（阶段 5）
    └─ emotion.transition({ previous, detected })
 
 3. Prompt 拼装（无模型调用）

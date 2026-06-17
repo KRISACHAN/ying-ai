@@ -8,7 +8,12 @@ import type {
   EmotionTransitionInput,
 } from "../../abstractions/emotion";
 
-/** 情绪引擎占位实现：始终返回 neutral；transition 直接透传 detected。 */
+/**
+ * 情绪引擎占位实现：始终返回 neutral；transition 直接透传 detected。
+ *
+ * 默认 disabled 不保证 previous emotion 连续性。需要情绪连续性时，
+ * 宿主应显式注入 ModelEmotionEngine 或自定义 EmotionEngine。
+ */
 export class DisabledEmotionEngine implements EmotionEngine {
   public readonly meta = {
     id: "emotion.disabled",

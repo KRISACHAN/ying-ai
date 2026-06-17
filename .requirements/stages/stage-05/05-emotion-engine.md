@@ -1873,6 +1873,8 @@ updatedAt
 
 不要把 `confidence`、`transitionRule`、`failureReason` 等写入业务库，除非未来单独设计调试表。
 
+调试 demo 也必须遵守这个边界：页面可以展示完整 `result.emotion` 与 `debugContext`，但保存到 React state 并在下一轮请求中回传的 `emotion` 只能包含 `current / intensity / updatedAt`，不能把 `metadata` 原样回传。
+
 ---
 
 ## 十七、阶段完成后的目标状态

@@ -28,7 +28,7 @@ export interface ChatWorkflowInput {
   message: string;
   /** 短期对话历史，不含本轮 message。 */
   history?: ChatMessage[];
-  /** 情绪状态（阶段 5 前由宿主传入但 Workflow 未消费）。 */
+  /** 上轮伴侣情绪，由宿主传入；Workflow 消费后返回 output.emotion。 */
   emotion?: EmotionState;
   metadata?: Record<string, unknown>;
   /** 显式记忆作用域，优先于 sessionId 推导。 */
