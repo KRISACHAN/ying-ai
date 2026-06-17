@@ -1,4 +1,4 @@
-import { Pool, type PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 import type {
   EmbeddingProvider,
@@ -17,10 +17,9 @@ import type {
 } from "@ying-companion/ai-core";
 
 export interface PostgresMemoryProviderOptions {
-  connectionString: string;
+  pool: Pool;
   embeddingProvider: EmbeddingProvider;
   tableName?: string;
-  pool?: Pool;
 }
 
 /**
@@ -65,13 +64,11 @@ export class PostgresMemoryProvider implements MemoryProvider {
   private readonly pool: Pool;
   private readonly embeddingProvider: EmbeddingProvider;
   private readonly tableName: string;
-  private readonly ownsPool: boolean;
 
   public constructor(options: PostgresMemoryProviderOptions) {
-    this.pool = options.pool ?? new Pool({ connectionString: options.connectionString });
+    this.pool = options.pool;
     this.embeddingProvider = options.embeddingProvider;
     this.tableName = validateTableName(options.tableName ?? "companion_memories");
-    this.ownsPool = options.pool === undefined;
   }
 
   public async recall(input: MemoryRecallInput): Promise<MemoryRecallResult> {
@@ -261,9 +258,7 @@ export class PostgresMemoryProvider implements MemoryProvider {
   }
 
   public async dispose(): Promise<void> {
-    if (this.ownsPool) {
-      await this.pool.end();
-    }
+    // no-op: caller owns the Pool lifecycle.
   }
 }
 

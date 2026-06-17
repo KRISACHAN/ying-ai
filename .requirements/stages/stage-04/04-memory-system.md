@@ -216,8 +216,12 @@ packages/ai-core
 宿主应用负责创建具体 provider，然后注入 core：
 
 ```ts
-const memory = new PostgresMemoryProvider({
+const pool = new Pool({
   connectionString,
+});
+
+const memory = new PostgresMemoryProvider({
+  pool,
   embeddingProvider,
 });
 

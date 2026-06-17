@@ -11,6 +11,7 @@ import {
   PostgresMemoryProvider,
   type MemoryDatabaseHealth,
 } from "@ying-companion/memory-postgres";
+import { Pool } from "pg";
 
 import { readOptionalEnv } from "./model-config";
 
@@ -77,6 +78,7 @@ interface MemoryEnvConfig {
 
 interface PostgresRuntime {
   key: string;
+  pool: Pool;
   provider: PostgresMemoryProvider;
   embeddingModel: string;
   tableName: string;
@@ -141,12 +143,15 @@ async function resolvePostgresRuntime(
   }
 
   if (postgresRuntime !== undefined) {
-    // 替换前释放旧 pool；dispose 失败不应阻断新 runtime 构造。
-    await postgresRuntime.provider.dispose().catch(() => {
+    // 替换前释放旧 pool；清理失败不应阻断新 runtime 构造。
+    await postgresRuntime.pool.end().catch(() => {
       // best-effort cleanup
     });
   }
 
+  const pool = new Pool({
+    connectionString: config.connectionString,
+  });
   const embeddingProvider = new OpenAIEmbeddingProvider({
     // health 探测本身不发 embedding 请求；apiKey 缺失时占位，仅 chat/save 路径会真正调用。
     apiKey: config.apiKey ?? "",
@@ -154,13 +159,14 @@ async function resolvePostgresRuntime(
     ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
   });
   const provider = new PostgresMemoryProvider({
-    connectionString: config.connectionString,
+    pool,
     embeddingProvider,
     tableName: config.tableName,
   });
 
   postgresRuntime = {
     key,
+    pool,
     provider,
     embeddingModel: config.embeddingModel,
     tableName: config.tableName,

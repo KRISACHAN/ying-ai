@@ -236,8 +236,12 @@ const embeddingProvider = new OpenAIEmbeddingProvider({
   model: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
 });
 
-const memory = new PostgresMemoryProvider({
+const pool = new Pool({
   connectionString: process.env.DATABASE_URL!,
+});
+
+const memory = new PostgresMemoryProvider({
+  pool,
   embeddingProvider,
   tableName: process.env.MEMORY_POSTGRES_TABLE, // 可选，默认 companion_memories
 });
@@ -861,9 +865,9 @@ OPENAI_API_KEY / OPENAI_BASE_URL（可选；缺失时 embedding provider 用占�
 
 效果：即便模型生成配置（`OPENAI_MODEL` 等）缺失，health 端点仍能报告 DB / pgvector / 表状态，而不是 500。
 
-### 19.4 连接池生命周期：替换 runtime 前 dispose 旧 pool
+### 19.4 连接池生命周期：替换 runtime 前关闭旧 pool
 
-`resolvePostgresRuntime()` 按 `key` 复用 `PostgresMemoryProvider`；当 key 变化（切库 / 改 table / 改 embedding model / dev 热重载）需重建时，**先 `await postgresRuntime.provider.dispose().catch(() => {})`** 释放旧连接池再构造新实例（best-effort，dispose 失败不阻断新 runtime）。避免同进程内悄悄覆盖未释放的 pool。
+`resolvePostgresRuntime()` 按 `key` 复用 `PostgresMemoryProvider`；当 key 变化（切库 / 改 table / 改 embedding model / dev 热重载）需重建时，Demo 作为调用方必须先 **`await postgresRuntime.pool.end().catch(() => {})`** 释放旧连接池再构造新实例（best-effort，清理失败不阻断新 runtime）。`PostgresMemoryProvider.dispose()` 保留为兼容 no-op，不负责关闭调用方传入的 pool。避免同进程内悄悄覆盖未释放的 pool。
 
 ### 19.5 与 §5.4 一致的 `embeddingVectorLength` 取数路径
 
