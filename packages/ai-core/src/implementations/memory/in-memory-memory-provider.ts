@@ -1,3 +1,9 @@
+/**
+ * 进程内长期记忆实现（开发/调试用）。
+ *
+ * recall 使用简单关键词匹配打分（非真实向量）；save 去重后存入内存数组，进程重启即丢失。
+ * 生产持久化请使用 @ying-companion/memory-postgres 并注入 Core。
+ */
 import type {
   ExtractedMemory,
   MemoryProvider,
@@ -20,6 +26,7 @@ export class InMemoryMemoryProvider implements MemoryProvider {
 
   private readonly records: MemoryRecord[] = [];
 
+  /** 关键词匹配 recall（非向量）；按 score 与 importance 排序取 TopK。 */
   public async recall(input: MemoryRecallInput): Promise<MemoryRecallResult> {
     const limit = input.limit ?? 5;
     const minImportance = input.minImportance ?? 3;
@@ -46,6 +53,7 @@ export class InMemoryMemoryProvider implements MemoryProvider {
     return { memories };
   }
 
+  /** 写入进程内数组；importance < 3 与同 scope 重复内容跳过。 */
   public async save(input: MemorySaveInput): Promise<MemorySaveResult> {
     const saved: MemoryRecord[] = [];
     const skipped: ExtractedMemory[] = [];
@@ -89,6 +97,7 @@ export class InMemoryMemoryProvider implements MemoryProvider {
   }
 }
 
+/** 判断两条记忆是否属于同一隔离 scope。 */
 function sameScope(left: MemoryScope, right: MemoryScope): boolean {
   return (
     left.ownerType === right.ownerType &&
@@ -97,10 +106,12 @@ function sameScope(left: MemoryScope, right: MemoryScope): boolean {
   );
 }
 
+/** 将 query 拆为去重词元，用于简单关键词打分。 */
 function tokenize(text: string): string[] {
   return Array.from(new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []));
 }
 
+/** 基于子串包含与词元命中率计算 0–1 的相似度分数。 */
 function scoreMemory(content: string, terms: string[], query: string): number {
   const normalizedContent = content.toLowerCase();
   const normalizedQuery = query.toLowerCase();
@@ -118,6 +129,7 @@ function scoreMemory(content: string, terms: string[], query: string): number {
   return matched / terms.length;
 }
 
+/** 生成记忆 ID；优先使用 crypto.randomUUID。 */
 function createMemoryId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();

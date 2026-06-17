@@ -1,3 +1,10 @@
+/**
+ * OpenAI-compatible 模型实现（阶段 1）。
+ *
+ * 基于 Vercel AI SDK（@ai-sdk/openai-compatible + ai）适配，
+ * 支持 generate / stream、主模型重试、降级模型与运行时元信息。
+ * 不直接依赖 OpenAI 官方 SDK，也不读取环境变量。
+ */
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   generateText,
@@ -27,6 +34,7 @@ import type { OpenAICompatibleConfig } from "../../config/model-config";
 const DEFAULT_PRIMARY_MAX_RETRIES = 0;
 const DEFAULT_FALLBACK_MAX_RETRIES = 0;
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+/** 写入 runtime.errors 的单条错误消息上限，避免日志膨胀。 */
 const MAX_ERROR_MESSAGE_LENGTH = 240;
 
 export class OpenAICompatibleModel implements ChatModel {
@@ -41,7 +49,7 @@ export class OpenAICompatibleModel implements ChatModel {
 
   public constructor(config: OpenAICompatibleConfig) {
     this.config = config;
-    // Provider configuration is immutable for this model instance, so retries reuse the same factory.
+    // 模型实例配置不可变，重试循环复用同一 provider 工厂。
     this.provider = createOpenAICompatible({
       name: "openai-compatible",
       apiKey: this.config.apiKey,
@@ -50,6 +58,7 @@ export class OpenAICompatibleModel implements ChatModel {
     });
   }
 
+  /** 非流式生成：按主模型 → 降级模型顺序重试，成功时附带 runtime 元信息。 */
   public async generate(input: GenerateInput): Promise<GenerateOutput> {
     const state = createRuntimeState();
 
@@ -75,6 +84,10 @@ export class OpenAICompatibleModel implements ChatModel {
     throw createModelRuntimeError(state.errors);
   }
 
+  /**
+   * 流式生成：仅在尚未向调用方 yield 文本时可切换降级模型；
+   * 一旦开始吐字，后续错误直接抛出（V1 不在流中途切换模型）。
+   */
   public async *stream(input: GenerateInput): AsyncIterable<GenerateStreamChunk> {
     const state = createRuntimeState();
 
@@ -123,9 +136,9 @@ export class OpenAICompatibleModel implements ChatModel {
     throw createModelRuntimeError(state.errors);
   }
 
+  /** 组装 AI SDK generateText/streamText 参数；阶段 6 前忽略 tools。 */
   private createTextOptions(input: GenerateInput, model: string): TextOptions {
-    // TODO(stage-tool-system): Map validated Core tool descriptors to AI SDK ToolSet when tool execution lands.
-    // The Stage 1 runtime intentionally ignores tools instead of passing unchecked data into the provider.
+    // TODO(stage-tool-system): 阶段 6 将 Core 层 tool 描述映射为 AI SDK ToolSet。
     void input.tools;
 
     const options: TextOptions = {
@@ -145,6 +158,7 @@ export class OpenAICompatibleModel implements ChatModel {
     return options;
   }
 
+  /** 单次 generateText 调用，映射为 Core 的 GenerateOutput。 */
   private async generateOnce(input: GenerateInput, model: string): Promise<GenerateOutput> {
     const result = await generateText(this.createTextOptions(input, model));
 
@@ -167,8 +181,8 @@ export class OpenAICompatibleModel implements ChatModel {
     return output;
   }
 
+  /** 构建主模型与可选降级模型的尝试计划；单次 generate 的 model 覆盖仅作用于主模型。 */
   private createAttemptPlans(input: GenerateInput): ModelAttemptPlan[] {
-    // Per-call model override affects only the primary plan; fallback remains the configured fallback.
     const plans: ModelAttemptPlan[] = [
       {
         phase: "primary",
@@ -195,6 +209,7 @@ export class OpenAICompatibleModel implements ChatModel {
   }
 }
 
+/** AI SDK generateText/streamText 的入参形状。 */
 interface TextOptions {
   model: LanguageModel;
   messages: ModelMessage[];
@@ -203,22 +218,24 @@ interface TextOptions {
   maxRetries: number;
 }
 
+/** 单次模型尝试计划：阶段（主/降级）、模型名、最大重试次数。 */
 interface ModelAttemptPlan {
   phase: ModelAttemptPhase;
   model: string;
   maxRetries: number;
 }
 
+/** 跨重试循环累积的运行时状态。 */
 interface RuntimeState {
   primaryAttempts: number;
   fallbackAttempts: number;
   errors: ModelRuntimeErrorItem[];
 }
 
+/** 将 Core ChatMessage 转为 AI SDK ModelMessage；tool 角色在阶段 6 前显式抛错。 */
 function toAiSdkMessages(messages: ChatMessage[]): ModelMessage[] {
   return messages.map((message): ModelMessage => {
     if (message.role === "tool") {
-      // Tool execution belongs to a later stage; fail explicitly instead of silently dropping context.
       throw new Error("Tool role messages are not supported until the Tool System stage.");
     }
 
@@ -229,12 +246,14 @@ function toAiSdkMessages(messages: ChatMessage[]): ModelMessage[] {
   });
 }
 
+/** 拒绝空文本且无 toolCalls 的模型输出。 */
 function validateGenerateOutput(output: GenerateOutput): void {
   if (!output.text.trim() && (output.toolCalls?.length ?? 0) === 0) {
     throw new Error("Model output is empty");
   }
 }
 
+/** 将 AI SDK LanguageModelUsage 映射为 Core GenerateUsage。 */
 function toGenerateUsage(usage: LanguageModelUsage): GenerateUsage | undefined {
   const output: GenerateUsage = {};
 
@@ -253,6 +272,7 @@ function toGenerateUsage(usage: LanguageModelUsage): GenerateUsage | undefined {
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
+/** 将 AI SDK TypedToolCall 映射为 Core ModelToolCall。 */
 function toModelToolCalls(toolCalls: Array<TypedToolCall<ToolSet>>): ModelToolCall[] | undefined {
   if (toolCalls.length === 0) {
     return undefined;
@@ -264,6 +284,7 @@ function toModelToolCalls(toolCalls: Array<TypedToolCall<ToolSet>>): ModelToolCa
   }));
 }
 
+/** 初始化重试计数器与错误列表。 */
 function createRuntimeState(): RuntimeState {
   return {
     primaryAttempts: 0,
@@ -272,6 +293,7 @@ function createRuntimeState(): RuntimeState {
   };
 }
 
+/** 按阶段累加主模型或降级模型的尝试次数。 */
 function recordAttempt(state: RuntimeState, phase: ModelAttemptPhase): void {
   if (phase === "primary") {
     state.primaryAttempts += 1;
@@ -281,9 +303,10 @@ function recordAttempt(state: RuntimeState, phase: ModelAttemptPhase): void {
   state.fallbackAttempts += 1;
 }
 
+/** 组装写入 GenerateOutput.runtime 的结构化元信息。 */
 function createRuntimeInfo(plan: ModelAttemptPlan, state: RuntimeState): ModelRuntimeInfo {
   return {
-    // `model` remains the compact business field; `runtime.usedModel` is the structured debug field.
+    // GenerateOutput.model 为紧凑业务字段；runtime.usedModel 供调试面板结构化展示。
     usedModel: plan.model,
     fallbackUsed: plan.phase === "fallback",
     primaryAttempts: state.primaryAttempts,
@@ -292,6 +315,7 @@ function createRuntimeInfo(plan: ModelAttemptPlan, state: RuntimeState): ModelRu
   };
 }
 
+/** 规范化重试次数：非有限数回退默认值，负数截断为 0。 */
 function normalizeMaxRetries(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value)) {
     return fallback;
@@ -300,10 +324,12 @@ function normalizeMaxRetries(value: number | undefined, fallback: number): numbe
   return Math.max(0, Math.floor(value));
 }
 
+/** 总尝试次数 = 1 次初始调用 + maxRetries 次重试。 */
 function getMaxAttempts(maxRetries: number): number {
   return 1 + maxRetries;
 }
 
+/** 将单次失败转为可序列化的运行时错误项。 */
 function toRuntimeErrorItem(
   error: unknown,
   plan: ModelAttemptPlan,
@@ -317,11 +343,13 @@ function toRuntimeErrorItem(
   };
 }
 
+/** 截断并规范化错误消息，避免写入过长或含换行的摘要。 */
 function toSafeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/\s+/g, " ").slice(0, MAX_ERROR_MESSAGE_LENGTH);
 }
 
+/** 主模型与降级模型全部失败后抛出的统一错误。 */
 function createModelRuntimeError(errors: ModelRuntimeErrorItem[]): ModelRuntimeError {
   return new ModelRuntimeError("Model runtime failed after retry and fallback attempts.", errors);
 }

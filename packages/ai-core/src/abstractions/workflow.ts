@@ -1,3 +1,9 @@
+/**
+ * 聊天工作流抽象。
+ *
+ * ChatWorkflow 定义单轮对话的编排入口：宿主通过 core.executeWorkflow(input) 调用。
+ * ChatWorkflowInput/Output 是宿主与 Core 之间的主要业务契约。
+ */
 import type { ChatWorkflowCoreContext } from "./core-context";
 import type { EmotionState } from "./emotion";
 import type {
@@ -14,12 +20,18 @@ import type { SafetyCheckResult } from "./safety";
 import type { ConversationSummary, SummaryOptions, SummaryScope } from "./summary";
 import type { ToolResult } from "./tool";
 
+/** 单轮聊天的输入；history 由宿主维护，Core 不持久化短期对话。 */
 export interface ChatWorkflowInput {
+  /** 会话 ID，用于 Persona/Safety 与默认 MemoryScope 推导。 */
   sessionId?: string;
+  /** 当前用户消息，必填且非空。 */
   message: string;
+  /** 短期对话历史，不含本轮 message。 */
   history?: ChatMessage[];
+  /** 情绪状态（阶段 5 前由宿主传入但 Workflow 未消费）。 */
   emotion?: EmotionState;
   metadata?: Record<string, unknown>;
+  /** 显式记忆作用域，优先于 sessionId 推导。 */
   scope?: MemoryScope;
   summaryScope?: SummaryScope;
   conversationId?: string;
@@ -28,6 +40,7 @@ export interface ChatWorkflowInput {
     limit?: number;
     minImportance?: MemoryImportance;
   };
+  /** 滚动摘要开关与阈值；enabled 默认 false。 */
   summaryOptions?: SummaryOptions;
 }
 
@@ -54,6 +67,7 @@ export interface ChatWorkflowDebugContext {
   embeddingVectorLength?: number;
 }
 
+/** 单轮聊天的输出；text 为最终回复，metadata 含记忆/摘要/debug 等扩展信息。 */
 export interface ChatWorkflowOutput {
   text: string;
   model?: string;
@@ -79,10 +93,12 @@ export interface ChatWorkflowOutput {
   modelOutput?: GenerateOutput;
 }
 
+/** Workflow 执行时注入的 Core 上下文（由 CompanionCore 拆分 workflow 后传入）。 */
 export interface ChatWorkflowExecutionContext {
   core: ChatWorkflowCoreContext;
 }
 
+/** 聊天编排契约；宿主通过 core.executeWorkflow 间接调用。 */
 export interface ChatWorkflow extends CoreProvider {
   execute(
     input: ChatWorkflowInput,

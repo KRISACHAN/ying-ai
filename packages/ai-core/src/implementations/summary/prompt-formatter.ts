@@ -1,5 +1,6 @@
 import type { ConversationSummary } from "../../abstractions/summary";
 
+/** 将会话摘要格式化为可注入 system prompt 的文本块。 */
 export function formatSummaryForPrompt(
   summary: ConversationSummary | null | undefined,
 ): string | undefined {

@@ -1,3 +1,6 @@
+/**
+ * NoopSummaryProvider — 会话摘要存储空实现。
+ */
 import type {
   SummaryLoadResult,
   SummaryProvider,
@@ -5,6 +8,7 @@ import type {
   SummarySaveResult,
 } from "../../abstractions/summary";
 
+/** 摘要 Provider 空实现：load 恒为 null，save 透传但不持久化。 */
 export class NoopSummaryProvider implements SummaryProvider {
   public readonly meta = {
     id: "summary.noop",

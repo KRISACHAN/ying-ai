@@ -1,3 +1,8 @@
+/**
+ * 默认伴侣角色 Provider。
+ *
+ * 未自定义 PersonaProvider 时，createCompanionCore 使用此类加载默认角色「映映」。
+ */
 import type {
   CompanionPersona,
   PersonaLoadInput,
@@ -13,6 +18,7 @@ export class DefaultPersonaProvider implements PersonaProvider {
 
   public constructor(private readonly persona?: Partial<CompanionPersona>) {}
 
+  /** 返回构造时注入的 Persona，未注入字段使用默认「映映」设定。 */
   public async load(input?: PersonaLoadInput): Promise<CompanionPersona> {
     void input;
 

@@ -1,3 +1,6 @@
+/**
+ * EmptyToolRegistry — 工具注册表占位实现（阶段 6 前）。
+ */
 import type {
   ToolDefinition,
   ToolExecuteInput,
@@ -6,6 +9,7 @@ import type {
   ToolResult,
 } from "../../abstractions/tool";
 
+/** 工具注册表占位实现（阶段 6 前禁止注册与执行）。 */
 export class EmptyToolRegistry implements ToolRegistry {
   public readonly meta = {
     id: "tool.empty-registry",

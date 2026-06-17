@@ -1,3 +1,8 @@
+/**
+ * NoopMemoryProvider — 长期记忆空实现。
+ *
+ * createCompanionCore 未注入 memory 时的默认；recall 恒为空，save 全部记入 skipped。
+ */
 import type {
   MemoryProvider,
   MemoryRecallInput,
@@ -6,6 +11,7 @@ import type {
   MemorySaveResult,
 } from "../../abstractions/memory";
 
+/** 长期记忆空实现：recall 返回空、save 全部跳过。 */
 export class NoopMemoryProvider implements MemoryProvider {
   public readonly meta = {
     id: "memory.noop",

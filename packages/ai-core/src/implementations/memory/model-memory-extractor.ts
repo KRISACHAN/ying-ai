@@ -1,3 +1,9 @@
+/**
+ * 基于 LLM + Zod 的结构化记忆抽取器。
+ *
+ * 用低 temperature 的 generate 输出 JSON，经 schema 校验后返回 ExtractedMemory[]。
+ * 支持超时与 JSON 解析失败重试。
+ */
 import { z } from "zod";
 
 import type { ChatMessage, ChatModel } from "../../abstractions/model";
@@ -20,6 +26,7 @@ const MemoryExtractionResultSchema = z.object({
   memories: z.array(ExtractedMemorySchema),
 });
 
+/** ModelMemoryExtractor 构造参数。 */
 export interface ModelMemoryExtractorOptions {
   model: ChatModel;
   retryCount?: number;
@@ -48,6 +55,7 @@ export class ModelMemoryExtractor implements MemoryExtractor {
     this.timeoutMs = options.timeoutMs ?? 15_000;
   }
 
+  /** 调用 LLM 抽取结构化记忆；JSON 解析失败时按 retryCount 重试。 */
   public async extract(input: MemoryExtractionInput): Promise<MemoryExtractionResult> {
     let lastError: unknown;
 
@@ -81,6 +89,7 @@ export class ModelMemoryExtractor implements MemoryExtractor {
   }
 }
 
+/** 为模型调用包裹超时；timeoutMs <= 0 时不限制。 */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   if (timeoutMs <= 0) {
     return promise;
@@ -104,6 +113,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
+/** 构造记忆抽取的 system/user 消息；isRetry 时追加 JSON 格式纠错指令。 */
 function buildExtractionMessages(
   input: MemoryExtractionInput,
   isRetry: boolean,
@@ -147,6 +157,7 @@ function buildExtractionMessages(
   ];
 }
 
+/** 解析模型输出的 JSON；支持从 markdown 包裹中提取 `{...}` 子串。 */
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim();
 

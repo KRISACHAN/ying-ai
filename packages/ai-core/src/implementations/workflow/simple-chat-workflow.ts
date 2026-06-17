@@ -1,3 +1,10 @@
+/**
+ * 当前 V1 聊天主链路实现（阶段 3 + 4）。
+ *
+ * 编排顺序：Persona → Safety(input) → Summary(load) → Memory(recall)
+ * → Model → Safety(output) → Summary(update/save) → Memory(extract/save)。
+ * 详见类注释中的约束说明。
+ */
 import type { ChatMessage } from "../../abstractions/model";
 import {
   resolveMemoryScope,
@@ -24,7 +31,9 @@ import { formatMemoriesForPrompt } from "../memory/prompt-formatter";
 import { splitForSummary, trimRecentHistory } from "../summary/history-utils";
 import { formatSummaryForPrompt } from "../summary/prompt-formatter";
 
+/** 未传 summaryOptions.recentMessageLimit 时的默认值。 */
 const DEFAULT_RECENT_MESSAGE_LIMIT = 12;
+/** 未传 summaryOptions.summarizeTriggerMessageCount 时的默认值。 */
 const DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT = 16;
 
 /**
@@ -47,6 +56,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
     description: "Minimal persona + safety + model chat workflow",
   } as const;
 
+  /** 执行单轮聊天主链路，详见类级注释中的编排顺序与约束。 */
   public async execute(
     input: ChatWorkflowInput,
     context: ChatWorkflowExecutionContext,
@@ -267,7 +277,7 @@ async function safeEmit(observer: CoreObserver, event: CoreEvent): Promise<void>
   try {
     await Promise.resolve(observer.emit(event));
   } catch {
-    // observer must not break workflow
+    // Observer 异常不得打断 Workflow
   }
 }
 
@@ -293,6 +303,7 @@ function sanitizeHistory(history: ChatMessage[] | undefined): ChatMessage[] {
   });
 }
 
+/** 将 Persona、摘要与长期记忆拼成最终 system prompt。 */
 function buildPersonaSystemPrompt(
   persona: CompanionPersona,
   context: { summaryContext?: string; memoryContext?: string },
@@ -352,6 +363,7 @@ function buildPersonaSystemPrompt(
   return lines.join("\n");
 }
 
+/** 将 CompanionGender 枚举转为中文展示文案，用于 system prompt。 */
 function formatGender(gender: CompanionGender): string {
   switch (gender) {
     case "female":
@@ -386,6 +398,7 @@ interface LoadSummaryResult {
   reason?: string;
 }
 
+/** 加载当前会话摘要；失败时返回 null 且不阻断主链路。 */
 async function loadSummary(options: LoadSummaryOptions): Promise<LoadSummaryResult> {
   if (!options.enabled || options.scope === undefined) {
     return {
@@ -450,6 +463,7 @@ interface UpdateAndSaveSummaryResult {
   reason: string;
 }
 
+/** 超阈值时压缩旧消息为摘要并持久化；失败不阻断主链路。 */
 async function updateAndSaveSummary(
   options: UpdateAndSaveSummaryOptions,
 ): Promise<UpdateAndSaveSummaryResult> {
@@ -627,6 +641,7 @@ interface RecallMemoriesResult {
   embeddingVectorLength?: number;
 }
 
+/** 按 query 召回长期记忆；失败时返回空数组且不阻断主链路。 */
 async function recallMemories(options: RecallMemoriesOptions): Promise<RecallMemoriesResult> {
   await safeEmit(options.observer, {
     type: "memory:recall:start",
@@ -699,6 +714,7 @@ interface ExtractAndSaveResult {
   embeddingVectorLength?: number;
 }
 
+/** 抽取本轮记忆并保存（importance < 3 在 Workflow 层过滤）；失败不阻断主链路。 */
 async function extractAndSaveMemories(
   options: ExtractAndSaveOptions,
 ): Promise<ExtractAndSaveResult> {
@@ -791,6 +807,7 @@ async function extractAndSaveMemories(
   }
 }
 
+/** 将记忆对象裁剪为 Observer payload 可安全展示的字段。 */
 function toMemoryDebugPayload(memory: RecalledMemory | MemoryRecord): Record<string, unknown> {
   return {
     id: memory.id,

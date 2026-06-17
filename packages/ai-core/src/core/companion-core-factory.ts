@@ -1,3 +1,9 @@
+/**
+ * createCompanionCore 工厂：组装各 Provider 并返回 CompanionCore 实例。
+ *
+ * 仅 model 为必填；其余插槽未传入时使用默认实现。
+ * 注入 memory 时自动选用 ModelMemoryExtractor；注入 summary 时自动选用 ModelSummaryUpdater。
+ */
 import type { CompanionCoreContext } from "../abstractions/core-context";
 import type { EmotionEngine } from "../abstractions/emotion";
 import type { ChatModel } from "../abstractions/model";
@@ -22,6 +28,7 @@ import { EmptyToolRegistry } from "../implementations/tool/empty-tool-registry";
 import { SimpleChatWorkflow } from "../implementations/workflow/simple-chat-workflow";
 import { CompanionCore } from "./companion-core";
 
+/** createCompanionCore 的可选注入项；仅 model 必填。 */
 export interface CreateCompanionCoreOptions {
   model: ChatModel;
   persona?: PersonaProvider;
@@ -36,6 +43,7 @@ export interface CreateCompanionCoreOptions {
   observer?: CoreObserver;
 }
 
+/** 装配各 Provider 并返回可执行的 CompanionCore 实例。 */
 export function createCompanionCore(options: CreateCompanionCoreOptions): CompanionCore {
   const context: CompanionCoreContext = {
     model: options.model,
@@ -64,6 +72,7 @@ export function createCompanionCore(options: CreateCompanionCoreOptions): Compan
   return new CompanionCore(context);
 }
 
+/** 初始化完成后发射 core:init；Observer 异常不得阻断 Core 创建。 */
 function safeEmitCoreInit(context: CompanionCoreContext): void {
   try {
     void Promise.resolve(
@@ -87,9 +96,9 @@ function safeEmitCoreInit(context: CompanionCoreContext): void {
         },
       }),
     ).catch(() => {
-      // observer must not break core initialization
+      // Observer 异常不得阻断 Core 初始化
     });
   } catch {
-    // observer must not break core initialization
+    // Observer 异常不得阻断 Core 初始化
   }
 }

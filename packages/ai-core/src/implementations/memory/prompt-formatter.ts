@@ -1,5 +1,6 @@
 import type { RecalledMemory } from "../../abstractions/memory";
 
+/** 将 recall 到的记忆格式化为可注入 system prompt 的文本块。 */
 export function formatMemoriesForPrompt(memories: RecalledMemory[]): string | undefined {
   if (memories.length === 0) {
     return undefined;

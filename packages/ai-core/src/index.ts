@@ -1,3 +1,12 @@
+/**
+ * @ying-companion/ai-core 公共导出入口。
+ *
+ * 导出内容分为四类：
+ * 1. abstractions/ — 接口与类型契约（宿主可依赖的稳定 API）
+ * 2. core/ — CompanionCore 门面与 createCompanionCore 工厂
+ * 3. factories/、errors/ — 模型创建与运行时错误
+ * 4. implementations/ — 内置默认实现，供宿主直接使用或作为自定义实现的参考
+ */
 export * from "./abstractions/provider";
 export * from "./abstractions/core-context";
 export * from "./abstractions/observer";

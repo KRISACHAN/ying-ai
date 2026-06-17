@@ -1,3 +1,8 @@
+/**
+ * 基于 LLM + Zod 的滚动摘要更新器。
+ *
+ * 将「当前摘要 + 待压缩消息片段」发给模型，输出新摘要 JSON 并校验 schema。
+ */
 import { z } from "zod";
 
 import type { ChatMessage, ChatModel } from "../../abstractions/model";
@@ -13,6 +18,7 @@ const SummaryUpdateSchema = z.object({
   reason: z.string().optional(),
 });
 
+/** ModelSummaryUpdater 构造参数。 */
 export interface ModelSummaryUpdaterOptions {
   model: ChatModel;
   retryCount?: number;
@@ -38,6 +44,7 @@ export class ModelSummaryUpdater implements SummaryUpdater {
     this.timeoutMs = options.timeoutMs ?? 15_000;
   }
 
+  /** 合并当前摘要与待压缩消息，调用 LLM 生成新摘要 JSON。 */
   public async update(input: SummaryUpdateInput): Promise<SummaryUpdateResult> {
     if (input.messagesToSummarize.length === 0) {
       const summary: ConversationSummary = input.currentSummary ?? {
@@ -102,6 +109,7 @@ export class ModelSummaryUpdater implements SummaryUpdater {
   }
 }
 
+/** 为摘要更新模型调用包裹超时。 */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   if (timeoutMs <= 0) {
     return promise;
@@ -125,6 +133,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
+/** 构造摘要更新的 system/user 消息。 */
 function buildSummaryMessages(input: SummaryUpdateInput, isRetry: boolean): ChatMessage[] {
   const currentSummary = input.currentSummary?.content.trim() ?? "";
   const messages = input.messagesToSummarize
@@ -167,6 +176,7 @@ function buildSummaryMessages(input: SummaryUpdateInput, isRetry: boolean): Chat
   ];
 }
 
+/** 解析摘要更新模型输出的 JSON。 */
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim();
 
