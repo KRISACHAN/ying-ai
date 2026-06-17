@@ -82,12 +82,14 @@ analyze 输出的是「伴侣面对本轮消息时的意向情绪（detected）�
 7. `ModelEmotionEngine` 不直接依赖 OpenAI SDK；
 8. `ModelEmotionEngine` 输出必须经过结构化校验；
 9. 模型输出格式错误时不能污染主链路；
-10. `SimpleChatWorkflow` 在生成前调用 `emotion.analyze` 与 `emotion.transition`；
-11. 情绪结果注入 system prompt；
-12. `ChatWorkflowOutput.emotion` 返回本轮最终情绪；
-13. 调试 UI 可以展示：上一轮情绪（Before）、本轮意向情绪（Intention / Detected）、本轮最终情绪（After）；
-14. Core 内不写死 console，所有可观测信息走 `CoreObserver`；
-15. 阶段 4 的记忆 recall / extract / save 流程仍然正常。
+10. `SimpleChatWorkflow` 在生成前调用 `emotion.analyze`（async）与 `emotion.transition`（sync）；
+11. `analyze` 输入包含 `history` / `persona` / `recalledMemories`（Workflow 负责传入）；
+12. `EmotionState.metadata` 使用 `EmotionDebugMetadata`，不使用 `Record<string, unknown>`；
+13. 情绪结果注入 system prompt；
+14. `ChatWorkflowOutput.emotion` 返回本轮最终情绪；
+15. 调试 UI 可以展示：上一轮情绪（Before）、本轮意向情绪（Intention / Detected）、本轮最终情绪（After）；
+16. Core 内不写死 console，所有可观测信息走 `CoreObserver`；
+17. 阶段 4 的记忆 recall / extract / save 流程仍然正常。
 
 ---
 
@@ -100,15 +102,18 @@ analyze 输出的是「伴侣面对本轮消息时的意向情绪（detected）�
 需要完成：
 
 1. 实现 `ModelEmotionEngine`；
-2. 实现伴侣意向情绪推断 Prompt；
-3. 实现意向情绪分析结果 schema；
-4. 实现情绪转移规则；
-5. 实现情绪 prompt formatter；
-6. 在 `SimpleChatWorkflow` 中接入情绪调用点；
-7. 在 `ChatWorkflowDebugContext` 中补充情绪调试信息；
-8. 在 demo 页面展示情绪状态；
-9. 文档同步更新 `packages/ai-core/README.md` 当前阶段状态；
-10. 保留未来外部持久化 Provider 的扩展空间。
+2. 类型化 `EmotionDebugMetadata` / `EmotionTransitionRule`；
+3. 扩展 `EmotionAnalyzeInput`（history / persona / recalledMemories）；
+4. 明确 `EmotionTransitionInput`（含 `now?`），`transition` 改为同步；
+5. 实现伴侣意向情绪推断 Prompt；
+6. 实现意向情绪分析结果 schema；
+7. 实现情绪转移规则；
+8. 实现情绪 prompt formatter；
+9. 在 `SimpleChatWorkflow` 中接入情绪调用点；
+10. 在 `ChatWorkflowDebugContext` 中补充情绪调试信息；
+11. 在 demo 页面展示情绪状态；
+12. 文档同步更新 `packages/ai-core/README.md` 当前阶段状态；
+13. 保留未来外部持久化 Provider 的扩展空间。
 
 ### 3.2 本阶段不做
 
@@ -188,6 +193,7 @@ userId + companionId -> sessionId -> emotion state
 
 ```txt
 EmotionEngine 抽象
+EmotionDebugMetadata / EmotionTransitionRule
 ModelEmotionEngine 实现
 伴侣意向情绪推断 Prompt
 情绪状态转移规则
@@ -314,14 +320,30 @@ affectionate 亲近、依恋、撒娇、温柔（安慰、陪伴时的主情绪�
 
 ### 5.2 情绪状态结构
 
-沿用当前 `EmotionState`：
+在阶段 5 将 `metadata` 类型化为 `EmotionDebugMetadata`，避免 `Record<string, unknown>` 导致 TS 推断失控。
 
 ```ts
+export type EmotionTransitionRule =
+  | "fallback"
+  | "strong_override"
+  | "neutral_decay"
+  | "same_emotion_boost"
+  | "switch";
+
+/** 仅用于调试与 Observer，不作为持久化或业务 API 的稳定字段。 */
+export interface EmotionDebugMetadata {
+  confidence?: number;
+  reason?: string;
+  transitionRule?: EmotionTransitionRule;
+  failed?: boolean;
+  failureReason?: string;
+}
+
 export interface EmotionState {
   current: EmotionType;
   intensity: number;
   updatedAt?: Date;
-  metadata?: Record<string, unknown>;
+  metadata?: EmotionDebugMetadata;
 }
 ```
 
@@ -331,7 +353,7 @@ export interface EmotionState {
 current   伴侣当前情绪类型（对用户的情绪状态）
 intensity 情绪强度，范围 0～1
 updatedAt 状态更新时间
-metadata  调试信息或扩展信息，不作为稳定业务字段
+metadata  EmotionDebugMetadata，仅调试；宿主持久化时只存 current / intensity / updatedAt
 ```
 
 ### 5.3 intensity 约束
@@ -366,22 +388,59 @@ Math.min(1, Math.max(0, intensity));
 }
 ```
 
+### 5.5 输入类型（阶段 5 补齐）
+
+`EmotionAnalyzeInput` 不能只传 `message`。像「你昨天都不理我」这类指代，需要 history / persona / 召回记忆辅助推断。
+
+```ts
+import type { ChatMessage } from "./model";
+import type { CompanionPersona } from "./persona";
+import type { RecalledMemory } from "./memory";
+
+export interface EmotionAnalyzeInput {
+  sessionId?: string;
+  message: string;
+  /** 短期历史（不含本轮 message）；Workflow 建议传 trim 后的 recentHistory，默认最多 6 条。 */
+  history?: ChatMessage[];
+  /** 已加载的 Persona；Workflow 在 persona.load 之后传入。 */
+  persona?: CompanionPersona;
+  /** 本轮 recall 结果；无召回时可省略或传空数组。 */
+  recalledMemories?: RecalledMemory[];
+  previous?: EmotionState;
+}
+```
+
+`EmotionTransitionInput` 为纯确定性计算，字段写死，不使用 `any` 或松散 metadata：
+
+```ts
+export interface EmotionTransitionInput {
+  previous: EmotionState;
+  detected: EmotionState;
+  /** 状态更新时间；默认 `new Date()`。 */
+  now?: Date;
+}
+```
+
+`previous` / `detected` / `next` 的完整快照放在 Observer payload；`EmotionState.metadata` 只放单状态上的调试字段（`confidence`、`transitionRule` 等），避免循环嵌套。
+
 ---
 
 ## 六、EmotionEngine 设计
 
 ### 6.1 当前抽象
 
-当前已有接口：
+阶段 5 对抽象做**向后兼容的收紧**（尚未接入 Workflow，改动成本低）：
 
 ```ts
 export interface EmotionEngine extends CoreProvider {
+  /** 异步：需要调 LLM 推断意向情绪。 */
   analyze(input: EmotionAnalyzeInput): Promise<EmotionState>;
-  transition(input: EmotionTransitionInput): Promise<EmotionState>;
+  /** 同步：纯规则计算，不调用模型、不读外部状态。 */
+  transition(input: EmotionTransitionInput): EmotionState;
 }
 ```
 
-本阶段优先不破坏该接口。
+`transition` **不得**返回 `Promise`。实现类内部直接调用 `transitionEmotion(input)` 同步返回即可；`DisabledEmotionEngine` 同样改为同步。
 
 ### 6.2 实现类
 
@@ -486,8 +545,10 @@ const core = createCompanionCore({
 {
   sessionId,
   message,
+  history,           // 建议传入
+  persona,           // 建议传入
+  recalledMemories,  // 可选
   previous,
-  metadata,
 }
 ```
 
@@ -553,7 +614,8 @@ neutral, happy, sad, angry, anxious, affectionate
 2. 用户难过或焦虑时，优先 affectionate / sad / anxious，以陪伴和关切为主；
 3. 用户开心时，可用 happy / affectionate；
 4. angry 仅在你作为伴侣确实需要表达不满时使用，对用户发火时应极少出现；
-5. 可参考 previous 情绪保持连续性，但以本轮消息为主。
+5. 可参考 previous 情绪保持连续性，但以本轮消息为主；
+6. 会提供近期对话历史、角色设定与相关长期记忆，请结合上下文理解指代（如「你昨天都不理我」）。
 
 请输出 JSON：
 {
@@ -588,7 +650,7 @@ metadata 中记录：
 ```ts
 {
   failed: true,
-  reason: "schema_parse_failed",
+  failureReason: "schema_parse_failed",
 }
 ```
 
@@ -716,20 +778,21 @@ export function transitionEmotion(input: EmotionTransitionInput): EmotionState;
 
 ### 8.5 metadata
 
-`transition` 输出建议包含：
+`transition` 在返回的 `EmotionState.metadata` 中建议包含：
 
 ```ts
 metadata: {
-  previous,
-  detected,
-  transitionRule:
-    "fallback" | "strong_override" | "neutral_decay" | "same_emotion_boost" | "switch",
+  transitionRule: "strong_override", // EmotionTransitionRule
 }
 ```
 
+`detected` 上的 `confidence` / `reason` 由 `analyze` 写入，不重复塞进 `next.metadata`。
+
+Observer `emotion:analyze:end` payload 承载三分法快照（`previous` / `detected` / `next`），与 `EmotionState.metadata` 分工明确。
+
 `transitionRule` 取值与 §8.2 优先级顺序对应。
 
-metadata 仅用于调试，不作为稳定业务字段。
+metadata 仅用于调试，不作为稳定业务字段；宿主持久化时忽略 `metadata`。
 
 ---
 
@@ -900,10 +963,18 @@ Workflow 中建议区分：
 
 ```ts
 const previousEmotion = input.emotion ?? defaultEmotion;
-const detectedEmotion = await emotion.analyze(...); // 伴侣意向情绪（Intention）
-const nextEmotion = await emotion.transition({
+const detectedEmotion = await emotion.analyze({
+  sessionId: input.sessionId,
+  message: input.message,
+  history: recentHistory,
+  persona: loadedPersona,
+  recalledMemories,
+  previous: previousEmotion,
+});
+const nextEmotion = emotion.transition({
   previous: previousEmotion,
   detected: detectedEmotion,
+  now: new Date(),
 });
 ```
 
@@ -938,13 +1009,16 @@ try {
   detectedEmotion = await core.emotion.analyze({
     sessionId: input.sessionId,
     message: input.message,
+    history: recentHistory,
+    persona: loadedPersona,
+    recalledMemories,
     previous: nextEmotion,
-    metadata: input.metadata,
   });
 
-  nextEmotion = await core.emotion.transition({
+  nextEmotion = core.emotion.transition({
     previous: nextEmotion,
     detected: detectedEmotion,
+    now: new Date(),
   });
 
   await observer.emit({
@@ -1070,19 +1144,26 @@ packages/ai-core/README.md
 
 ## 十二、具体实施任务
 
-### 任务 1：确认并补齐 Emotion 抽象
+### 任务 1：补齐 Emotion 抽象与类型
 
 #### 目标
 
-确保当前 `EmotionEngine` 抽象足够支撑阶段 5。
+确保 `EmotionEngine` 抽象足够支撑阶段 5，并提升 TS 友好度。
 
 #### 要做
 
-检查：
+修改：
 
 ```txt
 packages/ai-core/src/abstractions/emotion.ts
 ```
+
+1. 新增 `EmotionTransitionRule`、`EmotionDebugMetadata`；
+2. `EmotionState.metadata` 改为 `EmotionDebugMetadata`；
+3. 扩展 `EmotionAnalyzeInput`：`history?`、`persona?`、`recalledMemories?`；
+4. 明确 `EmotionTransitionInput`：`previous`、`detected`、`now?`；
+5. `EmotionEngine.transition` 返回 `EmotionState`（同步，非 `Promise`）；
+6. 同步修改 `DisabledEmotionEngine`（`transition` 改同步）。
 
 确认已有：
 
@@ -1094,13 +1175,12 @@ EmotionTransitionInput;
 EmotionEngine;
 ```
 
-如果需要，只做向后兼容补充，不要破坏已有字段。
-
 #### 完成标准
 
 1. 类型导出正常；
-2. 不影响已有调用；
-3. `pnpm --filter @ying-companion/ai-core build` 通过。
+2. `transition` 签名为同步；
+3. 不影响除 `DisabledEmotionEngine` 外的已有调用；
+4. `pnpm --filter @ying-companion/ai-core build` 通过。
 
 ---
 
@@ -1208,7 +1288,15 @@ export class ModelEmotionEngine implements EmotionEngine
 
 ```txt
 analyze -> model.generate（含 retryCount / timeoutMs）-> parseEmotionAnalysis -> EmotionState
-transition -> transitionEmotion
+transition -> transitionEmotion（同步，直接 return）
+```
+
+`ModelEmotionEngine.transition` 实现为：
+
+```ts
+public transition(input: EmotionTransitionInput): EmotionState {
+  return transitionEmotion(input);
+}
 ```
 
 #### 关键约束
@@ -1691,6 +1779,35 @@ emotion_states
 
 但这不属于阶段 5。
 
+### 15.4 V1.1 性能优化方向（非本阶段，非阻塞）
+
+V1 阶段 5 采用独立 `emotion.analyze` 调用，单轮至少涉及：
+
+```txt
+Emotion analyze     1× LLM
+Main generate       1× LLM
+Memory extract      1× LLM
+（另加 embedding 调用）
+```
+
+这是可接受的 V1 权衡：情绪推断与主回复解耦、可单独降级、Prompt 更可控。
+
+**V1.1 可选优化**（本阶段不实现，仅预留方向）：
+
+1. **结构化合并输出**：主 `generate` 使用 `generateObject` / 结构化 JSON，一次返回 `{ reply, emotion }`，省掉独立 analyze 调用；
+2. **Tool 回调**：主模型通过 `set_emotion` 类 tool 声明情绪，由 Workflow 解析后走 `transition`；
+3. **条件跳过**：`DisabledEmotionEngine` 或宿主配置关闭时，零额外 LLM 成本。
+
+选择上述方案时须保留：
+
+```txt
+EmotionEngine 插槽
+transitionEmotion 纯函数
+宿主持久化 nextEmotion
+```
+
+即优化的是「如何得到 detected」，不是推翻状态机边界。
+
 ---
 
 ## 十六、风险与注意事项
@@ -1713,7 +1830,7 @@ Memory.recall embedding
 + Memory save embedding
 ```
 
-因此 demo 可以默认启用，正式产品未来需要配置开关。
+因此 demo 可以默认启用，正式产品未来需要配置开关。合并 analyze 的 V1.1 方向见 §15.4。
 
 V1 先按串行接入（Summary.load → Memory.recall → Emotion.analyze）。`03-plan` 阶段 7 提到 Persona.load / Memory.recall / Emotion.analyze 之间无数据依赖、可并行以压缩延迟；该优化不属于阶段 5 必做项，留待阶段 7 编排层统一处理。
 
@@ -1744,17 +1861,17 @@ Prompt 中要避免：
 你有抑郁倾向
 ```
 
-### 16.4 metadata 不作为稳定业务字段
+### 16.4 EmotionDebugMetadata 与持久化边界
 
-`EmotionState.metadata` 可以用于 demo 展示，但未来不要把它当稳定数据库字段设计依据。
-
-稳定字段只有：
+`EmotionState.metadata`（`EmotionDebugMetadata`）仅用于 demo / Observer 调试，**宿主持久化时只存**：
 
 ```txt
 current
 intensity
 updatedAt
 ```
+
+不要把 `confidence`、`transitionRule`、`failureReason` 等写入业务库，除非未来单独设计调试表。
 
 ---
 
@@ -1842,10 +1959,13 @@ Memory.save
 
 ```txt
 [ ] ai-core build 通过
+[ ] EmotionDebugMetadata / EmotionTransitionRule 已类型化
+[ ] EmotionAnalyzeInput 含 history / persona / recalledMemories
+[ ] EmotionEngine.transition 为同步函数
 [ ] ModelEmotionEngine 可被导入
 [ ] createCompanionCore 可注入 emotion
 [ ] SimpleChatWorkflow 会调用 emotion.analyze
-[ ] SimpleChatWorkflow 会调用 emotion.transition
+[ ] SimpleChatWorkflow 会调用 emotion.transition（无 await）
 [ ] result.emotion 返回 nextEmotion
 [ ] debugContext 中能看到 emotionContext
 [ ] Observer 中能看到 emotion:analyze:start/end
