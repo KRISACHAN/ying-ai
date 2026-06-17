@@ -3,11 +3,13 @@ import {
   createModel,
   DefaultPersonaProvider,
   InMemorySummaryProvider,
+  ModelEmotionEngine,
   ModelRuntimeError,
   type ChatMessage,
   type ChatWorkflowOutput,
   type CoreEvent,
   type CoreObserver,
+  type EmotionState,
   type MemoryScope,
   type SummaryOptions,
 } from "@ying-companion/ai-core";
@@ -35,6 +37,7 @@ interface ChatRequestScope {
 interface ChatRequestBody {
   message: string;
   history?: ChatMessage[];
+  emotion?: EmotionState;
   sessionId?: string;
   scope?: ChatRequestScope;
   summaryOptions?: SummaryOptions;
@@ -102,6 +105,12 @@ function validateRequestBody(raw: unknown): string | null {
   }
   if (body.sessionId !== undefined && typeof body.sessionId !== "string") {
     return "sessionId 必须是字符串";
+  }
+  if (body.emotion !== undefined) {
+    const emotionError = validateEmotion(body.emotion);
+    if (emotionError !== null) {
+      return emotionError;
+    }
   }
   if (body.scope !== undefined) {
     if (typeof body.scope !== "object" || body.scope === null) {
@@ -174,6 +183,7 @@ export async function POST(request: Request): Promise<Response> {
     const core = createCompanionCore({
       model,
       observer,
+      emotion: new ModelEmotionEngine({ model }),
       memory: memoryRuntime.provider,
       summary: demoSummaryProvider,
       // 仅 demo 默认值：性别可改，不代表产品固定角色（见阶段 2 §八）。
@@ -220,6 +230,7 @@ export async function POST(request: Request): Promise<Response> {
       sessionId,
       message: body.message,
       history: body.history ?? [],
+      ...(body.emotion !== undefined ? { emotion: normalizeEmotion(body.emotion) } : {}),
       scope,
       conversationId: sessionId,
       summaryOptions,
@@ -236,6 +247,7 @@ export async function POST(request: Request): Promise<Response> {
           memoryExtractor: inspection.providers.memoryExtractor,
           summaryProvider: inspection.providers.summary,
           summaryUpdater: inspection.providers.summaryUpdater,
+          emotionProvider: inspection.providers.emotion,
         },
       },
       observerEvents: serializeEvents(observer.events),
@@ -249,6 +261,42 @@ export async function POST(request: Request): Promise<Response> {
       observerEvents: serializeEvents(observer.events),
     });
   }
+}
+
+function validateEmotion(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) {
+    return "emotion 必须是对象";
+  }
+
+  const emotion = raw as Record<string, unknown>;
+  const allowedTypes = ["neutral", "happy", "sad", "angry", "anxious", "affectionate"];
+
+  if (!allowedTypes.includes(emotion.current as string)) {
+    return "emotion.current 非法";
+  }
+  if (typeof emotion.intensity !== "number" || !Number.isFinite(emotion.intensity)) {
+    return "emotion.intensity 必须是数字";
+  }
+  if (emotion.intensity < 0 || emotion.intensity > 1) {
+    return "emotion.intensity 必须在 0 到 1 之间";
+  }
+  if (
+    emotion.updatedAt !== undefined &&
+    typeof emotion.updatedAt !== "string" &&
+    !(emotion.updatedAt instanceof Date)
+  ) {
+    return "emotion.updatedAt 必须是 ISO 字符串";
+  }
+
+  return null;
+}
+
+function normalizeEmotion(emotion: EmotionState): EmotionState {
+  return {
+    current: emotion.current,
+    intensity: Math.min(1, Math.max(0, emotion.intensity)),
+    ...(emotion.updatedAt !== undefined ? { updatedAt: new Date(emotion.updatedAt) } : {}),
+  };
 }
 
 function serializeEvents(events: CoreEvent[]): SerializedCoreEvent[] {

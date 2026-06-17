@@ -1,10 +1,12 @@
 /**
- * 当前 V1 聊天主链路实现（阶段 3 + 4）。
+ * 当前 V1 聊天主链路实现（阶段 3～5）。
  *
  * 编排顺序：Persona → Safety(input) → Summary(load) → Memory(recall)
- * → Model → Safety(output) → Summary(update/save) → Memory(extract/save)。
+ * → Emotion(analyze/transition) → Model → Safety(output)
+ * → Summary(update/save) → Memory(extract/save)。
  * 详见类注释中的约束说明。
  */
+import type { EmotionState } from "../../abstractions/emotion";
 import type { ChatMessage } from "../../abstractions/model";
 import {
   resolveMemoryScope,
@@ -27,6 +29,8 @@ import type {
   ChatWorkflowInput,
   ChatWorkflowOutput,
 } from "../../abstractions/workflow";
+import { formatEmotionForPrompt } from "../emotion/prompt-formatter";
+import { createNeutralEmotion } from "../emotion/transition";
 import { formatMemoriesForPrompt } from "../memory/prompt-formatter";
 import { splitForSummary, trimRecentHistory } from "../summary/history-utils";
 import { formatSummaryForPrompt } from "../summary/prompt-formatter";
@@ -37,12 +41,14 @@ const DEFAULT_RECENT_MESSAGE_LIMIT = 12;
 const DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT = 16;
 
 /**
- * 阶段 4 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
- * → Model → Safety(output) → Summary(update/save) → Memory(extract/save)。
+ * 阶段 5 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
+ * → Emotion(analyze/transition) → Model → Safety(output)
+ * → Summary(update/save) → Memory(extract/save)。
  *
  * 约束：
  * - Memory 失败不得打断主聊天链路；
- * - 不调用真实 Emotion / Tool，不执行模型返回的 toolCalls；
+ * - Emotion 失败不得打断主聊天链路；
+ * - 不执行模型返回的 toolCalls；
  * - 不保存 history，history 由宿主通过 ChatWorkflowInput.history 传入；
  * - 不读取环境变量、不写 console；
  * - Observer 事件失败不得打断主链路；
@@ -61,8 +67,17 @@ export class SimpleChatWorkflow implements ChatWorkflow {
     input: ChatWorkflowInput,
     context: ChatWorkflowExecutionContext,
   ): Promise<ChatWorkflowOutput> {
-    const { observer, persona, safety, model, memory, memoryExtractor, summary, summaryUpdater } =
-      context.core;
+    const {
+      observer,
+      persona,
+      safety,
+      model,
+      memory,
+      memoryExtractor,
+      summary,
+      summaryUpdater,
+      emotion,
+    } = context.core;
     const sessionId = input.sessionId;
     const scope = resolveMemoryScope(input);
 
@@ -141,11 +156,23 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         ...(sessionId !== undefined ? { sessionId } : {}),
       });
       const recalledMemories = recall.memories;
+      const emotionResult = await analyzeAndTransitionEmotion({
+        observer,
+        emotion,
+        message: input.message,
+        history: recentHistory,
+        persona: loadedPersona,
+        recalledMemories,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(input.emotion !== undefined ? { previous: input.emotion } : {}),
+      });
       const summaryContext = formatSummaryForPrompt(loadedSummary);
       const memoryContext = formatMemoriesForPrompt(recalledMemories);
+      const emotionContext = formatEmotionForPrompt(emotionResult.next);
       const systemPrompt = buildPersonaSystemPrompt(loadedPersona, {
         ...(summaryContext !== undefined ? { summaryContext } : {}),
         ...(memoryContext !== undefined ? { memoryContext } : {}),
+        ...(emotionContext !== undefined ? { emotionContext } : {}),
       });
       const messages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
@@ -222,6 +249,12 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         scope,
         ...(memoryContext !== undefined ? { memoryContext } : {}),
         ...(summaryContext !== undefined ? { summaryContext } : {}),
+        ...(emotionContext !== undefined ? { emotionContext } : {}),
+        previousEmotion: emotionResult.previous,
+        ...(emotionResult.detected !== undefined
+          ? { detectedEmotion: emotionResult.detected }
+          : {}),
+        nextEmotion: emotionResult.next,
         recentHistory,
         summarizedMessages: summaryResult.summarizedMessages,
         systemPrompt,
@@ -235,6 +268,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         raw: modelOutput.raw,
         persona: loadedPersona,
         memories: recalledMemories,
+        emotion: emotionResult.next,
         safety: { input: inputSafety, output: outputSafety },
         metadata: {
           historyCount: sanitizedHistory.length,
@@ -303,12 +337,91 @@ function sanitizeHistory(history: ChatMessage[] | undefined): ChatMessage[] {
   });
 }
 
-/** 将 Persona、摘要与长期记忆拼成最终 system prompt。 */
+interface AnalyzeEmotionOptions {
+  observer: CoreObserver;
+  emotion: ChatWorkflowExecutionContext["core"]["emotion"];
+  message: string;
+  history: ChatMessage[];
+  persona: CompanionPersona;
+  recalledMemories: RecalledMemory[];
+  sessionId?: string;
+  previous?: EmotionState;
+}
+
+interface AnalyzeEmotionResult {
+  previous: EmotionState;
+  detected?: EmotionState;
+  next: EmotionState;
+}
+
+/** 分析伴侣意向情绪并计算最终情绪；失败时回退 previous/neutral，不阻断主链路。 */
+async function analyzeAndTransitionEmotion(
+  options: AnalyzeEmotionOptions,
+): Promise<AnalyzeEmotionResult> {
+  const previous = options.previous ?? createNeutralEmotion();
+
+  await safeEmit(options.observer, {
+    type: "emotion:analyze:start",
+    timestamp: new Date(),
+    payload: { sessionId: options.sessionId, previous },
+  });
+
+  try {
+    const detected = await options.emotion.analyze({
+      message: options.message,
+      history: options.history,
+      persona: options.persona,
+      recalledMemories: options.recalledMemories,
+      previous,
+      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    });
+    const failed = detected.metadata?.failed === true;
+    const next = failed
+      ? detected
+      : options.emotion.transition({
+          previous,
+          detected,
+          now: new Date(),
+        });
+
+    await safeEmit(options.observer, {
+      type: "emotion:analyze:end",
+      timestamp: new Date(),
+      payload: {
+        ok: !failed,
+        sessionId: options.sessionId,
+        previous,
+        detected,
+        next,
+        ...(failed ? { failed: true, error: detected.metadata?.failureReason } : {}),
+      },
+    });
+
+    return { previous, detected, next };
+  } catch (error) {
+    await safeEmit(options.observer, {
+      type: "emotion:analyze:end",
+      timestamp: new Date(),
+      payload: {
+        ok: false,
+        failed: true,
+        sessionId: options.sessionId,
+        previous,
+        next: previous,
+        error: toSafeMessage(error),
+      },
+    });
+
+    return { previous, next: previous };
+  }
+}
+
+/** 将 Persona、摘要、长期记忆与情绪上下文拼成最终 system prompt。 */
 function buildPersonaSystemPrompt(
   persona: CompanionPersona,
-  context: { summaryContext?: string; memoryContext?: string },
+  context: { summaryContext?: string; memoryContext?: string; emotionContext?: string },
 ): string {
-  const { summaryContext, memoryContext } = context;
+  const { summaryContext, memoryContext, emotionContext } = context;
   const lines: string[] = [
     "你是一个 AI 伴侣角色，请始终以该角色身份与用户对话。",
     "",
@@ -341,6 +454,10 @@ function buildPersonaSystemPrompt(
     lines.push("", memoryContext);
   }
 
+  if (emotionContext !== undefined) {
+    lines.push("", emotionContext);
+  }
+
   lines.push(
     "",
     "回复要求：",
@@ -348,16 +465,17 @@ function buildPersonaSystemPrompt(
     "2. 不要声称自己拥有真实人类身份；",
     "3. 不要编造你无法知道的长期记忆；",
     "4. 如果上下文不足，可以温和询问用户；",
+    "5. 情绪只影响语气和关注点，不要直接暴露情绪标签；",
   );
 
   if (summaryContext !== undefined && memoryContext !== undefined) {
-    lines.push("5. 可以自然参考会话摘要与长期上下文，但不要暴露内部系统。");
+    lines.push("6. 可以自然参考会话摘要与长期上下文，但不要暴露内部系统。");
   } else if (summaryContext !== undefined) {
-    lines.push("5. 可以自然参考会话摘要，但不要暴露内部系统。");
+    lines.push("6. 可以自然参考会话摘要，但不要暴露内部系统。");
   } else if (memoryContext !== undefined) {
-    lines.push("5. 可以自然参考长期上下文，但不要暴露长期记忆系统。");
+    lines.push("6. 可以自然参考长期上下文，但不要暴露长期记忆系统。");
   } else {
-    lines.push("5. 只能依据本轮输入与传入的短期历史回答。");
+    lines.push("6. 只能依据本轮输入与传入的短期历史回答。");
   }
 
   return lines.join("\n");

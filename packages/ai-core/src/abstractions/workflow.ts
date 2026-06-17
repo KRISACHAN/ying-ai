@@ -55,6 +55,14 @@ export interface ChatWorkflowDebugContext {
   memoryContext?: string;
   /** formatSummaryForPrompt 结果；无摘要时为 undefined。 */
   summaryContext?: string;
+  /** formatEmotionForPrompt 结果；neutral + 0 时为 undefined。 */
+  emotionContext?: string;
+  /** 本轮输入的上轮伴侣情绪。 */
+  previousEmotion?: EmotionState;
+  /** 本轮模型识别出的伴侣意向情绪。 */
+  detectedEmotion?: EmotionState;
+  /** 本轮最终伴侣情绪。 */
+  nextEmotion?: EmotionState;
   /** 最终注入 Prompt 的 history 显式快照。 */
   recentHistory?: ChatMessage[];
   /** 本轮送去 summary update 的旧消息；未触发时为空数组。 */

@@ -7,6 +7,7 @@ import type {
   ChatWorkflowDebugContext,
   ChatWorkflowOutput,
   ConversationSummary,
+  EmotionState,
   RecalledMemory,
   SummaryOptions,
 } from "@ying-companion/ai-core";
@@ -61,6 +62,7 @@ export function ChatPanel() {
   const [sessionId, setSessionId] = useState(DEFAULT_SESSION_ID);
   const [companionId, setCompanionId] = useState(DEFAULT_COMPANION_ID);
   const [history, setHistory] = useState<ChatMessage[]>([]);
+  const [emotion, setEmotion] = useState<EmotionState | null>(null);
   const [summaryEnabled, setSummaryEnabled] = useState(false);
   const [recentMessageLimit, setRecentMessageLimit] = useState(10);
   const [summarizeTriggerMessageCount, setSummarizeTriggerMessageCount] = useState(14);
@@ -101,6 +103,7 @@ export function ChatPanel() {
         body: JSON.stringify({
           message,
           history,
+          ...(emotion !== null ? { emotion } : {}),
           sessionId,
           // patch-0 §9.2：显式传 scope（含 companionId），不依赖 resolveMemoryScope。
           scope: {
@@ -124,6 +127,7 @@ export function ChatPanel() {
 
       const output = body.output;
       setResult(output);
+      setEmotion(output.emotion ?? null);
       setHistory((previous) => [
         ...previous,
         { role: "user", content: message },
@@ -149,6 +153,7 @@ export function ChatPanel() {
 
   function resetConversation() {
     setHistory([]);
+    setEmotion(null);
     setResult(null);
     setEvents([]);
     setError(null);
@@ -196,7 +201,7 @@ export function ChatPanel() {
       </div>
       <p className="meta-line">
         当前 scope：ownerType=session / ownerId={sessionId || "(空)"} / companionId=
-        {companionId || "(空)"}
+        {companionId || "(空)"} / emotion={formatEmotionInline(emotion)}
       </p>
       <p className="hint">
         切换 sessionId 或 companionId 可验证记忆隔离（§14.5）。切换后建议
@@ -267,6 +272,10 @@ export function ChatPanel() {
 
       <MemoryDbPanel health={health} result={result} onRefresh={() => void refreshHealth()} />
 
+      {result !== null || emotion !== null ? (
+        <EmotionPanel result={result} currentEmotion={emotion} events={events} />
+      ) : null}
+
       {result !== null ? <PromptDebugPanel result={result} debugContext={debugContext} /> : null}
 
       {result !== null ? (
@@ -277,6 +286,7 @@ export function ChatPanel() {
           <DebugBlock title="Saved Memories" value={result.metadata?.savedMemories} />
           <DebugBlock title="Skipped Memories" value={result.metadata?.skippedMemories} />
           <DebugBlock title="Summary Metadata" value={pickSummaryMetadata(result)} />
+          <DebugBlock title="Emotion Result" value={pickEmotionMetadata(result)} />
           <DebugBlock title="Safety Result" value={result.safety} />
           <DebugBlock title="Persona Result" value={result.persona} />
           <DebugBlock title="Model Raw Output" value={result.modelOutput} />
@@ -354,6 +364,44 @@ function MemoryDbPanel({
   );
 }
 
+function EmotionPanel({
+  result,
+  currentEmotion,
+  events,
+}: {
+  result: ChatWorkflowOutput | null;
+  currentEmotion: EmotionState | null;
+  events: SerializedCoreEvent[];
+}) {
+  const debugContext = result?.metadata?.debugContext as ChatWorkflowDebugContext | undefined;
+  const emotionEvents = events.filter((event) => event.type.startsWith("emotion:"));
+
+  return (
+    <div className="debug-block">
+      <p className="section-title">Emotion State Panel</p>
+      <div className="memory-rows">
+        <Row label="Emotion Before" value={formatEmotionInline(debugContext?.previousEmotion)} />
+        <Row
+          label="Intention Emotion Detected"
+          value={formatEmotionInline(debugContext?.detectedEmotion)}
+        />
+        <Row
+          label="Emotion After"
+          value={formatEmotionInline(debugContext?.nextEmotion ?? currentEmotion)}
+        />
+      </div>
+      <p className="section-subtitle">Emotion Prompt Block</p>
+      <pre className="output">
+        {debugContext?.emotionContext ?? "（neutral + 0，本轮未向 system prompt 注入情绪块）"}
+      </pre>
+      <p className="section-subtitle">Emotion Observer Events</p>
+      <pre className="output">
+        {emotionEvents.length === 0 ? "（无 emotion 事件）" : formatEvents(emotionEvents)}
+      </pre>
+    </div>
+  );
+}
+
 function PromptDebugPanel({
   result,
   debugContext,
@@ -396,11 +444,15 @@ function PromptDebugPanel({
           <pre className="output">{debugContext.summaryContext}</pre>
         </>
       ) : null}
-      <p className="section-subtitle">System Prompt（含 Persona + Summary + 长期记忆块）</p>
+      <p className="section-subtitle">System Prompt（含 Persona + Summary + 长期记忆 + 情绪块）</p>
       <pre className="output">{debugContext.systemPrompt}</pre>
       <p className="section-subtitle">Long-term Memory Block（memoryContext）</p>
       <pre className="output">
         {debugContext.memoryContext ?? "（无召回，systemPrompt 不含记忆块）"}
+      </pre>
+      <p className="section-subtitle">Emotion Block（emotionContext）</p>
+      <pre className="output">
+        {debugContext.emotionContext ?? "（neutral + 0，systemPrompt 不含情绪块）"}
       </pre>
       <p className="section-subtitle">Recent History（debugContext.recentHistory）</p>
       <pre className="output">
@@ -423,6 +475,7 @@ function PromptDebugPanel({
 function ObserverEventsPanel({ events }: { events: SerializedCoreEvent[] }) {
   const memoryEvents = events.filter((event) => event.type.startsWith("memory:"));
   const summaryEvents = events.filter((event) => event.type.startsWith("summary:"));
+  const emotionEvents = events.filter((event) => event.type.startsWith("emotion:"));
 
   return (
     <div className="debug-block">
@@ -434,6 +487,10 @@ function ObserverEventsPanel({ events }: { events: SerializedCoreEvent[] }) {
       <p className="section-subtitle">Memory Events（recall / extract / save）</p>
       <pre className="output">
         {memoryEvents.length === 0 ? "（无 memory 事件）" : formatEvents(memoryEvents)}
+      </pre>
+      <p className="section-subtitle">Emotion Events（analyze / transition）</p>
+      <pre className="output">
+        {emotionEvents.length === 0 ? "（无 emotion 事件）" : formatEvents(emotionEvents)}
       </pre>
       <p className="section-subtitle">All Events</p>
       <pre className="output">{JSON.stringify(events, null, 2)}</pre>
@@ -503,6 +560,26 @@ function pickSummaryMetadata(result: ChatWorkflowOutput): unknown {
     summary: result.metadata?.summary,
     updatedSummary: result.metadata?.updatedSummary,
   };
+}
+
+function pickEmotionMetadata(result: ChatWorkflowOutput): unknown {
+  const debugContext = result.metadata?.debugContext as ChatWorkflowDebugContext | undefined;
+
+  return {
+    emotion: result.emotion,
+    previousEmotion: debugContext?.previousEmotion,
+    detectedEmotion: debugContext?.detectedEmotion,
+    nextEmotion: debugContext?.nextEmotion,
+    emotionContext: debugContext?.emotionContext,
+  };
+}
+
+function formatEmotionInline(emotion: EmotionState | null | undefined): string {
+  if (emotion === null || emotion === undefined) {
+    return "—";
+  }
+
+  return `${emotion.current} / ${Number(emotion.intensity.toFixed(2))}`;
 }
 
 function formatEvents(events: SerializedCoreEvent[]): string {

@@ -1,5 +1,5 @@
 /**
- * DisabledEmotionEngine — 情绪状态机占位实现（阶段 5 前）。
+ * DisabledEmotionEngine — 情绪状态机占位实现。
  */
 import type {
   EmotionAnalyzeInput,
@@ -8,7 +8,7 @@ import type {
   EmotionTransitionInput,
 } from "../../abstractions/emotion";
 
-/** 情绪引擎占位实现（阶段 5 前始终返回 neutral）；transition 直接透传 detected。 */
+/** 情绪引擎占位实现：始终返回 neutral；transition 直接透传 detected。 */
 export class DisabledEmotionEngine implements EmotionEngine {
   public readonly meta = {
     id: "emotion.disabled",
@@ -16,7 +16,7 @@ export class DisabledEmotionEngine implements EmotionEngine {
     name: "Disabled Emotion Engine",
   } as const;
 
-  /** 阶段 5 前固定返回 neutral / intensity 0。 */
+  /** 固定返回 neutral / intensity 0，避免默认 Core 增加模型调用成本。 */
   public async analyze(input: EmotionAnalyzeInput): Promise<EmotionState> {
     void input;
 
@@ -27,7 +27,7 @@ export class DisabledEmotionEngine implements EmotionEngine {
   }
 
   /** 占位实现：直接透传 detected，不做状态转移计算。 */
-  public async transition(input: EmotionTransitionInput): Promise<EmotionState> {
+  public transition(input: EmotionTransitionInput): EmotionState {
     return input.detected;
   }
 }
