@@ -230,6 +230,8 @@ packages/ai-core
 示意：
 
 ```ts
+import { Pool } from "pg";
+
 const embeddingProvider = new OpenAIEmbeddingProvider({
   apiKey: process.env.OPENAI_API_KEY!,
   baseUrl: process.env.OPENAI_BASE_URL,
@@ -253,7 +255,8 @@ const core = createCompanionCore({ model, memory });
 
 ```txt
 读取 env → Demo 应用
-连接 PostgreSQL → memory-postgres
+创建 PostgreSQL Pool → Demo 应用（调用方）
+传入 Pool → PostgresMemoryProvider（memory-postgres 适配器）
 调用 MemoryProvider → ai-core workflow
 ```
 
