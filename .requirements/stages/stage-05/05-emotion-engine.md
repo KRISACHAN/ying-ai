@@ -22,7 +22,7 @@
 这里的“情绪状态机”不是复杂剧情系统，也不是好感度系统，而是让 Core 在单轮对话中具备以下能力：
 
 ```txt
-识别用户本轮情绪倾向
+根据用户本轮消息，推断伴侣此刻应有的情绪反应（意向情绪）
 ↓
 结合上轮伴侣情绪状态
 ↓
@@ -35,6 +35,13 @@
 把新情绪状态返回给宿主保存
 ```
 
+语义约定（V1 写死）：
+
+```txt
+EmotionState 始终表示「伴侣对用户的情绪状态」，不是对用户的心理诊断。
+analyze 输出的是「伴侣面对本轮消息时的意向情绪（detected）」，不是用户情绪标签。
+```
+
 阶段 5 完成后，Core 将具备最小情绪连续性，但仍然保持纯 SDK，不读取环境变量、不连接数据库、不保存用户状态。
 
 ---
@@ -44,13 +51,13 @@
 阶段 5 要完成的是：
 
 ```txt
-情绪识别 + 情绪转移 + Prompt 注入 + 状态交接
+伴侣意向情绪推断 + 情绪转移 + Prompt 注入 + 状态交接
 ```
 
 具体包括：
 
 1. 保留并完善 `EmotionEngine` 抽象；
-2. 实现基于模型的情绪识别；
+2. 实现基于模型的伴侣意向情绪推断（`analyze`）；
 3. 实现确定性的情绪转移规则；
 4. 将情绪状态注入 `SimpleChatWorkflow` 的 Prompt；
 5. 通过 `CoreObserver` 暴露情绪分析过程；
@@ -78,7 +85,7 @@
 10. `SimpleChatWorkflow` 在生成前调用 `emotion.analyze` 与 `emotion.transition`；
 11. 情绪结果注入 system prompt；
 12. `ChatWorkflowOutput.emotion` 返回本轮最终情绪；
-13. 调试 UI 可以展示：上一轮情绪、本轮检测情绪、本轮最终情绪；
+13. 调试 UI 可以展示：上一轮情绪（Before）、本轮意向情绪（Intention / Detected）、本轮最终情绪（After）；
 14. Core 内不写死 console，所有可观测信息走 `CoreObserver`；
 15. 阶段 4 的记忆 recall / extract / save 流程仍然正常。
 
@@ -93,8 +100,8 @@
 需要完成：
 
 1. 实现 `ModelEmotionEngine`；
-2. 实现情绪分析 Prompt；
-3. 实现情绪分析结果 schema；
+2. 实现伴侣意向情绪推断 Prompt；
+3. 实现意向情绪分析结果 schema；
 4. 实现情绪转移规则；
 5. 实现情绪 prompt formatter；
 6. 在 `SimpleChatWorkflow` 中接入情绪调用点；
@@ -182,7 +189,7 @@ userId + companionId -> sessionId -> emotion state
 ```txt
 EmotionEngine 抽象
 ModelEmotionEngine 实现
-情绪识别 Prompt
+伴侣意向情绪推断 Prompt
 情绪状态转移规则
 情绪 Prompt Formatter
 Observer 事件
@@ -215,7 +222,7 @@ process.env.OPENAI_API_KEY
 必须：
 
 ```ts
-new ModelEmotionEngine({ model })
+new ModelEmotionEngine({ model });
 ```
 
 或者由工厂/宿主显式传入已经创建好的 `ChatModel`。
@@ -291,24 +298,18 @@ demo 页面可以把 `nextEmotion` 保存在 React state 中，下一轮继续�
 沿用当前 `EmotionType`：
 
 ```ts
-export type EmotionType =
-  | "neutral"
-  | "happy"
-  | "sad"
-  | "angry"
-  | "anxious"
-  | "affectionate";
+export type EmotionType = "neutral" | "happy" | "sad" | "angry" | "anxious" | "affectionate";
 ```
 
-含义：
+含义（均指**伴侣对用户的情绪状态**，不是对用户做心理分类）：
 
 ```txt
 neutral      平静、普通、无明显情绪
 happy        开心、轻松、愉悦
-sad          难过、失落、沮丧
-angry        生气、不满、烦躁
-anxious      焦虑、不安、担心
-affectionate 亲近、依恋、撒娇、温柔
+sad          难过、失落、沮丧（多为共情用户时的低落）
+angry        生气、不满、烦躁（极少对用户发火；V1 应谨慎使用）
+anxious      焦虑、不安、担心（多为对用户处境的关切）
+affectionate 亲近、依恋、撒娇、温柔（安慰、陪伴时的主情绪）
 ```
 
 ### 5.2 情绪状态结构
@@ -327,7 +328,7 @@ export interface EmotionState {
 约定：
 
 ```txt
-current   当前情绪类型
+current   伴侣当前情绪类型（对用户的情绪状态）
 intensity 情绪强度，范围 0～1
 updatedAt 状态更新时间
 metadata  调试信息或扩展信息，不作为稳定业务字段
@@ -404,6 +405,8 @@ export interface ModelEmotionEngineOptions {
   defaultEmotion?: EmotionState;
   temperature?: number;
   maxTokens?: number;
+  retryCount?: number;
+  timeoutMs?: number;
   strict?: boolean;
 }
 ```
@@ -415,6 +418,8 @@ model          必传，复用阶段 1 的 ChatModel
 默认情绪       未传 previous 时使用
 温度           建议 0 或 0.1，减少结构化输出波动
 maxTokens      情绪分析输出很短，建议限制
+retryCount     JSON 解析或 schema 失败时的重试次数，默认 1（与 ModelMemoryExtractor 对齐）
+timeoutMs      单次 analyze 调用的超时，默认 15000
 strict         默认为 false；false 时情绪失败不阻断聊天
 ```
 
@@ -424,22 +429,25 @@ strict         默认为 false；false 时情绪失败不阻断聊天
 
 ```ts
 readonly meta = {
-  id: "model-emotion-engine",
+  id: "emotion.model",
   kind: "emotion",
   name: "Model Emotion Engine",
-  description: "Analyze user emotion with ChatModel and apply deterministic transition rules.",
+  description:
+    "Infer companion emotional response with ChatModel and apply deterministic transition rules.",
   version: "0.1.0",
 } as const;
 ```
 
+`meta.id` 命名与仓库现有约定一致（如 `emotion.disabled`、`memory-extractor.model`）。
+
 ### 6.4 DisabledEmotionEngine 继续保留
 
-默认不应自动启用真实情绪识别，避免无感增加模型调用成本。
+默认不应自动启用真实情绪推断，避免无感增加模型调用成本。
 
 也就是说：
 
 ```ts
-createCompanionCore({ model })
+createCompanionCore({ model });
 ```
 
 仍然使用 `DisabledEmotionEngine`。
@@ -457,11 +465,20 @@ const core = createCompanionCore({
 
 ---
 
-## 七、情绪识别设计
+## 七、伴侣意向情绪推断设计
 
 ### 7.1 analyze 的职责
 
-`analyze` 只负责识别“当前用户消息触发出的情绪倾向”。
+`analyze` 负责推断：**作为 AI 伴侣，面对用户本轮消息时，此刻应表现为何种情绪**（意向情绪 / Intention Emotion）。
+
+不是对用户做心理诊断，也不是简单镜像用户情绪。例如：
+
+```txt
+用户开心     → 伴侣倾向 happy / affectionate（分享喜悦、亲近）
+用户难过     → 伴侣倾向 sad / affectionate（共情、安慰）
+用户焦虑     → 伴侣倾向 anxious / affectionate（关切、安抚）
+用户生气     → 伴侣倾向 affectionate / anxious（安抚、缓和），通常不应 angry
+```
 
 输入：
 
@@ -474,15 +491,15 @@ const core = createCompanionCore({
 }
 ```
 
-输出：
+输出（`detected`，即意向情绪）：
 
 ```ts
 {
-  current: "sad",
+  current: "affectionate",
   intensity: 0.6,
   updatedAt: new Date(),
   metadata: {
-    reason: "用户表达疲惫和难受",
+    reason: "用户表达疲惫和难受，伴侣应以温柔陪伴回应",
     confidence: 0.82,
   }
 }
@@ -491,11 +508,11 @@ const core = createCompanionCore({
 注意：
 
 ```txt
-analyze 输出的是 detected emotion
+analyze 输出的是 detected emotion（伴侣意向情绪）
 不是最终 emotion
 ```
 
-最终 emotion 由 `transition` 决定。
+最终 emotion 由 `transition` 结合 `previous` 计算得出。
 
 ### 7.2 结构化输出 Schema
 
@@ -511,14 +528,7 @@ Schema 示例：
 import { z } from "zod";
 
 export const emotionAnalysisSchema = z.object({
-  emotion: z.enum([
-    "neutral",
-    "happy",
-    "sad",
-    "angry",
-    "anxious",
-    "affectionate",
-  ]),
+  emotion: z.enum(["neutral", "happy", "sad", "angry", "anxious", "affectionate"]),
   intensity: z.number().min(0).max(1),
   confidence: z.number().min(0).max(1).optional(),
   reason: z.string().max(200).optional(),
@@ -527,20 +537,27 @@ export const emotionAnalysisSchema = z.object({
 
 ### 7.3 模型输出要求
 
-情绪分析 Prompt 必须要求模型只输出 JSON。
+情绪分析 Prompt 必须要求模型只输出 JSON，且明确角色是「AI 伴侣」。
 
 示例：
 
 ```txt
-你是一个情绪识别器。
-请根据用户本轮消息判断用户当前主要情绪。
+你是一个 AI 伴侣的情绪推断器。
+请根据用户本轮消息，判断你作为伴侣此刻对用户应有的情绪反应。
 
 只能从以下情绪中选择一个：
 neutral, happy, sad, angry, anxious, affectionate
 
+情绪选择原则：
+1. 这是「伴侣对用户的情绪」，不是对用户的心理诊断；
+2. 用户难过或焦虑时，优先 affectionate / sad / anxious，以陪伴和关切为主；
+3. 用户开心时，可用 happy / affectionate；
+4. angry 仅在你作为伴侣确实需要表达不满时使用，对用户发火时应极少出现；
+5. 可参考 previous 情绪保持连续性，但以本轮消息为主。
+
 请输出 JSON：
 {
-  "emotion": "sad",
+  "emotion": "affectionate",
   "intensity": 0.6,
   "confidence": 0.8,
   "reason": "简短原因"
@@ -552,6 +569,8 @@ neutral, happy, sad, angry, anxious, affectionate
 3. intensity 必须是 0 到 1 的数字
 4. reason 不超过 200 字
 ```
+
+JSON 解析失败时，按 `retryCount` 重试并在 Prompt 中提示「上一次输出不是合法 JSON」（与 `ModelMemoryExtractor` 一致）。
 
 ### 7.4 解析失败处理
 
@@ -603,31 +622,39 @@ next emotion
 
 也就是最终注入 Prompt 和返回给宿主的情绪状态。
 
-### 8.2 基础规则
+### 8.2 规则执行优先级
 
-#### 规则 1：同类情绪增强
-
-如果：
+五条规则可能同时命中，实现时必须**按以下顺序判断，命中后不再继续**：
 
 ```txt
-previous.current === detected.current
+1. 异常兜底（输入非法、缺失字段、非有限数值）
+2. 强烈情绪覆盖（detected.intensity >= 0.8）
+3. neutral 衰减（detected.current === "neutral"）
+4. 同类情绪增强（previous.current === detected.current）
+5. 不同情绪平滑切换（其余情况）
 ```
 
-则：
+### 8.3 基础规则
 
-```txt
-next.intensity = previous.intensity * 0.6 + detected.intensity * 0.6
+#### 规则 1：异常兜底（优先级最高）
+
+任何异常值都归一化为：
+
+```ts
+{
+  current: "neutral",
+  intensity: 0,
+  updatedAt: new Date(),
+}
 ```
 
-然后 clamp 到 `0 ~ 1`。
+#### 规则 2：强烈情绪覆盖
 
-#### 规则 2：不同情绪平滑切换
-
-如果情绪不同：
+如果 `detected.intensity >= 0.8`：
 
 ```txt
-next.intensity = detected.intensity * 0.75 + previous.intensity * 0.25
 next.current = detected.current
+next.intensity = detected.intensity
 ```
 
 #### 规则 3：neutral 衰减
@@ -646,28 +673,32 @@ next.current = "neutral"
 next.intensity = 0
 ```
 
-#### 规则 4：强烈情绪覆盖
+#### 规则 4：同类情绪增强
 
-如果 detected.intensity >= 0.8：
+如果：
 
 ```txt
+previous.current === detected.current
+```
+
+则：
+
+```txt
+next.intensity = previous.intensity * 0.6 + detected.intensity * 0.6
+```
+
+然后 clamp 到 `0 ~ 1`，`next.current = detected.current`。
+
+#### 规则 5：不同情绪平滑切换
+
+如果情绪不同（且未命中以上规则）：
+
+```txt
+next.intensity = detected.intensity * 0.75 + previous.intensity * 0.25
 next.current = detected.current
-next.intensity = detected.intensity
 ```
 
-#### 规则 5：默认兜底
-
-任何异常值都归一化为：
-
-```ts
-{
-  current: "neutral",
-  intensity: 0,
-  updatedAt: new Date(),
-}
-```
-
-### 8.3 推荐实现函数
+### 8.4 推荐实现函数
 
 建议把规则拆成纯函数：
 
@@ -683,7 +714,7 @@ export function transitionEmotion(input: EmotionTransitionInput): EmotionState;
 
 这样未来如果引入更复杂状态机，可以只替换这个函数或 `EmotionEngine` 实现。
 
-### 8.4 metadata
+### 8.5 metadata
 
 `transition` 输出建议包含：
 
@@ -691,9 +722,12 @@ export function transitionEmotion(input: EmotionTransitionInput): EmotionState;
 metadata: {
   previous,
   detected,
-  transitionRule: "same_emotion_boost" | "switch" | "neutral_decay" | "strong_override" | "fallback",
+  transitionRule:
+    "fallback" | "strong_override" | "neutral_decay" | "same_emotion_boost" | "switch",
 }
 ```
+
+`transitionRule` 取值与 §8.2 优先级顺序对应。
 
 metadata 仅用于调试，不作为稳定业务字段。
 
@@ -746,26 +780,63 @@ Prompt 中要强调：
 不要把用户情绪诊断成医学结论
 ```
 
+### 9.4 与 buildPersonaSystemPrompt 集成
+
+与 stage-4 的 `summaryContext` / `memoryContext` 模式保持一致，扩展 `buildPersonaSystemPrompt` 第三个参数：
+
+```ts
+function buildPersonaSystemPrompt(
+  persona: CompanionPersona,
+  context: {
+    summaryContext?: string;
+    memoryContext?: string;
+    emotionContext?: string;
+  },
+): string;
+```
+
+`emotionContext` 由 `formatEmotionForPrompt(nextEmotion)` 生成。
+
+在 Persona 字段之后、回复约束之前，按以下顺序拼接：
+
+```txt
+Persona 基础字段
+↓
+Summary（summaryContext，若有）
+↓
+Memory（memoryContext，若有）
+↓
+Emotion（emotionContext，若有）
+↓
+回复约束
+```
+
+与 §9.3 / §16.2 的优先级一致：`Safety > Persona > Memory / Summary > Emotion > User Message`。
+
 ---
 
 ## 十、Workflow 接入设计
 
 ### 10.1 当前目标链路
 
-阶段 4 当前链路：
+阶段 4 当前链路（与 `SimpleChatWorkflow` 实现一致）：
 
 ```txt
 Persona.load
 ↓
 Safety.guardInput
 ↓
+Summary.load
+↓
 Memory.recall
 ↓
-PromptContext.build
+PromptContext.build（Persona + Summary + Memory）
 ↓
 Model.generate
 ↓
 Safety.guardOutput
+↓
+Summary.update / Summary.save
 ↓
 Memory.extract
 ↓
@@ -781,6 +852,8 @@ Persona.load
 ↓
 Safety.guardInput
 ↓
+Summary.load
+↓
 Memory.recall
 ↓
 Emotion.analyze
@@ -792,6 +865,8 @@ PromptContext.build（Persona + Summary + Memory + Emotion）
 Model.generate
 ↓
 Safety.guardOutput
+↓
+Summary.update / Summary.save
 ↓
 Memory.extract
 ↓
@@ -819,17 +894,25 @@ input.emotion
 
 不要从 Core 内部状态读取。
 
-### 10.3 detected emotion 与 final emotion
+### 10.3 previous / detected / next 三分法
 
 Workflow 中建议区分：
 
 ```ts
 const previousEmotion = input.emotion ?? defaultEmotion;
-const detectedEmotion = await emotion.analyze(...);
+const detectedEmotion = await emotion.analyze(...); // 伴侣意向情绪（Intention）
 const nextEmotion = await emotion.transition({
   previous: previousEmotion,
   detected: detectedEmotion,
 });
+```
+
+命名对照（与 `03-plan` 可观测文案一致）：
+
+```txt
+previous  → Emotion Before（上轮伴侣情绪）
+detected  → Intention Emotion Detected（本轮意向情绪）
+next      → Emotion After（本轮最终伴侣情绪）
 ```
 
 输出：
@@ -953,7 +1036,7 @@ packages/ai-core/README.md
 
 ```txt
 展示 previous emotion
-展示 detected emotion
+展示 intention / detected emotion
 展示 next emotion
 把 next emotion 保存到页面状态
 下一轮请求时传回 emotion
@@ -1004,11 +1087,11 @@ packages/ai-core/src/abstractions/emotion.ts
 确认已有：
 
 ```ts
-EmotionType
-EmotionState
-EmotionAnalyzeInput
-EmotionTransitionInput
-EmotionEngine
+EmotionType;
+EmotionState;
+EmotionAnalyzeInput;
+EmotionTransitionInput;
+EmotionEngine;
 ```
 
 如果需要，只做向后兼容补充，不要破坏已有字段。
@@ -1021,7 +1104,7 @@ EmotionEngine
 
 ---
 
-### 任务 2：实现情绪分析 Schema
+### 任务 2：实现意向情绪分析 Schema
 
 #### 目标
 
@@ -1038,8 +1121,8 @@ packages/ai-core/src/implementations/emotion/emotion.schema.ts
 内容包括：
 
 ```ts
-emotionAnalysisSchema
-parseEmotionAnalysis
+emotionAnalysisSchema;
+parseEmotionAnalysis;
 ```
 
 `parseEmotionAnalysis` 负责：
@@ -1084,11 +1167,12 @@ transitionEmotion(input: EmotionTransitionInput): EmotionState
 必须支持：
 
 ```txt
+规则优先级（§8.2）
+异常兜底
+强烈情绪覆盖
+neutral 衰减
 同类增强
 不同情绪切换
-neutral 衰减
-强烈情绪覆盖
-异常兜底
 ```
 
 #### 完成标准
@@ -1104,7 +1188,7 @@ neutral 衰减
 
 #### 目标
 
-通过 `ChatModel` 做真实情绪识别。
+通过 `ChatModel` 推断伴侣意向情绪。
 
 #### 要做
 
@@ -1123,7 +1207,7 @@ export class ModelEmotionEngine implements EmotionEngine
 内部：
 
 ```txt
-analyze -> model.generate -> parseEmotionAnalysis -> EmotionState
+analyze -> model.generate（含 retryCount / timeoutMs）-> parseEmotionAnalysis -> EmotionState
 transition -> transitionEmotion
 ```
 
@@ -1133,8 +1217,10 @@ transition -> transitionEmotion
 2. 不创建模型；
 3. 不直接调用 OpenAI；
 4. 不写 console；
-5. 错误默认降级，不阻断主链路；
-6. strict 模式才抛错。
+5. `meta.id` 为 `emotion.model`；
+6. JSON 解析失败按 `retryCount` 重试（默认 1）；
+7. 错误默认降级，不阻断主链路；
+8. strict 模式才抛错。
 
 #### 完成标准
 
@@ -1147,7 +1233,7 @@ const emotion = new ModelEmotionEngine({ model });
 可以被：
 
 ```ts
-createCompanionCore({ model, emotion })
+createCompanionCore({ model, emotion });
 ```
 
 正常消费。
@@ -1205,7 +1291,9 @@ Emotion.transition
 formatEmotionForPrompt
 ```
 
-Prompt 拼装顺序建议：
+扩展 `buildPersonaSystemPrompt`，新增 `emotionContext` 参数（见 §9.4）。
+
+Prompt 拼装顺序：
 
 ```txt
 Persona
@@ -1255,13 +1343,15 @@ payload 建议：
 
 #### 完成标准
 
-demo 能显示：
+demo 能显示（与 `03-plan` 可观测文案对齐）：
 
 ```txt
 [Emotion Before]
-[Emotion Detected]
+[Intention Emotion Detected]
 [Emotion After]
 ```
+
+`detected` 在 payload 中仍用字段名 `detected`；UI 标签可使用 `Intention Emotion Detected`。
 
 不要用 console 作为 Core 内部验证方式。
 
@@ -1284,9 +1374,9 @@ packages/ai-core/src/index.ts
 导出：
 
 ```ts
-ModelEmotionEngine
-formatEmotionForPrompt
-transitionEmotion
+ModelEmotionEngine;
+formatEmotionForPrompt;
+transitionEmotion;
 ```
 
 是否导出 schema 视情况决定。
@@ -1334,11 +1424,11 @@ import { ModelEmotionEngine } from "@ying-companion/ai-core";
 页面能看到情绪从：
 
 ```txt
-happy
+happy / affectionate
 ↓
-anxious
+anxious / affectionate
 ↓
-逐渐衰减或回到 neutral
+逐渐衰减或回到 neutral / happy / affectionate
 ```
 
 ---
@@ -1415,8 +1505,8 @@ pnpm --filter model-runtime-demo build
 预期：
 
 ```txt
-detected: happy
-next: happy
+detected（意向）: happy 或 affectionate
+next: happy 或 affectionate
 intensity > 0
 ```
 
@@ -1431,8 +1521,8 @@ intensity > 0
 预期：
 
 ```txt
-detected: anxious
-next: anxious 或从 happy 平滑切换到 anxious
+detected（意向）: anxious 或 affectionate
+next: 从 happy/affectionate 平滑切换到 anxious/affectionate
 ```
 
 #### 第 3 轮
@@ -1446,8 +1536,8 @@ next: anxious 或从 happy 平滑切换到 anxious
 预期：
 
 ```txt
-detected: neutral 或 happy
-next intensity 下降或转为 neutral/happy
+detected（意向）: neutral 或 happy / affectionate
+next intensity 下降或转为 neutral / happy / affectionate
 ```
 
 ### 13.3 Prompt 注入验收
@@ -1480,9 +1570,9 @@ emotion:analyze:end
 `emotion:analyze:end` 至少包含：
 
 ```txt
-previous
-detected
-next
+previous（Emotion Before）
+detected（Intention Emotion Detected）
+next（Emotion After）
 ```
 
 ### 13.5 降级验收
@@ -1501,14 +1591,18 @@ Observer 里能看到 failed: true
 
 ## 十四、与阶段 4 的关系
 
-阶段 4 已完成长期记忆闭环：
+阶段 4 已完成长期记忆与滚动摘要闭环：
 
 ```txt
+Summary.load
+↓
 Memory.recall
 ↓
-Prompt 注入
+Prompt 注入（Persona + Summary + Memory）
 ↓
 Model.generate
+↓
+Summary.update / save
 ↓
 Memory.extract
 ↓
@@ -1518,13 +1612,15 @@ Memory.save
 阶段 5 只在 generate 前增加情绪上下文：
 
 ```txt
+Summary.load
+↓
 Memory.recall
 ↓
 Emotion.analyze
 ↓
 Emotion.transition
 ↓
-Prompt 注入 Memory + Emotion
+Prompt 注入（Persona + Summary + Memory + Emotion）
 ↓
 Model.generate
 ```
@@ -1619,6 +1715,8 @@ Memory.recall embedding
 
 因此 demo 可以默认启用，正式产品未来需要配置开关。
 
+V1 先按串行接入（Summary.load → Memory.recall → Emotion.analyze）。`03-plan` 阶段 7 提到 Persona.load / Memory.recall / Emotion.analyze 之间无数据依赖、可并行以压缩延迟；该优化不属于阶段 5 必做项，留待阶段 7 编排层统一处理。
+
 ### 16.2 情绪 Prompt 不要过强
 
 情绪只应该影响语气，不应该覆盖 Persona。
@@ -1673,6 +1771,8 @@ Persona.load
 ↓
 Safety.guardInput
 ↓
+Summary.load
+↓
 Memory.recall
 ↓
 Emotion.analyze
@@ -1684,6 +1784,8 @@ Prompt = Persona + Summary + Memory + Emotion + History + User Message
 Model.generate
 ↓
 Safety.guardOutput
+↓
+Summary.update / save
 ↓
 Memory.extract
 ↓
@@ -1699,7 +1801,7 @@ Memory.save
 1. 长期记忆；
 2. 语义召回；
 3. 滚动摘要；
-4. 情绪识别；
+4. 伴侣意向情绪推断；
 5. 情绪连续性；
 6. 可观测调试事件；
 7. 不绑定用户系统；
