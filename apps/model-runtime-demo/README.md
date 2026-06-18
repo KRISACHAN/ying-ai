@@ -1,6 +1,6 @@
 # @ying-companion/model-runtime-demo
 
-阶段 1 Model Runtime、阶段 2 Core Abstractions 与阶段 3 Simple Chat Workflow 的 Next.js 调试应用，只负责输出环境变量读取结果、Core 初始化信息、模型响应、重试与降级结果，以及聊天主链路的可观测输出。
+阶段 1～6 的 Next.js 调试应用，只负责输出环境变量读取结果、Core 初始化信息、模型响应、重试与降级结果，以及聊天、记忆、情绪、工具调用主链路的可观测输出。
 
 ## 环境变量
 
@@ -62,4 +62,5 @@ DATABASE_URL=postgresql://localhost:5432/ying_companion_dev
   - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
   - **滚动摘要控件**：默认关闭（`summaryOptions.enabled=false`）。启用后使用 demo 进程内 `InMemorySummaryProvider` 保存当前会话摘要，重启、热重载、多 worker 下不保证保留或一致，不是生产持久化方案。`recentMessageLimit` 必须小于 `summarizeTriggerMessageCount`，用于验证旧消息压缩成 summary、Prompt 只保留 summary + recent history。
   - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，100% 还原本轮发给模型的 system prompt、Conversation Summary、长期记忆块、Recent History 与当前用户输入。滚动摘要开启后重点查看 `summaryContext`、`recentHistory`、`summarizedMessages`、Conversation Summary、Updated Summary 与 Summary Events。
+  - **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
   - **scope 切换**：页面可改 `sessionId` 与 `companionId`，请求体显式传 `scope`，用于验证记忆隔离（不同 ownerId / companionId 不互相召回）。

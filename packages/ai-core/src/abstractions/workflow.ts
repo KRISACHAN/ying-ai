@@ -13,12 +13,12 @@ import type {
   MemoryScope,
   RecalledMemory,
 } from "./memory";
-import type { ChatMessage, GenerateOutput } from "./model";
+import type { ChatMessage, GenerateOutput, ModelToolCall } from "./model";
 import type { CompanionPersona } from "./persona";
 import type { CoreProvider } from "./provider";
 import type { SafetyCheckResult } from "./safety";
 import type { ConversationSummary, SummaryOptions, SummaryScope } from "./summary";
-import type { ToolResult } from "./tool";
+import type { ToolDefinition, ToolResult } from "./tool";
 
 /** 单轮聊天的输入；history 由宿主维护，Core 不持久化短期对话。 */
 export interface ChatWorkflowInput {
@@ -67,6 +67,14 @@ export interface ChatWorkflowDebugContext {
   recentHistory?: ChatMessage[];
   /** 本轮送去 summary update 的旧消息；未触发时为空数组。 */
   summarizedMessages?: ChatMessage[];
+  /** 本轮注册给模型的工具定义快照。 */
+  toolDefinitions?: ToolDefinition[];
+  /** 模型请求的工具调用快照。 */
+  toolCalls?: ModelToolCall[];
+  /** 工具执行结果快照。 */
+  toolResults?: ToolResult[];
+  /** 工具执行后传入二次生成的消息。 */
+  toolFollowUpMessages?: ChatMessage[];
   /** buildPersonaSystemPrompt 完整结果。 */
   systemPrompt: string;
   /** 最终传入 model.generate 的 messages。 */

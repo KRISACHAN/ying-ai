@@ -8,18 +8,20 @@ import type { CoreProvider } from "./provider";
 
 export type ChatMessageRole = "system" | "user" | "assistant" | "tool";
 
-/** 单条对话消息；tool 角色在阶段 6 前由 Workflow 过滤，不传入模型。 */
+/** 单条对话消息；tool 角色消息由 Workflow 在工具二次生成时构造。 */
 export interface ChatMessage {
   role: ChatMessageRole;
   content: string;
   name?: string;
+  toolCallId?: string;
+  toolCalls?: ModelToolCall[];
 }
 
 /** 模型 generate / stream 的输入。 */
 export interface GenerateInput {
   messages: ChatMessage[];
   /**
-   * TODO(stage-tool-system): 阶段 6 前为前向兼容占位，当前不传给 AI SDK 执行。
+   * Core 工具定义经实现层适配后的模型工具集合。
    */
   tools?: Record<string, unknown>;
   /** 单次调用的主模型覆盖；不影响 factory 配置的 fallbackModel。 */
@@ -47,6 +49,7 @@ export interface GenerateOutput {
 
 /** 模型返回的工具调用请求（阶段 6 前由 Workflow 忽略）。 */
 export interface ModelToolCall {
+  id?: string;
   name: string;
   arguments: unknown;
 }

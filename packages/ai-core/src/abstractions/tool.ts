@@ -1,17 +1,30 @@
 /**
- * 工具调用抽象（阶段 6 接入 Workflow）。
+ * 工具调用抽象（阶段 6）。
  *
  * ToolRegistry 扩展 ToolProvider，支持 register 注册工具与 handler。
- * 当前默认 EmptyToolRegistry 占位；Workflow 尚未执行 model 返回的 toolCalls。
+ * Workflow 通过 ToolRegistry 执行模型返回的 toolCalls，再把 ToolResult 拼回二次生成。
  */
 import type { CoreProvider } from "./provider";
 
 /** 工具元信息，将注册到模型 tools 入参（阶段 6）。 */
 export interface ToolDefinition {
   name: string;
-  description?: string;
-  parameters?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+  description: string;
+  parameters?: ToolParametersSchema;
+  metadata?: ToolDefinitionMetadata;
+}
+
+/** Core 自己的工具参数 schema 约定：V1 只支持 object 参数。 */
+export interface ToolParametersSchema {
+  type: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+}
+
+export interface ToolDefinitionMetadata {
+  tags?: string[];
+  [key: string]: unknown;
 }
 
 /** 模型返回的工具调用请求。 */
@@ -26,7 +39,27 @@ export interface ToolResult {
   toolCallId?: string;
   name: string;
   result: unknown;
-  metadata?: Record<string, unknown>;
+  ok?: boolean;
+  error?: ToolExecutionError;
+  metadata?: ToolExecutionMetadata;
+}
+
+export type ToolExecutionErrorCode =
+  | "TOOL_NOT_FOUND"
+  | "TOOL_INVALID_ARGUMENTS"
+  | "TOOL_EXECUTION_FAILED";
+
+export interface ToolExecutionError {
+  code: ToolExecutionErrorCode;
+  message: string;
+}
+
+export interface ToolExecutionMetadata {
+  startedAt?: Date;
+  endedAt?: Date;
+  durationMs?: number;
+  rawArguments?: unknown;
+  [key: string]: unknown;
 }
 
 export interface ToolExecuteInput {

@@ -36,7 +36,7 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 | `memory.ts`       | 长期记忆       | `MemoryProvider`（recall/save）、`MemoryExtractor`（抽取）、`EmbeddingProvider`（向量化）、`MemoryScope`（隔离） |
 | `summary.ts`      | 滚动摘要       | `SummaryProvider`（load/save）、`SummaryUpdater`（压缩旧消息为 `ConversationSummary`）                           |
 | `emotion.ts`      | 情绪状态机     | `EmotionEngine`：`analyze` 识别情绪、`transition` 做状态转移（阶段 5 接入 Workflow）                             |
-| `tool.ts`         | 工具调用       | `ToolRegistry`：注册工具、执行 `tool_call`、返回 `ToolResult`（阶段 6 接入 Workflow）                            |
+| `tool.ts`         | 工具调用       | `ToolRegistry`：注册工具、执行 `tool_call`、返回 `ToolResult`；V1 参数 schema 使用 Core 自己的 object 约定       |
 | `safety.ts`       | 内容安全       | `SafetyProvider`：`guardInput` / `guardOutput`，拒绝时 Workflow 抛错                                             |
 | `workflow.ts`     | 聊天编排       | `ChatWorkflow`、`ChatWorkflowInput/Output`：宿主与 Core 之间的主业务契约                                         |
 | `observer.ts`     | 可观测性       | `CoreObserver`、`CoreEvent`：各阶段 `*:start` / `*:end` 事件，供宿主展示调试信息                                 |
@@ -58,27 +58,30 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 
 ### 2.4 `implementations/` — 内置默认实现
 
-| 子目录                                  | 默认实现                    | 作用                                                       |
-| --------------------------------------- | --------------------------- | ---------------------------------------------------------- |
-| `model/openai.ts`                       | `OpenAICompatibleModel`     | Vercel AI SDK 适配；`generate` / `stream`、重试与降级      |
-| `workflow/simple-chat-workflow.ts`      | `SimpleChatWorkflow`        | 当前 V1 聊天主链路（阶段 3～5）；阶段 7 将演进为全能力编排 |
-| `workflow/disabled-chat-workflow.ts`    | `DisabledChatWorkflow`      | 显式禁用 Workflow 时 `execute` 抛错                        |
-| `persona/default-persona-provider.ts`   | `DefaultPersonaProvider`    | 默认角色「映映」                                           |
-| `memory/noop-memory-provider.ts`        | `NoopMemoryProvider`        | 未注入 memory 时的空实现                                   |
-| `memory/in-memory-memory-provider.ts`   | `InMemoryMemoryProvider`    | 进程内关键词 recall（开发调试用）                          |
-| `memory/model-memory-extractor.ts`      | `ModelMemoryExtractor`      | LLM + Zod 结构化记忆抽取                                   |
-| `memory/prompt-formatter.ts`            | `formatMemoriesForPrompt`   | 将 recall 结果格式化为 prompt 文本块                       |
-| `summary/noop-summary-provider.ts`      | `NoopSummaryProvider`       | 摘要存储空实现                                             |
-| `summary/in-memory-summary-provider.ts` | `InMemorySummaryProvider`   | 进程内摘要 Map（demo 用）                                  |
-| `summary/model-summary-updater.ts`      | `ModelSummaryUpdater`       | LLM 驱动滚动摘要更新                                       |
-| `summary/history-utils.ts`              | `splitForSummary` 等        | 长对话 history 切分（旧消息 vs 近期消息）                  |
-| `summary/prompt-formatter.ts`           | `formatSummaryForPrompt`    | 摘要注入 prompt                                            |
-| `emotion/disabled-emotion-engine.ts`    | `DisabledEmotionEngine`     | 情绪占位；默认返回 neutral，避免自动增加模型调用           |
-| `emotion/model-emotion-engine.ts`       | `ModelEmotionEngine`        | 复用 `ChatModel` 推断伴侣意向情绪并执行状态转移            |
-| `emotion/prompt-formatter.ts`           | `formatEmotionForPrompt`    | 将最终情绪状态格式化为 prompt 文本块                       |
-| `tool/empty-tool-registry.ts`           | `EmptyToolRegistry`         | 工具占位（阶段 6 前禁止注册/执行）                         |
-| `safety/passthrough-safety-provider.ts` | `PassthroughSafetyProvider` | 安全透传（一律放行）                                       |
-| `observer/noop-core-observer.ts`        | `NoopCoreObserver`          | 丢弃所有事件                                               |
+| 子目录                                  | 默认实现                    | 作用                                                                                     |
+| --------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
+| `model/openai.ts`                       | `OpenAICompatibleModel`     | Vercel AI SDK 适配；`generate` / `stream`、重试与降级                                    |
+| `workflow/simple-chat-workflow.ts`      | `SimpleChatWorkflow`        | 当前 V1 聊天主链路（阶段 3～6）：记忆、情绪、本地工具二次生成                            |
+| `workflow/disabled-chat-workflow.ts`    | `DisabledChatWorkflow`      | 显式禁用 Workflow 时 `execute` 抛错                                                      |
+| `persona/default-persona-provider.ts`   | `DefaultPersonaProvider`    | 默认角色「映映」                                                                         |
+| `memory/noop-memory-provider.ts`        | `NoopMemoryProvider`        | 未注入 memory 时的空实现                                                                 |
+| `memory/in-memory-memory-provider.ts`   | `InMemoryMemoryProvider`    | 进程内关键词 recall（开发调试用）                                                        |
+| `memory/model-memory-extractor.ts`      | `ModelMemoryExtractor`      | LLM + Zod 结构化记忆抽取                                                                 |
+| `memory/prompt-formatter.ts`            | `formatMemoriesForPrompt`   | 将 recall 结果格式化为 prompt 文本块                                                     |
+| `summary/noop-summary-provider.ts`      | `NoopSummaryProvider`       | 摘要存储空实现                                                                           |
+| `summary/in-memory-summary-provider.ts` | `InMemorySummaryProvider`   | 进程内摘要 Map（demo 用）                                                                |
+| `summary/model-summary-updater.ts`      | `ModelSummaryUpdater`       | LLM 驱动滚动摘要更新                                                                     |
+| `summary/history-utils.ts`              | `splitForSummary` 等        | 长对话 history 切分（旧消息 vs 近期消息）                                                |
+| `summary/prompt-formatter.ts`           | `formatSummaryForPrompt`    | 摘要注入 prompt                                                                          |
+| `emotion/disabled-emotion-engine.ts`    | `DisabledEmotionEngine`     | 情绪占位；默认返回 neutral，避免自动增加模型调用                                         |
+| `emotion/model-emotion-engine.ts`       | `ModelEmotionEngine`        | 复用 `ChatModel` 推断伴侣意向情绪并执行状态转移                                          |
+| `emotion/prompt-formatter.ts`           | `formatEmotionForPrompt`    | 将最终情绪状态格式化为 prompt 文本块                                                     |
+| `tool/empty-tool-registry.ts`           | `EmptyToolRegistry`         | 默认空工具注册表；无工具时聊天行为保持不变                                               |
+| `tool/local-tool-registry.ts`           | `LocalToolRegistry`         | 本地工具注册、列出、执行与受控错误包装                                                   |
+| `tool/tool-adapter.ts`                  | 工具适配器                  | `ToolDefinition -> GenerateInput.tools`、`ModelToolCall -> ToolCall`、follow-up messages |
+| `tool/format-tool-results.ts`           | 工具结果格式化              | 将 `ToolResult` 序列化为二次生成的 tool role 消息内容                                    |
+| `safety/passthrough-safety-provider.ts` | `PassthroughSafetyProvider` | 安全透传（一律放行）                                                                     |
+| `observer/noop-core-observer.ts`        | `NoopCoreObserver`          | 丢弃所有事件                                                                             |
 
 ### 2.5 外部协作包（不在本包内）
 
@@ -96,7 +99,7 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 | 3    | 聊天主链路          | ✅                                     |
 | 4    | 长期记忆 + 滚动摘要 | ✅                                     |
 | 5    | 情绪状态机          | ✅                                     |
-| 6    | 工具调用多步循环    | 🔌 接口就绪，Workflow 未执行 toolCalls |
+| 6    | 工具调用多步循环    | ✅ 本地 Tool Registry + 非流式二次生成 |
 | 7    | 完整 Workflow 编排  | 🔜 演进 `SimpleChatWorkflow`           |
 | 8    | 调试 UI             | 部分在 demo                            |
 

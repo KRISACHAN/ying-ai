@@ -7,7 +7,7 @@
  * 详见类注释中的约束说明。
  */
 import type { EmotionState } from "../../abstractions/emotion";
-import type { ChatMessage } from "../../abstractions/model";
+import type { ChatMessage, GenerateOutput, ModelToolCall } from "../../abstractions/model";
 import {
   resolveMemoryScope,
   type ExtractedMemory,
@@ -22,6 +22,7 @@ import {
   type ConversationSummary,
   type SummaryScope,
 } from "../../abstractions/summary";
+import type { ToolDefinition, ToolResult } from "../../abstractions/tool";
 import type {
   ChatWorkflow,
   ChatWorkflowDebugContext,
@@ -34,11 +35,13 @@ import { createNeutralEmotion } from "../emotion/transition";
 import { formatMemoriesForPrompt } from "../memory/prompt-formatter";
 import { splitForSummary, trimRecentHistory } from "../summary/history-utils";
 import { formatSummaryForPrompt } from "../summary/prompt-formatter";
+import { buildToolFollowUpMessages, toCoreToolCall, toModelTools } from "../tool/tool-adapter";
 
 /** 未传 summaryOptions.recentMessageLimit 时的默认值。 */
 const DEFAULT_RECENT_MESSAGE_LIMIT = 12;
 /** 未传 summaryOptions.summarizeTriggerMessageCount 时的默认值。 */
 const DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT = 16;
+const DEFAULT_MAX_TOOL_ROUNDS = 1;
 
 /**
  * 阶段 5 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
@@ -77,6 +80,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       summary,
       summaryUpdater,
       emotion,
+      tools,
     } = context.core;
     const sessionId = input.sessionId;
     const scope = resolveMemoryScope(input);
@@ -180,22 +184,22 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         { role: "user", content: input.message },
       ];
 
-      await safeEmit(observer, {
-        type: "workflow:step",
-        timestamp: new Date(),
-        payload: { step: "model:generate:start", sessionId, messageCount: messages.length },
+      const toolDefinitions = await listTools({
+        observer,
+        tools,
+        ...(sessionId !== undefined ? { sessionId } : {}),
       });
-      const modelOutput = await model.generate({ messages });
-      await safeEmit(observer, {
-        type: "workflow:step",
-        timestamp: new Date(),
-        payload: {
-          step: "model:generate:end",
-          sessionId,
-          model: modelOutput.model,
-          runtime: modelOutput.runtime,
-        },
+      const modelTools = toModelTools(toolDefinitions);
+      const generationResult = await generateWithTools({
+        observer,
+        model,
+        tools,
+        messages,
+        ...(modelTools !== undefined ? { modelTools } : {}),
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       });
+      const modelOutput = generationResult.finalOutput;
 
       await safeEmit(observer, {
         type: "safety:output:start",
@@ -259,6 +263,12 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         summarizedMessages: summaryResult.summarizedMessages,
         systemPrompt,
         messages,
+        toolDefinitions,
+        toolCalls: generationResult.toolCalls,
+        toolResults: generationResult.toolResults,
+        ...(generationResult.followUpMessages !== undefined
+          ? { toolFollowUpMessages: generationResult.followUpMessages }
+          : {}),
         ...(embeddingVectorLength !== undefined ? { embeddingVectorLength } : {}),
       };
 
@@ -269,11 +279,15 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         persona: loadedPersona,
         memories: recalledMemories,
         emotion: emotionResult.next,
+        toolResults: generationResult.toolResults,
         safety: { input: inputSafety, output: outputSafety },
         metadata: {
           historyCount: sanitizedHistory.length,
           messageCount: messages.length,
-          toolCallsIgnored: modelOutput.toolCalls?.length ?? 0,
+          toolDefinitions,
+          toolCalls: generationResult.toolCalls,
+          toolRounds: generationResult.rounds,
+          toolFollowUpGenerated: generationResult.followUpGenerated,
           extractedMemories: memoryResult.extracted,
           savedMemories: memoryResult.saved,
           skippedMemories: memoryResult.skipped,
@@ -313,6 +327,234 @@ async function safeEmit(observer: CoreObserver, event: CoreEvent): Promise<void>
   } catch {
     // Observer 异常不得打断 Workflow
   }
+}
+
+interface ListToolsOptions {
+  observer: CoreObserver;
+  tools: ChatWorkflowExecutionContext["core"]["tools"];
+  sessionId?: string;
+}
+
+async function listTools(options: ListToolsOptions): Promise<ToolDefinition[]> {
+  await safeEmit(options.observer, {
+    type: "workflow:step",
+    timestamp: new Date(),
+    payload: { step: "tool:list:start", sessionId: options.sessionId },
+  });
+
+  const definitions = await options.tools.list();
+
+  await safeEmit(options.observer, {
+    type: "tool:list",
+    timestamp: new Date(),
+    payload: {
+      sessionId: options.sessionId,
+      count: definitions.length,
+      tools: definitions.map((definition) => ({
+        name: definition.name,
+        description: definition.description,
+      })),
+    },
+  });
+  await safeEmit(options.observer, {
+    type: "workflow:step",
+    timestamp: new Date(),
+    payload: { step: "tool:list:end", sessionId: options.sessionId, count: definitions.length },
+  });
+
+  return definitions;
+}
+
+interface GenerateWithToolsOptions {
+  observer: CoreObserver;
+  model: ChatWorkflowExecutionContext["core"]["model"];
+  tools: ChatWorkflowExecutionContext["core"]["tools"];
+  messages: ChatMessage[];
+  modelTools?: Record<string, unknown>;
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface GenerateWithToolsResult {
+  finalOutput: GenerateOutput;
+  toolCalls: ModelToolCall[];
+  toolResults: ToolResult[];
+  rounds: number;
+  followUpGenerated: boolean;
+  followUpMessages?: ChatMessage[];
+}
+
+async function generateWithTools(
+  options: GenerateWithToolsOptions,
+): Promise<GenerateWithToolsResult> {
+  const hasTools = options.modelTools !== undefined;
+  const firstStep = hasTools ? "tool:model-generate-with-tools" : "model:generate";
+
+  await safeEmit(options.observer, {
+    type: "workflow:step",
+    timestamp: new Date(),
+    payload: {
+      step: `${firstStep}:start`,
+      sessionId: options.sessionId,
+      messageCount: options.messages.length,
+      toolsEnabled: hasTools,
+    },
+  });
+  const firstOutput = await options.model.generate({
+    messages: options.messages,
+    ...(options.modelTools !== undefined ? { tools: options.modelTools } : {}),
+  });
+  await safeEmit(options.observer, {
+    type: "workflow:step",
+    timestamp: new Date(),
+    payload: {
+      step: `${firstStep}:end`,
+      sessionId: options.sessionId,
+      model: firstOutput.model,
+      runtime: firstOutput.runtime,
+      toolCallCount: firstOutput.toolCalls?.length ?? 0,
+    },
+  });
+
+  const toolCalls = firstOutput.toolCalls ?? [];
+  if (!hasTools || toolCalls.length === 0 || DEFAULT_MAX_TOOL_ROUNDS < 1) {
+    return {
+      finalOutput: firstOutput,
+      toolCalls,
+      toolResults: [],
+      rounds: 0,
+      followUpGenerated: false,
+    };
+  }
+
+  const toolResults = await executeToolCalls({
+    observer: options.observer,
+    tools: options.tools,
+    toolCalls,
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+  });
+  const followUpMessages = buildToolFollowUpMessages(
+    options.messages,
+    firstOutput.text,
+    toolCalls,
+    toolResults,
+  );
+
+  await safeEmit(options.observer, {
+    type: "workflow:step",
+    timestamp: new Date(),
+    payload: {
+      step: "tool:follow-up-generate:start",
+      sessionId: options.sessionId,
+      messageCount: followUpMessages.length,
+      toolResultCount: toolResults.length,
+    },
+  });
+  const finalOutput = await options.model.generate({
+    messages: followUpMessages,
+    ...(options.modelTools !== undefined ? { tools: options.modelTools } : {}),
+  });
+  await safeEmit(options.observer, {
+    type: "workflow:step",
+    timestamp: new Date(),
+    payload: {
+      step: "tool:follow-up-generate:end",
+      sessionId: options.sessionId,
+      model: finalOutput.model,
+      runtime: finalOutput.runtime,
+      toolCallCount: finalOutput.toolCalls?.length ?? 0,
+    },
+  });
+
+  return {
+    finalOutput,
+    toolCalls,
+    toolResults,
+    rounds: 1,
+    followUpGenerated: true,
+    followUpMessages,
+  };
+}
+
+interface ExecuteToolCallsOptions {
+  observer: CoreObserver;
+  tools: ChatWorkflowExecutionContext["core"]["tools"];
+  toolCalls: ModelToolCall[];
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+async function executeToolCalls(options: ExecuteToolCallsOptions): Promise<ToolResult[]> {
+  const results: ToolResult[] = [];
+
+  for (const modelToolCall of options.toolCalls) {
+    const coreCall = toCoreToolCall(modelToolCall);
+
+    await safeEmit(options.observer, {
+      type: "tool:execute:start",
+      timestamp: new Date(),
+      payload: {
+        sessionId: options.sessionId,
+        toolCallId: coreCall.id,
+        name: coreCall.name,
+        arguments: coreCall.arguments,
+      },
+    });
+
+    const result = hasInvalidJsonArguments(modelToolCall, coreCall)
+      ? createInvalidArgumentsResult(modelToolCall)
+      : await options.tools.execute({
+          call: coreCall,
+          ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+          ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+        });
+
+    await safeEmit(options.observer, {
+      type: "tool:execute:end",
+      timestamp: new Date(),
+      payload: {
+        sessionId: options.sessionId,
+        toolCallId: result.toolCallId,
+        name: result.name,
+        ok: result.ok ?? true,
+        result: result.result,
+        error: result.error,
+        durationMs: result.metadata?.durationMs,
+      },
+    });
+
+    results.push(result);
+  }
+
+  return results;
+}
+
+function hasInvalidJsonArguments(
+  modelToolCall: ModelToolCall,
+  coreCall: { arguments: unknown },
+): boolean {
+  return (
+    typeof modelToolCall.arguments === "string" &&
+    modelToolCall.arguments.trim() !== "" &&
+    coreCall.arguments === modelToolCall.arguments
+  );
+}
+
+function createInvalidArgumentsResult(modelToolCall: ModelToolCall): ToolResult {
+  return {
+    name: modelToolCall.name,
+    ...(modelToolCall.id !== undefined ? { toolCallId: modelToolCall.id } : {}),
+    ok: false,
+    result: null,
+    error: {
+      code: "TOOL_INVALID_ARGUMENTS",
+      message: `Tool arguments are not valid JSON: ${modelToolCall.name}`,
+    },
+    metadata: {
+      rawArguments: modelToolCall.arguments,
+    },
+  };
 }
 
 /**

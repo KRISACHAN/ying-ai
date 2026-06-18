@@ -3,6 +3,7 @@ import {
   createModel,
   DefaultPersonaProvider,
   InMemorySummaryProvider,
+  LocalToolRegistry,
   ModelEmotionEngine,
   ModelRuntimeError,
   type ChatMessage,
@@ -10,6 +11,7 @@ import {
   type CoreEvent,
   type CoreObserver,
   type EmotionState,
+  type MemoryProvider,
   type MemoryScope,
   type SummaryOptions,
 } from "@ying-companion/ai-core";
@@ -179,24 +181,6 @@ export async function POST(request: Request): Promise<Response> {
     // patch-0 §8.2 / §11.4：按 health snapshot 严格选择 Postgres / InMemory / Unavailable。
     // chat 热路径不探测 DB，仅读 /api/memory-health 写入的 snapshot。
     const memoryRuntime = await resolveChatMemoryRuntime(process.env);
-    // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
-    const core = createCompanionCore({
-      model,
-      observer,
-      emotion: new ModelEmotionEngine({ model }),
-      memory: memoryRuntime.provider,
-      summary: demoSummaryProvider,
-      // 仅 demo 默认值：性别可改，不代表产品固定角色（见阶段 2 §八）。
-      persona: new DefaultPersonaProvider({
-        id: "debug-companion",
-        name: "映映",
-        gender: "female",
-        relationship: "AI 伴侣",
-        personality: "温柔、真诚、愿意倾听",
-        speakingStyle: "自然、亲近、不过度夸张",
-      }),
-    });
-
     // patch-0 §9.2 / §10：宿主显式构造 scope（含 companionId），优先级高于 sessionId。
     const sessionId = body.sessionId ?? "demo-session";
     const scope: MemoryScope = {
@@ -226,11 +210,38 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
+    const inputEmotion =
+      body.emotion !== undefined ? normalizeEmotion(body.emotion) : createNeutralDemoEmotion();
+    const tools = createDemoTools({
+      memory: memoryRuntime.provider,
+      scope,
+      emotion: inputEmotion,
+    });
+
+    // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
+    const core = createCompanionCore({
+      model,
+      observer,
+      emotion: new ModelEmotionEngine({ model }),
+      memory: memoryRuntime.provider,
+      summary: demoSummaryProvider,
+      tools,
+      // 仅 demo 默认值：性别可改，不代表产品固定角色（见阶段 2 §八）。
+      persona: new DefaultPersonaProvider({
+        id: "debug-companion",
+        name: "映映",
+        gender: "female",
+        relationship: "AI 伴侣",
+        personality: "温柔、真诚、愿意倾听",
+        speakingStyle: "自然、亲近、不过度夸张",
+      }),
+    });
+
     const output = await core.executeWorkflow({
       sessionId,
       message: body.message,
       history: body.history ?? [],
-      ...(body.emotion !== undefined ? { emotion: normalizeEmotion(body.emotion) } : {}),
+      ...(body.emotion !== undefined ? { emotion: inputEmotion } : {}),
       scope,
       conversationId: sessionId,
       summaryOptions,
@@ -248,6 +259,7 @@ export async function POST(request: Request): Promise<Response> {
           summaryProvider: inspection.providers.summary,
           summaryUpdater: inspection.providers.summaryUpdater,
           emotionProvider: inspection.providers.emotion,
+          toolProvider: inspection.providers.tools,
         },
       },
       observerEvents: serializeEvents(observer.events),
@@ -291,11 +303,140 @@ function validateEmotion(raw: unknown): string | null {
   return null;
 }
 
+function createDemoTools(options: {
+  memory: MemoryProvider;
+  scope: MemoryScope;
+  emotion: EmotionState;
+}): LocalToolRegistry {
+  const tools = new LocalToolRegistry();
+
+  tools.register(
+    {
+      name: "get_current_time",
+      description: "获取当前本地时间。适合用户询问现在几点、今天日期、当前时间时调用。",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+      metadata: { tags: ["debug", "time"] },
+    },
+    async (input) => ({
+      name: "get_current_time",
+      ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
+      ok: true,
+      result: {
+        iso: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+    }),
+  );
+
+  tools.register(
+    {
+      name: "search_memory",
+      description: "搜索与用户问题相关的长期记忆。适合需要确认用户偏好、事实、过往事件时调用。",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "要搜索的记忆查询文本",
+          },
+          topK: {
+            type: "number",
+            description: "最多返回多少条记忆",
+          },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      metadata: { tags: ["debug", "memory"] },
+    },
+    async (input) => {
+      const args = toRecord(input.call.arguments);
+      const query = typeof args.query === "string" ? args.query : "";
+      const topK = typeof args.topK === "number" && Number.isFinite(args.topK) ? args.topK : 3;
+
+      if (query.trim() === "") {
+        return {
+          name: "search_memory",
+          ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
+          ok: false,
+          result: null,
+          error: {
+            code: "TOOL_INVALID_ARGUMENTS",
+            message: "search_memory.query is required",
+          },
+        };
+      }
+
+      const recalled = await options.memory.recall({
+        scope: options.scope,
+        query,
+        limit: Math.max(1, Math.min(8, Math.floor(topK))),
+        minImportance: 1,
+      });
+
+      return {
+        name: "search_memory",
+        ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
+        ok: true,
+        result: {
+          memories: recalled.memories.map((memory) => ({
+            id: memory.id,
+            type: memory.type,
+            content: memory.content,
+            importance: memory.importance,
+            score: memory.score,
+          })),
+          embeddingVectorLength: recalled.embeddingVectorLength,
+        },
+      };
+    },
+  );
+
+  tools.register(
+    {
+      name: "get_emotion_state",
+      description: "获取当前伴侣情绪状态。适合需要确认伴侣当前情绪时调用。",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+      metadata: { tags: ["debug", "emotion"] },
+    },
+    async (input) => ({
+      name: "get_emotion_state",
+      ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
+      ok: true,
+      result: options.emotion,
+    }),
+  );
+
+  return tools;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
 function normalizeEmotion(emotion: EmotionState): EmotionState {
   return {
     current: emotion.current,
     intensity: Math.min(1, Math.max(0, emotion.intensity)),
     ...(emotion.updatedAt !== undefined ? { updatedAt: new Date(emotion.updatedAt) } : {}),
+  };
+}
+
+function createNeutralDemoEmotion(): EmotionState {
+  return {
+    current: "neutral",
+    intensity: 0,
+    updatedAt: new Date(),
   };
 }
 

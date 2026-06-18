@@ -136,16 +136,17 @@ export class OpenAICompatibleModel implements ChatModel {
     throw createModelRuntimeError(state.errors);
   }
 
-  /** 组装 AI SDK generateText/streamText 参数；阶段 6 前忽略 tools。 */
+  /** 组装 AI SDK generateText/streamText 参数。 */
   private createTextOptions(input: GenerateInput, model: string): TextOptions {
-    // TODO(stage-tool-system): 阶段 6 将 Core 层 tool 描述映射为 AI SDK ToolSet。
-    void input.tools;
-
     const options: TextOptions = {
       model: this.provider(model),
       messages: toAiSdkMessages(input.messages),
       maxRetries: 0,
     };
+
+    if (input.tools !== undefined) {
+      options.tools = input.tools as ToolSet;
+    }
 
     if (input.temperature !== undefined) {
       options.temperature = input.temperature;
@@ -213,6 +214,7 @@ export class OpenAICompatibleModel implements ChatModel {
 interface TextOptions {
   model: LanguageModel;
   messages: ModelMessage[];
+  tools?: ToolSet;
   temperature?: number;
   maxOutputTokens?: number;
   maxRetries: number;
@@ -232,11 +234,46 @@ interface RuntimeState {
   errors: ModelRuntimeErrorItem[];
 }
 
-/** 将 Core ChatMessage 转为 AI SDK ModelMessage；tool 角色在阶段 6 前显式抛错。 */
+/** 将 Core ChatMessage 转为 AI SDK ModelMessage。 */
 function toAiSdkMessages(messages: ChatMessage[]): ModelMessage[] {
   return messages.map((message): ModelMessage => {
+    if (message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0) {
+      const content = [];
+
+      if (message.content.trim() !== "") {
+        content.push({ type: "text" as const, text: message.content });
+      }
+
+      for (const toolCall of message.toolCalls ?? []) {
+        content.push({
+          type: "tool-call" as const,
+          toolCallId: toolCall.id ?? "",
+          toolName: toolCall.name,
+          input: toolCall.arguments,
+        });
+      }
+
+      return {
+        role: "assistant",
+        content,
+      };
+    }
+
     if (message.role === "tool") {
-      throw new Error("Tool role messages are not supported until the Tool System stage.");
+      return {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: message.toolCallId ?? "",
+            toolName: message.name ?? "unknown_tool",
+            output: {
+              type: "text",
+              value: message.content,
+            },
+          },
+        ],
+      };
     }
 
     return {
@@ -279,6 +316,7 @@ function toModelToolCalls(toolCalls: Array<TypedToolCall<ToolSet>>): ModelToolCa
   }
 
   return toolCalls.map((toolCall) => ({
+    id: toolCall.toolCallId,
     name: toolCall.toolName,
     arguments: toolCall.input,
   }));

@@ -276,6 +276,8 @@ export function ChatPanel() {
         <EmotionPanel result={result} currentEmotion={emotion} events={events} />
       ) : null}
 
+      {result !== null ? <ToolsPanel result={result} events={events} /> : null}
+
       {result !== null ? <PromptDebugPanel result={result} debugContext={debugContext} /> : null}
 
       {result !== null ? (
@@ -287,6 +289,7 @@ export function ChatPanel() {
           <DebugBlock title="Skipped Memories" value={result.metadata?.skippedMemories} />
           <DebugBlock title="Summary Metadata" value={pickSummaryMetadata(result)} />
           <DebugBlock title="Emotion Result" value={pickEmotionMetadata(result)} />
+          <DebugBlock title="Tool Result" value={pickToolMetadata(result)} />
           <DebugBlock title="Safety Result" value={result.safety} />
           <DebugBlock title="Persona Result" value={result.persona} />
           <DebugBlock title="Model Raw Output" value={result.modelOutput} />
@@ -402,6 +405,45 @@ function EmotionPanel({
   );
 }
 
+function ToolsPanel({
+  result,
+  events,
+}: {
+  result: ChatWorkflowOutput;
+  events: SerializedCoreEvent[];
+}) {
+  const debugContext = result.metadata?.debugContext as ChatWorkflowDebugContext | undefined;
+  const toolEvents = events.filter((event) => event.type.startsWith("tool:"));
+
+  return (
+    <div className="debug-block">
+      <p className="section-title">Tools Panel</p>
+      <div className="memory-rows">
+        <Row label="Provider" value={formatProviderName(result.metadata?.toolProvider)} />
+        <Row label="Registered Tools" value={String(debugContext?.toolDefinitions?.length ?? 0)} />
+        <Row label="Requested Tool Calls" value={String(debugContext?.toolCalls?.length ?? 0)} />
+        <Row label="Tool Results" value={String(result.toolResults?.length ?? 0)} />
+        <Row
+          label="Follow-up Generate"
+          value={result.metadata?.toolFollowUpGenerated === true ? "yes" : "no"}
+        />
+      </div>
+      <p className="section-subtitle">Registered Tools</p>
+      <pre className="output">{render(debugContext?.toolDefinitions ?? [])}</pre>
+      <p className="section-subtitle">Tool Calls</p>
+      <pre className="output">{render(debugContext?.toolCalls ?? [])}</pre>
+      <p className="section-subtitle">Tool Results</p>
+      <pre className="output">{render(result.toolResults ?? [])}</pre>
+      <p className="section-subtitle">Tool Follow-up Messages</p>
+      <pre className="output">{render(debugContext?.toolFollowUpMessages ?? [])}</pre>
+      <p className="section-subtitle">Tool Observer Events</p>
+      <pre className="output">
+        {toolEvents.length === 0 ? "（无 tool 事件）" : formatEvents(toolEvents)}
+      </pre>
+    </div>
+  );
+}
+
 function PromptDebugPanel({
   result,
   debugContext,
@@ -476,6 +518,7 @@ function ObserverEventsPanel({ events }: { events: SerializedCoreEvent[] }) {
   const memoryEvents = events.filter((event) => event.type.startsWith("memory:"));
   const summaryEvents = events.filter((event) => event.type.startsWith("summary:"));
   const emotionEvents = events.filter((event) => event.type.startsWith("emotion:"));
+  const toolEvents = events.filter((event) => event.type.startsWith("tool:"));
 
   return (
     <div className="debug-block">
@@ -491,6 +534,10 @@ function ObserverEventsPanel({ events }: { events: SerializedCoreEvent[] }) {
       <p className="section-subtitle">Emotion Events（analyze / transition）</p>
       <pre className="output">
         {emotionEvents.length === 0 ? "（无 emotion 事件）" : formatEvents(emotionEvents)}
+      </pre>
+      <p className="section-subtitle">Tool Events（list / execute）</p>
+      <pre className="output">
+        {toolEvents.length === 0 ? "（无 tool 事件）" : formatEvents(toolEvents)}
       </pre>
       <p className="section-subtitle">All Events</p>
       <pre className="output">{JSON.stringify(events, null, 2)}</pre>
@@ -572,6 +619,31 @@ function pickEmotionMetadata(result: ChatWorkflowOutput): unknown {
     nextEmotion: debugContext?.nextEmotion,
     emotionContext: debugContext?.emotionContext,
   };
+}
+
+function pickToolMetadata(result: ChatWorkflowOutput): unknown {
+  const debugContext = result.metadata?.debugContext as ChatWorkflowDebugContext | undefined;
+
+  return {
+    toolProvider: result.metadata?.toolProvider,
+    toolDefinitions: debugContext?.toolDefinitions,
+    toolCalls: debugContext?.toolCalls,
+    toolResults: result.toolResults,
+    toolRounds: result.metadata?.toolRounds,
+    toolFollowUpGenerated: result.metadata?.toolFollowUpGenerated,
+  };
+}
+
+function formatProviderName(value: unknown): string {
+  if (typeof value !== "object" || value === null) {
+    return "—";
+  }
+
+  const provider = value as { id?: unknown; name?: unknown };
+  const id = typeof provider.id === "string" ? provider.id : "unknown";
+  const name = typeof provider.name === "string" ? provider.name : "unknown";
+
+  return `${name} (${id})`;
 }
 
 function formatEmotionInline(emotion: EmotionState | null | undefined): string {
