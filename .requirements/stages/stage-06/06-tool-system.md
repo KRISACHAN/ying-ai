@@ -400,16 +400,18 @@ tool name: unknown_tool
 
 ```ts
 {
+  toolCallId: modelToolCall.id,
   name: "unknown_tool",
-  result: {
-    ok: false,
-    error: {
-      code: "TOOL_NOT_FOUND",
-      message: "Tool is not registered: unknown_tool"
-    }
-  }
+  ok: false,
+  error: {
+    code: "TOOL_NOT_FOUND",
+    message: "Tool is not registered: unknown_tool",
+  },
+  result: null,
 }
 ```
+
+不要把 `ok` / `error` 嵌套进 `result`；`result` 只承载工具业务返回值，失败时可为 `null` 或省略业务字段。
 
 然后把该结果传给模型进行二次生成。
 
@@ -542,8 +544,8 @@ export interface ToolExecutionMetadata {
 
 说明：
 
-1. `result` 保存工具业务结果；
-2. `ok` 表示工具执行是否成功；
+1. `result` 只保存工具业务结果，成功时为工具返回值，失败时可为 `null`；
+2. `ok` 表示工具执行是否成功，与 `error` 同级，**不要**把 `ok` / `error` 再塞进 `result`；
 3. `error` 只保存安全摘要；
 4. 不要把完整异常对象塞进 `metadata`；
 5. `metadata.rawArguments` 只用于调试，不应该长期持久化。
@@ -1272,7 +1274,8 @@ packages/ai-core/src/implementations/tool/format-tool-results.ts
 负责：
 
 ```txt
-ToolResult[] -> system message content
+ToolResult -> tool role message content（单条）
+ToolResult[] -> follow-up messages 组装辅助
 ```
 
 格式原则：
@@ -1647,57 +1650,58 @@ observer 能看到 tool:execute:end 且 ok=false
 7. 新增 `ToolDefinitionMetadata`；
 8. `ToolResult` 扩展 `ok?: boolean` 与 `error?: ToolExecutionError`；
 9. `ToolResult.metadata` 类型收紧为 `ToolExecutionMetadata`；
-10. 新增 `ToolExecutionError`；
-11. 新增 `ToolExecutionMetadata`；
+10. `ToolResult` 的 `ok` / `error` 与 `result` 同级，不嵌套进 `result`；
+11. 新增 `ToolExecutionError`；
+12. 新增 `ToolExecutionMetadata`；
 
 **LocalToolRegistry**
 
-12. 新增 `LocalToolRegistry`；
-13. `LocalToolRegistry.meta.id` 为 `tool.local-registry`；
-14. `LocalToolRegistry.register()` 可注册工具，包含名称与描述校验；
-15. `LocalToolRegistry.list()` 可列出工具；
-16. `LocalToolRegistry.execute()` 可执行工具；
-17. 重复注册同名工具会受控报错；
-18. 未注册工具执行会返回 `TOOL_NOT_FOUND` 结果；
-19. 工具 handler 抛错会返回 `TOOL_EXECUTION_FAILED` 结果；
-20. 工具执行结果包含安全错误摘要，不暴露完整异常对象；
+13. 新增 `LocalToolRegistry`；
+14. `LocalToolRegistry.meta.id` 为 `tool.local-registry`；
+15. `LocalToolRegistry.register()` 可注册工具，包含名称与描述校验；
+16. `LocalToolRegistry.list()` 可列出工具；
+17. `LocalToolRegistry.execute()` 可执行工具；
+18. 重复注册同名工具会受控报错；
+19. 未注册工具执行会返回 `TOOL_NOT_FOUND` 结果；
+20. 工具 handler 抛错会返回 `TOOL_EXECUTION_FAILED` 结果；
+21. 工具执行结果包含安全错误摘要，不暴露完整异常对象；
 
 **适配层**
 
-21. 新增 `ToolDefinition -> GenerateInput.tools` 适配逻辑（`toModelTools`）；
-22. 新增 `ModelToolCall -> ToolCall` 适配逻辑（`toCoreToolCall`）；
-23. 新增 `ToolResult[] -> tool role follow-up messages` 格式化逻辑；
-24. follow-up messages 使用 `role: "tool"` + `toolCallId` 标准格式，不用 system message；
-25. `OpenAICompatibleModel` 实现层正确映射 `role: "tool"` 消息到 Vercel AI SDK `ModelMessage`；
+22. 新增 `ToolDefinition -> GenerateInput.tools` 适配逻辑（`toModelTools`）；
+23. 新增 `ModelToolCall -> ToolCall` 适配逻辑（`toCoreToolCall`）；
+24. 新增 `ToolResult[] -> tool role follow-up messages` 格式化逻辑；
+25. follow-up messages 使用 `role: "tool"` + `toolCallId` 标准格式，不用 system message；
+26. `OpenAICompatibleModel` 实现层正确映射 `role: "tool"` 消息到 Vercel AI SDK `ModelMessage`；
 
 **Workflow**
 
-26. `SimpleChatWorkflow` 在主生成前调用 `tools.list()`；
-27. `SimpleChatWorkflow` 在模型返回 `toolCalls` 后顺序执行工具；
-28. `SimpleChatWorkflow` 在工具执行后触发 tool role follow-up 二次生成；
-29. `SimpleChatWorkflow` 有 `maxToolRounds` 限制，默认 1；
-30. 没有工具时，阶段 5 的聊天链路行为不受影响；
-31. 有工具但模型不调用时，直接使用第一次模型输出；
-32. `ChatWorkflowOutput.toolResults` 返回本轮工具执行结果；
-33. `CoreObserver` 输出工具相关事件（`tool:list`、`tool:execute:start`、`tool:execute:end`）；
+27. `SimpleChatWorkflow` 在主生成前调用 `tools.list()`；
+28. `SimpleChatWorkflow` 在模型返回 `toolCalls` 后顺序执行工具；
+29. `SimpleChatWorkflow` 在工具执行后触发 tool role follow-up 二次生成；
+30. `SimpleChatWorkflow` 有 `maxToolRounds` 限制，默认 1；
+31. 没有工具时，阶段 5 的聊天链路行为不受影响；
+32. 有工具但模型不调用时，直接使用第一次模型输出；
+33. `ChatWorkflowOutput.toolResults` 返回本轮工具执行结果；
+34. `CoreObserver` 输出工具相关事件（`tool:list`、`tool:execute:start`、`tool:execute:end`）；
 
 **demo**
 
-34. demo 可展示已注册工具列表、工具调用过程、工具结果、最终回复；
+35. demo 可展示已注册工具列表、工具调用过程、工具结果、最终回复；
 
 **边界保证**
 
-35. `ai-core` 不读取 env；
-36. `ai-core` 不连接数据库；
-37. `ai-core` 不写死 console；
-38. 不引入 LangChain；
-39. 不引入 LangGraph；
-40. 不实现远程 Tool Call；
-41. 不实现流式工具循环；
-42. 阶段 1 的模型 runtime 能力不被破坏；
-43. 阶段 4 的记忆系统不被破坏；
-44. 阶段 5 的情绪状态机不被破坏；
-45. `@ying-companion/ai-core` 可以正常 `typecheck` 与 `build`。
+36. `ai-core` 不读取 env；
+37. `ai-core` 不连接数据库；
+38. `ai-core` 不写死 console；
+39. 不引入 LangChain；
+40. 不引入 LangGraph；
+41. 不实现远程 Tool Call；
+42. 不实现流式工具循环；
+43. 阶段 1 的模型 runtime 能力不被破坏；
+44. 阶段 4 的记忆系统不被破坏；
+45. 阶段 5 的情绪状态机不被破坏；
+46. `@ying-companion/ai-core` 可以正常 `typecheck` 与 `build`。
 
 ---
 
@@ -1795,11 +1799,12 @@ CoreObserver -> 日志服务 / 数据库 / 后台管理
 18. 默认 `maxToolRounds` 使用 1；
 19. 验收时必须跑 `typecheck` 与 `build`；
 20. demo 必须能看到工具调用链路；
-21. 必须先给 `ModelToolCall` 补上 `id?: string`，否则工具 id 会丢失；
-22. 必须先给 `ChatMessage` 补上 `toolCallId?: string`，否则无法构造标准 tool role 消息；
-23. follow-up messages 使用 `role: "tool"` 格式，不要用 system message 兜底；
-24. `sanitizeHistory` 过滤 tool role 只针对宿主传入的 `history`，Workflow 内部构造的 follow-up messages 不受此约束，不要误删；
-25. `OpenAICompatibleModel` 的 ChatMessage → ModelMessage 转换逻辑需要覆盖 `role: "tool"` 分支，映射 `toolCallId` 到 SDK 的 `tool_call_id` 字段。
+21. `ToolResult` 的 `ok` / `error` 与 `result` 同级，不要把 `ok` / `error` 嵌套进 `result`；
+22. 必须先给 `ModelToolCall` 补上 `id?: string`，否则工具 id 会丢失；
+23. 必须先给 `ChatMessage` 补上 `toolCallId?: string`，否则无法构造标准 tool role 消息；
+24. follow-up messages 使用 `role: "tool"` 格式，不要用 system message 兜底；
+25. `sanitizeHistory` 过滤 tool role 只针对宿主传入的 `history`，Workflow 内部构造的 follow-up messages 不受此约束，不要误删；
+26. `OpenAICompatibleModel` 的 ChatMessage → ModelMessage 转换逻辑需要覆盖 `role: "tool"` 分支，映射 `toolCallId` 到 SDK 的 `tool_call_id` 字段。
 
 本阶段的成功标准不是“拥有很多工具”，而是：
 
