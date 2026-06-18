@@ -362,7 +362,7 @@ maxToolRounds = 3
 如果：
 
 ```ts
-await tools.list()
+await tools.list();
 ```
 
 返回空数组，则：
@@ -454,14 +454,20 @@ export interface ToolParametersSchema {
   required?: string[];
   additionalProperties?: boolean;
 }
+
+export interface ToolDefinitionMetadata {
+  tags?: string[];
+  [key: string]: unknown;
+}
 ```
 
 说明：
 
 1. V1 只支持 object 参数；
-2. 该结构接近 JSON Schema，但保持为 Core 自己的类型；
-3. 不要在 public abstraction 中暴露 AI SDK Tool 类型；
-4. 不要在 `ToolDefinition` 中直接保存 handler。
+2. `ToolParametersSchema` 接近 JSON Schema，但保持为 Core 自己的类型；
+3. `ToolDefinitionMetadata` 用于工具注册时附带的扩展信息（分类、标签等），V1 允许任意 key；
+4. 不要在 public abstraction 中暴露 AI SDK Tool 类型；
+5. 不要在 `ToolDefinition` 中直接保存 handler。
 
 ### 6.2 ToolCall
 
@@ -518,10 +524,7 @@ export interface ToolResult {
 
 ```ts
 export interface ToolExecutionError {
-  code:
-    | "TOOL_NOT_FOUND"
-    | "TOOL_INVALID_ARGUMENTS"
-    | "TOOL_EXECUTION_FAILED";
+  code: "TOOL_NOT_FOUND" | "TOOL_INVALID_ARGUMENTS" | "TOOL_EXECUTION_FAILED";
   message: string;
 }
 ```
@@ -577,7 +580,7 @@ export type ToolHandler = (input: ToolExecuteInput) => Promise<ToolResult>;
 建议不要把 handler 设计成：
 
 ```ts
-(args) => result
+(args) => result;
 ```
 
 原因：
@@ -746,9 +749,7 @@ packages/ai-core/src/implementations/workflow/tool-message-adapter.ts
 建议提供：
 
 ```ts
-export function toModelTools(
-  definitions: ToolDefinition[],
-): Record<string, unknown> | undefined;
+export function toModelTools(definitions: ToolDefinition[]): Record<string, unknown> | undefined;
 ```
 
 行为：
@@ -767,7 +768,26 @@ export function toModelTools(
 
 ### 8.4 ModelToolCall -> ToolCall
 
-建议提供：
+**前置修改：** 当前 `packages/ai-core/src/abstractions/model.ts` 的 `ModelToolCall` 定义为：
+
+```ts
+export interface ModelToolCall {
+  name: string;
+  arguments: unknown;
+}
+```
+
+缺少 `id` 字段。OpenAI function calling 协议的 tool_call 响应带有 `id`（形如 `call_abc123`），二次生成时必须用该 id 关联 tool result 消息。阶段 6 实现时**必须先给 `ModelToolCall` 补上 `id?: string`**：
+
+```ts
+export interface ModelToolCall {
+  id?: string; // 新增，对应 OpenAI tool_call.id
+  name: string;
+  arguments: unknown;
+}
+```
+
+在此基础上提供适配函数：
 
 ```ts
 export function toCoreToolCall(modelToolCall: ModelToolCall): ToolCall;
@@ -794,43 +814,66 @@ modelToolCall.arguments -> ToolCall.arguments
 
 ### 8.5 ToolResult -> Follow-up Messages
 
-工具结果需要重新注入模型。
+工具结果必须按 OpenAI function calling 标准协议注入到二次生成的消息中。
 
-V1 可以采用简化策略，不强行依赖 AI SDK 的底层 tool result message 类型。
-
-推荐方式：
-
-```txt
-在二次生成时追加一个 tool result summary message
-```
-
-例如：
+**前置修改：** 当前 `ChatMessage` 缺少 `toolCallId` 字段，而 `tool` role 消息需要通过 `toolCallId` 与 `ModelToolCall.id` 关联。阶段 6 实现时**必须给 `ChatMessage` 补上 `toolCallId?: string`**：
 
 ```ts
-{
-  role: "system",
-  content: formatToolResultsForPrompt(toolResults),
+export interface ChatMessage {
+  role: ChatMessageRole;
+  content: string;
+  name?: string;
+  toolCallId?: string; // 新增，tool role 消息专用，关联 ModelToolCall.id
 }
 ```
 
-格式示例：
+Follow-up messages 的构造规则：
 
 ```txt
-以下是本轮工具调用结果，请基于这些结果自然回复用户，不要暴露内部工具调用细节。
-
-工具：get_current_time
-结果：2026-06-18 15:30:00 Asia/Singapore
-
-工具：search_memory
-结果：用户喜欢五月天；用户是前端开发工程师
+原始 messages（system + history + user）
+↓
+追加 assistant 消息（携带模型返回的 toolCalls 信息）
+↓
+每个工具结果追加一条 tool role 消息
+↓
+传入二次 model.generate()
 ```
 
-说明：
+具体格式：
 
-1. V1 先保证功能稳定；
-2. 后续可以再切换到更严格的 provider-native tool result message；
-3. 该格式化逻辑应在实现层，不应泄露到业务层；
-4. 不要把工具调用细节直接作为最终回复返回给用户。
+```ts
+// assistant 消息，标记本轮模型请求了哪些工具
+{
+  role: "assistant",
+  content: "",          // 无文字输出时为空字符串
+}
+
+// 每个工具结果各一条 tool role 消息
+{
+  role: "tool",
+  toolCallId: toolResult.toolCallId,   // 对应 ModelToolCall.id
+  content: formatToolResultContent(toolResult),
+}
+```
+
+`formatToolResultContent` 将 `ToolResult` 序列化为模型可读的字符串：
+
+```ts
+// 成功
+JSON.stringify(toolResult.result);
+
+// 失败
+JSON.stringify({ error: toolResult.error?.code, message: toolResult.error?.message });
+```
+
+**模型实现层的适配：** `OpenAICompatibleModel.generateOnce()` 在将 `ChatMessage[]` 转换为 Vercel AI SDK 的 `ModelMessage[]` 时，需要正确映射 `role: "tool"` 消息（`toolCallId` 对应 SDK 的 `tool_call_id` 字段）。此适配逻辑只在实现层，不泄露到 `ChatMessage` 抽象以外。
+
+注意：
+
+1. `sanitizeHistory` 过滤 tool role 的规则**只作用于宿主传入的 `history`**，Workflow 内部构造的 follow-up messages 不走此过滤；
+2. 不要把工具调用细节直接作为最终回复返回给用户；
+3. 格式化逻辑在实现层（`tool-adapter.ts` 或 `format-tool-results.ts`），不泄露到业务层；
+4. 如果 `toolCallId` 为空（模型未返回 id），content 仍然注入，id 对应字段留空字符串。
 
 ---
 
@@ -1590,42 +1633,71 @@ observer 能看到 tool:execute:end 且 ok=false
 
 本阶段完成后，需要满足：
 
-1. 新增 `LocalToolRegistry`；
-2. `LocalToolRegistry.meta.id` 为 `tool.local-registry`；
-3. `LocalToolRegistry.register()` 可注册工具；
-4. `LocalToolRegistry.list()` 可列出工具；
-5. `LocalToolRegistry.execute()` 可执行工具；
-6. 重复注册同名工具会受控报错；
-7. 未注册工具执行会返回 `TOOL_NOT_FOUND`；
-8. 工具 handler 抛错会返回 `TOOL_EXECUTION_FAILED`；
-9. 工具执行结果包含安全错误摘要，不暴露完整异常对象；
-10. `ToolDefinition.parameters` 有稳定结构约定；
-11. 新增 `ToolExecutionError`；
-12. 新增 `ToolExecutionMetadata`；
-13. 新增 `ToolDefinitionMetadata`；
-14. 新增 `ToolDefinition -> GenerateInput.tools` 适配逻辑；
-15. 新增 `ModelToolCall -> ToolCall` 适配逻辑；
-16. 新增 `ToolResult[] -> follow-up message` 格式化逻辑；
-17. `SimpleChatWorkflow` 在模型生成前调用 `tools.list()`；
-18. `SimpleChatWorkflow` 在模型返回 `toolCalls` 后执行工具；
-19. `SimpleChatWorkflow` 支持工具二次生成；
-20. `SimpleChatWorkflow` 有 `maxToolRounds` 限制，默认 1；
-21. 没有工具时，阶段 5 的聊天链路不受影响；
-22. 有工具但模型不调用时，直接使用第一次模型输出；
-23. `ChatWorkflowOutput.toolResults` 返回工具结果；
-24. `CoreObserver` 输出工具相关事件；
-25. demo 可展示工具列表、工具调用、工具结果、最终回复；
-26. `ai-core` 不读取 env；
-27. `ai-core` 不连接数据库；
-28. `ai-core` 不写死 console；
-29. 不引入 LangChain；
-30. 不引入 LangGraph；
-31. 不实现远程 Tool Call；
-32. 不实现流式工具循环；
-33. 阶段 1 的模型 runtime 能力不被破坏；
-34. 阶段 4 的记忆系统不被破坏；
-35. 阶段 5 的情绪状态机不被破坏；
-36. `@ying-companion/ai-core` 可以正常 `typecheck` 与 `build`。
+**前置抽象修改（model.ts / model abstraction）**
+
+1. `ModelToolCall` 补上 `id?: string` 字段；
+2. `ChatMessage` 补上 `toolCallId?: string` 字段（tool role 消息专用）；
+
+**类型新增（tool.ts）**
+
+3. `ToolDefinition.description` 改为必填 `string`；
+4. `ToolDefinition.parameters` 类型收紧为 `ToolParametersSchema`；
+5. `ToolDefinition.metadata` 类型收紧为 `ToolDefinitionMetadata`；
+6. 新增 `ToolParametersSchema`；
+7. 新增 `ToolDefinitionMetadata`；
+8. `ToolResult` 扩展 `ok?: boolean` 与 `error?: ToolExecutionError`；
+9. `ToolResult.metadata` 类型收紧为 `ToolExecutionMetadata`；
+10. 新增 `ToolExecutionError`；
+11. 新增 `ToolExecutionMetadata`；
+
+**LocalToolRegistry**
+
+12. 新增 `LocalToolRegistry`；
+13. `LocalToolRegistry.meta.id` 为 `tool.local-registry`；
+14. `LocalToolRegistry.register()` 可注册工具，包含名称与描述校验；
+15. `LocalToolRegistry.list()` 可列出工具；
+16. `LocalToolRegistry.execute()` 可执行工具；
+17. 重复注册同名工具会受控报错；
+18. 未注册工具执行会返回 `TOOL_NOT_FOUND` 结果；
+19. 工具 handler 抛错会返回 `TOOL_EXECUTION_FAILED` 结果；
+20. 工具执行结果包含安全错误摘要，不暴露完整异常对象；
+
+**适配层**
+
+21. 新增 `ToolDefinition -> GenerateInput.tools` 适配逻辑（`toModelTools`）；
+22. 新增 `ModelToolCall -> ToolCall` 适配逻辑（`toCoreToolCall`）；
+23. 新增 `ToolResult[] -> tool role follow-up messages` 格式化逻辑；
+24. follow-up messages 使用 `role: "tool"` + `toolCallId` 标准格式，不用 system message；
+25. `OpenAICompatibleModel` 实现层正确映射 `role: "tool"` 消息到 Vercel AI SDK `ModelMessage`；
+
+**Workflow**
+
+26. `SimpleChatWorkflow` 在主生成前调用 `tools.list()`；
+27. `SimpleChatWorkflow` 在模型返回 `toolCalls` 后顺序执行工具；
+28. `SimpleChatWorkflow` 在工具执行后触发 tool role follow-up 二次生成；
+29. `SimpleChatWorkflow` 有 `maxToolRounds` 限制，默认 1；
+30. 没有工具时，阶段 5 的聊天链路行为不受影响；
+31. 有工具但模型不调用时，直接使用第一次模型输出；
+32. `ChatWorkflowOutput.toolResults` 返回本轮工具执行结果；
+33. `CoreObserver` 输出工具相关事件（`tool:list`、`tool:execute:start`、`tool:execute:end`）；
+
+**demo**
+
+34. demo 可展示已注册工具列表、工具调用过程、工具结果、最终回复；
+
+**边界保证**
+
+35. `ai-core` 不读取 env；
+36. `ai-core` 不连接数据库；
+37. `ai-core` 不写死 console；
+38. 不引入 LangChain；
+39. 不引入 LangGraph；
+40. 不实现远程 Tool Call；
+41. 不实现流式工具循环；
+42. 阶段 1 的模型 runtime 能力不被破坏；
+43. 阶段 4 的记忆系统不被破坏；
+44. 阶段 5 的情绪状态机不被破坏；
+45. `@ying-companion/ai-core` 可以正常 `typecheck` 与 `build`。
 
 ---
 
@@ -1653,7 +1725,7 @@ LangGraphChatWorkflow
 但外部仍然通过：
 
 ```ts
-core.executeWorkflow(input)
+core.executeWorkflow(input);
 ```
 
 调用，不应发生破坏性变化。
@@ -1722,7 +1794,12 @@ CoreObserver -> 日志服务 / 数据库 / 后台管理
 17. 不要默认注册工具，工具应由宿主显式注入；
 18. 默认 `maxToolRounds` 使用 1；
 19. 验收时必须跑 `typecheck` 与 `build`；
-20. demo 必须能看到工具调用链路。
+20. demo 必须能看到工具调用链路；
+21. 必须先给 `ModelToolCall` 补上 `id?: string`，否则工具 id 会丢失；
+22. 必须先给 `ChatMessage` 补上 `toolCallId?: string`，否则无法构造标准 tool role 消息；
+23. follow-up messages 使用 `role: "tool"` 格式，不要用 system message 兜底；
+24. `sanitizeHistory` 过滤 tool role 只针对宿主传入的 `history`，Workflow 内部构造的 follow-up messages 不受此约束，不要误删；
+25. `OpenAICompatibleModel` 的 ChatMessage → ModelMessage 转换逻辑需要覆盖 `role: "tool"` 分支，映射 `toolCallId` 到 SDK 的 `tool_call_id` 字段。
 
 本阶段的成功标准不是“拥有很多工具”，而是：
 
