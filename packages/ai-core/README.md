@@ -184,7 +184,8 @@ flowchart TD
   end
 
   subgraph PhaseB["阶段 B：Prompt 拼装"]
-    F --> G["buildSystemPrompt\n= Persona\n+ Summary 块\n+ Memory 块\n+ Emotion 块\n+ 回复约束"]
+    F --> F2["ToolRegistry.list\n（若宿主注入工具）"]
+    F2 --> G["buildSystemPrompt\n= Persona\n+ Summary 块\n+ Memory 块\n+ Emotion 块\n+ 工具说明\n+ 回复约束"]
     G --> H["messages =\n[system,\n recentHistory,\n user: prompt]"]
   end
 
@@ -193,7 +194,8 @@ flowchart TD
     I --> J{"有 toolCalls?"}
     J -->|是| K["ToolRegistry.execute\n每个 tool_call"]
     K --> L["将 ToolResult 拼回 messages"]
-    L --> I
+    L --> I2["Model.generate\n二次生成"]
+    I2 --> M
     J -->|否| M["得到候选回复文本"]
   end
 
@@ -213,14 +215,15 @@ flowchart TD
   Q -.->|失败| END
 ```
 
-**与当前 `SimpleChatWorkflow` 的差异：**
+**当前 `SimpleChatWorkflow` 与阶段 7 目标态的差异：**
 
-| 步骤                | 目标态（阶段 7）                                               | 当前实现（阶段 5）                                   |
-| ------------------- | -------------------------------------------------------------- | ---------------------------------------------------- |
-| `Emotion.analyze`   | ✅ 拼入 prompt                                                 | ✅ 已接入；默认 `DisabledEmotionEngine` 返回 neutral |
-| `Tool` 多步循环     | ✅ `tool_call → execute → re-generate`                         | ❌ 忽略 `toolCalls`                                  |
-| `Persona.load` 时机 | 与 recall / emotion 可并行                                     | 串行，且在 Safety 之后                               |
-| 其余                | Safety / Summary / Memory recall / Model / Memory extract·save | ✅ 已实现                                            |
+| 步骤                | 目标态（阶段 7）                                               | 当前实现（阶段 6）                                     |
+| ------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
+| `Emotion.analyze`   | ✅ 拼入 prompt                                                 | ✅ 已接入；默认 `DisabledEmotionEngine` 返回 neutral   |
+| `Tool` 工具循环     | 可配置多轮 / 可演进为编排节点                                  | ✅ 非流式 generate，默认最多 1 轮工具 + 1 次二次生成   |
+| follow-up toolCalls | 可继续编排或中断恢复                                           | 不再执行，写入 `droppedToolCalls` / `toolCallsDropped` |
+| `Persona.load` 时机 | 与 recall / emotion 可并行                                     | 串行，且在 Safety 之后                                 |
+| 其余                | Safety / Summary / Memory recall / Model / Memory extract·save | ✅ 已实现                                              |
 
 > 默认 `createCompanionCore({ model })` 仍使用 `DisabledEmotionEngine`，不会额外触发情绪分析 LLM。
 > 宿主显式注入 `new ModelEmotionEngine({ model })` 后，Workflow 会分析意向情绪并把最终情绪拼入 prompt。
@@ -250,13 +253,15 @@ flowchart TD
 3. Prompt 拼装（无模型调用）
    ├─ formatSummaryForPrompt(summary)
    ├─ formatMemoriesForPrompt(memories)
-   ├─ buildPersonaSystemPrompt(persona, summary, memory, emotion)
+   ├─ tools.list()                         → ToolDefinition[]（若宿主注入工具）
+   ├─ buildPersonaSystemPrompt(persona, summary, memory, emotion, tools)
    └─ messages = [system, ...recentHistory, user:message]
 
 4. 主生成 + 工具循环（阶段 6，非流式 generate）
    ├─ model.generate({ messages, tools })  → text + toolCalls?
    ├─ [若有 toolCalls] tools.execute(call) → ToolResult
-   ├─ [若有 toolCalls] model.generate(...)  → 二次生成（可循环多轮）
+   ├─ [若有 toolCalls] model.generate(...)  → 二次生成
+   ├─ [若二次仍有 toolCalls] droppedToolCalls 记录，不再执行第三轮
    └─ 得到最终 assistant 文本
 
 5. 输出守卫
@@ -282,7 +287,7 @@ flowchart TD
 | 调用                   | 触发条件                    | 次数  |
 | ---------------------- | --------------------------- | ----- |
 | 主 `generate`          | 每轮必有                    | 1+    |
-| `generate`（工具二次） | 模型返回 toolCalls          | 0–N   |
+| `generate`（工具二次） | 模型返回 toolCalls          | 0–1   |
 | `MemoryExtractor`      | 每轮必有（注入 memory 时）  | 1     |
 | `SummaryUpdater`       | 消息数超阈值                | 0–1   |
 | `Emotion.analyze`      | 阶段 5 后每轮               | 1     |
@@ -343,12 +348,12 @@ flowchart LR
 
 ### 4.4 工程与边界
 
-| 实践             | 说明                                                          |
-| ---------------- | ------------------------------------------------------------- |
-| **接口优先**     | 宿主只依赖 `abstractions/` 类型                               |
-| **稳定 meta.id** | `core.inspect()` 与 Observer 不依赖类名                       |
-| **debugContext** | `metadata.debugContext` 还原完整 prompt（调试用，非业务契约） |
-| **包边界**       | DB 在 `memory-postgres`；ai-core 零 `pg` 依赖                 |
+| 实践             | 说明                                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| **接口优先**     | 宿主只依赖 `abstractions/` 类型                                                                          |
+| **稳定 meta.id** | `core.inspect()` 与 Observer 不依赖类名                                                                  |
+| **debugContext** | `metadata.debugContext` 还原首次 prompt；工具二次生成输入见 `toolFollowUpMessages`（调试用，非业务契约） |
+| **包边界**       | DB 在 `memory-postgres`；ai-core 零 `pg` 依赖                                                            |
 
 ---
 
@@ -398,6 +403,57 @@ previousEmotion = result.emotion;
 ```
 
 `EmotionState` 表示「伴侣对用户的情绪状态」。Core 不保存该状态、不建情绪表；正式业务层应只持久化 `current / intensity / updatedAt`，下一轮再作为 `ChatWorkflowInput.emotion` 传回。
+
+启用本地工具调用时，宿主显式注入 `LocalToolRegistry`。Core 默认仍使用 `EmptyToolRegistry`，无工具时行为与普通聊天一致：
+
+```ts
+import { createCompanionCore, createModel, LocalToolRegistry } from "@ying-companion/ai-core";
+
+const model = createModel({ apiKey: "...", model: "gpt-4o-mini" });
+const tools = new LocalToolRegistry();
+
+tools.register(
+  {
+    name: "get_current_time",
+    description: "获取当前本地时间。",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  async (input) => ({
+    name: "get_current_time",
+    ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
+    ok: true,
+    result: {
+      timezone: "Asia/Shanghai",
+      timezoneLabel: "北京时间",
+      localTime: new Intl.DateTimeFormat("zh-CN", {
+        timeZone: "Asia/Shanghai",
+        dateStyle: "medium",
+        timeStyle: "medium",
+        hour12: false,
+      }).format(new Date()),
+      utcIso: new Date().toISOString(),
+    },
+  }),
+);
+
+const core = createCompanionCore({ model, tools });
+
+const result = await core.executeWorkflow({
+  sessionId: "session-1",
+  message: "现在几点了？",
+  history: [],
+});
+
+result.toolResults; // 本轮工具执行结果
+result.metadata?.toolCallsDropped; // 二次生成仍请求工具时为 true
+```
+
+V1 工具循环只接入非流式 `generate`，默认最多执行 1 轮工具；二次生成再次返回的 `toolCalls` 会进入 `droppedToolCalls` 供调试观察，不会继续执行第三轮。
 
 ---
 

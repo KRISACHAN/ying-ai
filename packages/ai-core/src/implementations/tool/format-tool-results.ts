@@ -1,6 +1,6 @@
 import type { ToolResult } from "../../abstractions/tool";
 
-/** 将 ToolResult 序列化为模型可读、无堆栈的 tool role content。 */
+/** 将 ToolResult 序列化为模型可读、无堆栈的 tool role content；返回值不是 ToolResult 结构。 */
 export function formatToolResultForModel(result: ToolResult): string {
   if (result.ok === false) {
     return safeJsonStringify({

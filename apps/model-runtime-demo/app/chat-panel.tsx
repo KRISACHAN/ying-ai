@@ -424,6 +424,10 @@ function ToolsPanel({
         <Row label="Requested Tool Calls" value={String(debugContext?.toolCalls?.length ?? 0)} />
         <Row label="Tool Results" value={String(result.toolResults?.length ?? 0)} />
         <Row
+          label="Dropped Tool Calls"
+          value={String(debugContext?.droppedToolCalls?.length ?? 0)}
+        />
+        <Row
           label="Follow-up Generate"
           value={result.metadata?.toolFollowUpGenerated === true ? "yes" : "no"}
         />
@@ -434,6 +438,8 @@ function ToolsPanel({
       <pre className="output">{render(debugContext?.toolCalls ?? [])}</pre>
       <p className="section-subtitle">Tool Results</p>
       <pre className="output">{render(result.toolResults ?? [])}</pre>
+      <p className="section-subtitle">Dropped Tool Calls（达到 V1 单轮工具限制后不再执行）</p>
+      <pre className="output">{render(debugContext?.droppedToolCalls ?? [])}</pre>
       <p className="section-subtitle">Tool Follow-up Messages</p>
       <pre className="output">{render(debugContext?.toolFollowUpMessages ?? [])}</pre>
       <p className="section-subtitle">Tool Observer Events</p>
@@ -508,8 +514,14 @@ function PromptDebugPanel({
       </pre>
       <p className="section-subtitle">Current User Message</p>
       <pre className="output">{currentUser?.content ?? "—"}</pre>
-      <p className="section-subtitle">Final Messages（实际传给模型）</p>
+      <p className="section-subtitle">Initial Generate Messages（首次传给模型）</p>
       <pre className="output">{JSON.stringify(messages, null, 2)}</pre>
+      {debugContext.toolFollowUpMessages !== undefined ? (
+        <>
+          <p className="section-subtitle">Final Generate Messages（工具二次生成实际输入）</p>
+          <pre className="output">{JSON.stringify(debugContext.toolFollowUpMessages, null, 2)}</pre>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -629,6 +641,8 @@ function pickToolMetadata(result: ChatWorkflowOutput): unknown {
     toolDefinitions: debugContext?.toolDefinitions,
     toolCalls: debugContext?.toolCalls,
     toolResults: result.toolResults,
+    droppedToolCalls: debugContext?.droppedToolCalls,
+    toolCallsDropped: result.metadata?.toolCallsDropped,
     toolRounds: result.metadata?.toolRounds,
     toolFollowUpGenerated: result.metadata?.toolFollowUpGenerated,
   };

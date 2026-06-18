@@ -23,6 +23,7 @@ import { resolveChatMemoryRuntime, type MemoryDatabaseStatus } from "../../lib/m
 const MAX_MESSAGE_LENGTH = 8000;
 const MAX_HISTORY_LENGTH = 50;
 const DEFAULT_COMPANION_ID = "debug-companion";
+const DEMO_TIME_ZONE = "Asia/Shanghai";
 const DEFAULT_SUMMARY_OPTIONS: Required<SummaryOptions> = {
   enabled: false,
   recentMessageLimit: 10,
@@ -215,7 +216,7 @@ export async function POST(request: Request): Promise<Response> {
     const tools = createDemoTools({
       memory: memoryRuntime.provider,
       scope,
-      emotion: inputEmotion,
+      fallbackEmotion: inputEmotion,
     });
 
     // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
@@ -306,7 +307,7 @@ function validateEmotion(raw: unknown): string | null {
 function createDemoTools(options: {
   memory: MemoryProvider;
   scope: MemoryScope;
-  emotion: EmotionState;
+  fallbackEmotion: EmotionState;
 }): LocalToolRegistry {
   const tools = new LocalToolRegistry();
 
@@ -326,10 +327,7 @@ function createDemoTools(options: {
       name: "get_current_time",
       ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
       ok: true,
-      result: {
-        iso: new Date().toISOString(),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      },
+      result: createCurrentTimeResult(),
     }),
   );
 
@@ -413,15 +411,75 @@ function createDemoTools(options: {
       name: "get_emotion_state",
       ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
       ok: true,
-      result: options.emotion,
+      result: readCurrentEmotion(input.metadata) ?? options.fallbackEmotion,
     }),
   );
 
   return tools;
 }
 
+function createCurrentTimeResult(now = new Date()): {
+  timezone: string;
+  timezoneLabel: string;
+  utcOffset: string;
+  localTime: string;
+  utcIso: string;
+  instruction: string;
+} {
+  return {
+    timezone: DEMO_TIME_ZONE,
+    timezoneLabel: "北京时间",
+    utcOffset: "+08:00",
+    localTime: formatDateTimeInTimeZone(now, DEMO_TIME_ZONE),
+    utcIso: now.toISOString(),
+    instruction: "回答北京时间时使用 localTime，不要把 utcIso 当作北京时间。",
+  };
+}
+
+function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  return [
+    `${getDatePart(parts, "year")}-${getDatePart(parts, "month")}-${getDatePart(parts, "day")}`,
+    `${getDatePart(parts, "hour")}:${getDatePart(parts, "minute")}:${getDatePart(parts, "second")}`,
+  ].join(" ");
+}
+
+function getDatePart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {
+  return parts.find((part) => part.type === type)?.value ?? "";
+}
+
 function toRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function readCurrentEmotion(metadata: Record<string, unknown> | undefined): EmotionState | null {
+  const raw = metadata?.currentEmotion;
+
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+
+  const emotion = raw as Partial<EmotionState>;
+  const allowedTypes = ["neutral", "happy", "sad", "angry", "anxious", "affectionate"];
+
+  if (!allowedTypes.includes(emotion.current as string)) {
+    return null;
+  }
+  if (typeof emotion.intensity !== "number" || !Number.isFinite(emotion.intensity)) {
+    return null;
+  }
+
+  return normalizeEmotion(emotion as EmotionState);
 }
 
 function normalizeEmotion(emotion: EmotionState): EmotionState {

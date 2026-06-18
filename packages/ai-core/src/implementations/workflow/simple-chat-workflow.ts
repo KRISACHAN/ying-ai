@@ -1,10 +1,10 @@
 /**
- * 当前 V1 聊天主链路实现（阶段 3～5）。
+ * 当前 V1 聊天主链路实现（阶段 3～6）。
  *
  * 编排顺序：Persona → Safety(input) → Summary(load) → Memory(recall)
- * → Emotion(analyze/transition) → Model → Safety(output)
+ * → Emotion(analyze/transition) → ToolRegistry.list → Model.generate
+ * → ToolRegistry.execute → follow-up generate → Safety(output)
  * → Summary(update/save) → Memory(extract/save)。
- * 详见类注释中的约束说明。
  */
 import type { EmotionState } from "../../abstractions/emotion";
 import type { ChatMessage, GenerateOutput, ModelToolCall } from "../../abstractions/model";
@@ -44,14 +44,14 @@ const DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT = 16;
 const DEFAULT_MAX_TOOL_ROUNDS = 1;
 
 /**
- * 阶段 5 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
- * → Emotion(analyze/transition) → Model → Safety(output)
+ * 阶段 6 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
+ * → Emotion(analyze/transition) → ToolRegistry.list → Model/Tool loop → Safety(output)
  * → Summary(update/save) → Memory(extract/save)。
  *
  * 约束：
  * - Memory 失败不得打断主聊天链路；
  * - Emotion 失败不得打断主聊天链路；
- * - 不执行模型返回的 toolCalls；
+ * - V1 只支持非流式 generate 工具循环，默认最多执行 1 轮工具；
  * - 不保存 history，history 由宿主通过 ChatWorkflowInput.history 传入；
  * - 不读取环境变量、不写 console；
  * - Observer 事件失败不得打断主链路；
@@ -173,10 +173,16 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       const summaryContext = formatSummaryForPrompt(loadedSummary);
       const memoryContext = formatMemoriesForPrompt(recalledMemories);
       const emotionContext = formatEmotionForPrompt(emotionResult.next);
+      const toolDefinitions = await listTools({
+        observer,
+        tools,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+      });
       const systemPrompt = buildPersonaSystemPrompt(loadedPersona, {
         ...(summaryContext !== undefined ? { summaryContext } : {}),
         ...(memoryContext !== undefined ? { memoryContext } : {}),
         ...(emotionContext !== undefined ? { emotionContext } : {}),
+        toolDefinitions,
       });
       const messages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
@@ -184,12 +190,11 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         { role: "user", content: input.message },
       ];
 
-      const toolDefinitions = await listTools({
-        observer,
-        tools,
-        ...(sessionId !== undefined ? { sessionId } : {}),
-      });
       const modelTools = toModelTools(toolDefinitions);
+      const toolExecutionMetadata = {
+        ...(input.metadata ?? {}),
+        currentEmotion: emotionResult.next,
+      };
       const generationResult = await generateWithTools({
         observer,
         model,
@@ -197,7 +202,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         messages,
         ...(modelTools !== undefined ? { modelTools } : {}),
         ...(sessionId !== undefined ? { sessionId } : {}),
-        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+        metadata: toolExecutionMetadata,
       });
       const modelOutput = generationResult.finalOutput;
 
@@ -266,6 +271,9 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         toolDefinitions,
         toolCalls: generationResult.toolCalls,
         toolResults: generationResult.toolResults,
+        ...(generationResult.droppedToolCalls.length > 0
+          ? { droppedToolCalls: generationResult.droppedToolCalls }
+          : {}),
         ...(generationResult.followUpMessages !== undefined
           ? { toolFollowUpMessages: generationResult.followUpMessages }
           : {}),
@@ -286,6 +294,8 @@ export class SimpleChatWorkflow implements ChatWorkflow {
           messageCount: messages.length,
           toolDefinitions,
           toolCalls: generationResult.toolCalls,
+          droppedToolCalls: generationResult.droppedToolCalls,
+          toolCallsDropped: generationResult.toolCallsDropped,
           toolRounds: generationResult.rounds,
           toolFollowUpGenerated: generationResult.followUpGenerated,
           extractedMemories: memoryResult.extracted,
@@ -379,6 +389,8 @@ interface GenerateWithToolsResult {
   finalOutput: GenerateOutput;
   toolCalls: ModelToolCall[];
   toolResults: ToolResult[];
+  droppedToolCalls: ModelToolCall[];
+  toolCallsDropped: boolean;
   rounds: number;
   followUpGenerated: boolean;
   followUpMessages?: ChatMessage[];
@@ -422,6 +434,8 @@ async function generateWithTools(
       finalOutput: firstOutput,
       toolCalls,
       toolResults: [],
+      droppedToolCalls: hasTools && DEFAULT_MAX_TOOL_ROUNDS < 1 ? toolCalls : [],
+      toolCallsDropped: hasTools && DEFAULT_MAX_TOOL_ROUNDS < 1 && toolCalls.length > 0,
       rounds: 0,
       followUpGenerated: false,
     };
@@ -455,6 +469,8 @@ async function generateWithTools(
     messages: followUpMessages,
     ...(options.modelTools !== undefined ? { tools: options.modelTools } : {}),
   });
+  const droppedToolCalls = finalOutput.toolCalls ?? [];
+  const toolCallsDropped = droppedToolCalls.length > 0;
   await safeEmit(options.observer, {
     type: "workflow:step",
     timestamp: new Date(),
@@ -464,6 +480,7 @@ async function generateWithTools(
       model: finalOutput.model,
       runtime: finalOutput.runtime,
       toolCallCount: finalOutput.toolCalls?.length ?? 0,
+      toolCallsDropped,
     },
   });
 
@@ -471,6 +488,8 @@ async function generateWithTools(
     finalOutput,
     toolCalls,
     toolResults,
+    droppedToolCalls,
+    toolCallsDropped,
     rounds: 1,
     followUpGenerated: true,
     followUpMessages,
@@ -661,9 +680,14 @@ async function analyzeAndTransitionEmotion(
 /** 将 Persona、摘要、长期记忆与情绪上下文拼成最终 system prompt。 */
 function buildPersonaSystemPrompt(
   persona: CompanionPersona,
-  context: { summaryContext?: string; memoryContext?: string; emotionContext?: string },
+  context: {
+    summaryContext?: string;
+    memoryContext?: string;
+    emotionContext?: string;
+    toolDefinitions?: ToolDefinition[];
+  },
 ): string {
-  const { summaryContext, memoryContext, emotionContext } = context;
+  const { summaryContext, memoryContext, emotionContext, toolDefinitions } = context;
   const lines: string[] = [
     "你是一个 AI 伴侣角色，请始终以该角色身份与用户对话。",
     "",
@@ -698,6 +722,15 @@ function buildPersonaSystemPrompt(
 
   if (emotionContext !== undefined) {
     lines.push("", emotionContext);
+  }
+
+  if ((toolDefinitions?.length ?? 0) > 0) {
+    lines.push(
+      "",
+      "可用工具说明：",
+      "如需当前时间、长期记忆补充或当前情绪状态，可以调用可用工具。",
+      "工具结果返回后，请自然使用这些信息回复用户，不要暴露内部工具调用过程。",
+    );
   }
 
   lines.push(

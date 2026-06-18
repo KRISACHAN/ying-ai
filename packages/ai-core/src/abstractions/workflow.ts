@@ -73,11 +73,13 @@ export interface ChatWorkflowDebugContext {
   toolCalls?: ModelToolCall[];
   /** 工具执行结果快照。 */
   toolResults?: ToolResult[];
+  /** 达到单轮工具轮数限制后被保留但不再执行的模型 toolCalls。 */
+  droppedToolCalls?: ModelToolCall[];
   /** 工具执行后传入二次生成的消息。 */
   toolFollowUpMessages?: ChatMessage[];
   /** buildPersonaSystemPrompt 完整结果。 */
   systemPrompt: string;
-  /** 最终传入 model.generate 的 messages。 */
+  /** 首次传入 model.generate 的 messages；二次生成输入见 toolFollowUpMessages。 */
   messages: ChatMessage[];
   /** 本轮 recall 或 save 中最后一次 embedding 的 vector.length。 */
   embeddingVectorLength?: number;
