@@ -55,7 +55,7 @@ Persona
 
 4. **并行优化**
    - `03-plan.md` 认为 `Persona.load` 与 `Memory.recall`、`Emotion.analyze` 可无依赖并行。
-   - 本文档：Emotion 依赖 `recalledMemories`，Summary 影响 `recentHistory`；**本阶段不实现** `parallelReadSteps`，仅作类型预留。
+   - 本文档：Emotion 依赖 `recalledMemories`，Summary 影响 `recentHistory`；**本阶段不实现并行**，且不在 `ChatWorkflowInput` 暴露相关开关（见 §6.2、§7.2）。
 
 5. **超时预算**
    - `03-plan.md` 强调单轮总超时与并行以控延迟。
@@ -132,7 +132,7 @@ Persona
 3. 默认注入的 `SimpleChatWorkflow` 能保持阶段 3～6 已有的完整行为；
 4. 当前流程顺序、工具最大轮数、Memory / Emotion / Summary 的非致命降级策略不被改变；`ToolRegistry.list` 保持关键路径语义（见 §6.3）；
 5. Workflow 具备稳定 `meta`，不使用 `constructor.name` 判断实现；
-6. Workflow 输出或 Observer 事件中可以获得本轮步骤轨迹；
+6. Workflow 输出（成功/降级）或 `workflow:error` 事件（失败）中可获得本轮步骤轨迹；
 7. 步骤轨迹不暴露 API Key、原始模型异常栈、数据库连接串、完整敏感 Prompt；
 8. `ai-core` 内仍不读环境变量、不写 console、不连接 PostgreSQL；
 9. `memory-postgres` 不新增编排职责；
@@ -155,7 +155,7 @@ Persona
 3. 定义 Workflow 级超时预算的**输入表达与计时记录**（本阶段不实现全链路 AbortSignal 取消）；
 4. 统一主链路、非致命辅助链路、写回链路的失败语义（以当前 `SimpleChatWorkflow` 行为为基线）；
 5. 统一 `CoreObserver` 的 Workflow Step 事件载荷，并保留对既有 `payload.step` 的向后兼容；
-6. 在 `ChatWorkflowOutput.metadata.trace` 中提供可选的步骤轨迹快照；
+6. 在成功/降级返回的 `ChatWorkflowOutput.metadata.trace` 与失败时的 `workflow:error.payload.trace` 中提供步骤轨迹；
 7. 将当前散落在 Workflow 内部的“步骤名称字符串”收束为稳定常量或类型；
 8. 给未来 `LangGraphWorkflow`、`StreamingChatWorkflow`、`RemoteToolWorkflow` 留出实现替换点；
 9. 更新 `packages/ai-core/README.md`，并在 demo 中做**最小**时间线 / trace 透传验证；
@@ -346,9 +346,9 @@ Memory.extract / save            （可选，写回路径）
 workflow:end
 ```
 
-### 6.2 可并行边界（本阶段不实现）
+### 6.2 可并行边界（本阶段不实现，不暴露 API）
 
-V1 **不实现** `parallelReadSteps`；以下仅作未来优化备忘。
+以下仅作未来优化备忘；**不**在 `ChatWorkflowInput` 增加并行相关字段，待真正落地时再设计公开接口。
 
 理论上，在无数据依赖时可并行：
 
@@ -373,8 +373,6 @@ Tool.execute → follow-up generate
 Safety.guardOutput → 对外返回最终文本
 Model.generate → Memory.extract / save
 ```
-
-`workflowOptions.parallelReadSteps` 仅为类型预留，默认 `false`，本阶段不得启用。
 
 ### 6.3 失败策略分层
 
@@ -485,26 +483,23 @@ const result = await core.executeWorkflow({
 ```ts
 workflowOptions?: {
   /**
-   * 单轮总预算（毫秒），用于计时与 trace 标记超预算风险。
-   * 本阶段不实现全链路 AbortSignal 取消；未传时不改变既有行为。
+   * 单轮总预算（毫秒）：仅用于计时，并在 trace / Observer 中标记是否超预算。
+   * 不取消、不中断任何 Provider 调用；未传时不改变既有行为。
    */
   timeoutMs?: number;
-  /** 是否在 metadata.trace 中返回步骤轨迹；默认 false。 */
+  /** 是否在成功/降级返回的 metadata.trace 中附带步骤轨迹；默认 false。 */
   includeTrace?: boolean;
-  /**
-   * 类型预留：并行读取步骤。默认 false，本阶段不实现、不启用。
-   */
-  parallelReadSteps?: boolean;
 };
 ```
 
 约束：
 
-1. `timeoutMs` 是整个 Workflow 的**计时预算**，不是 Provider 内部模型重试预算的替代品；
+1. `timeoutMs` 仅作**计时与超预算标记**，不是 Provider 内部模型重试预算的替代品，**不得**用于取消底层调用；
 2. 阶段 1 的模型重试、降级模型仍由 `ChatModel` 自己负责；
 3. **本阶段不要求**以 `AbortSignal` 穿透改造所有 Provider；
-4. 若某底层调用无法安全中断，超时仅须在 trace / Observer 中记录「超预算」或 `budgetExceeded: true`，**不得**伪称已取消该调用；
-5. 未传 `workflowOptions` 时，阶段 3～6 的现有表现必须保持不变。
+4. 若配置了 `timeoutMs` 且实际耗时超出，须在 trace / Observer 中记录 `budgetExceeded: true` 或等价字段，**不得**伪称已取消该调用；
+5. 未传 `workflowOptions` 时，阶段 3～6 的现有表现必须保持不变；
+6. V1 **不**在 `workflowOptions` 中暴露 `parallelReadSteps` 等未实现开关，避免「看起来支持、实际无行为」的假 API。
 
 ### 7.3 新增步骤轨迹领域类型
 
@@ -560,25 +555,46 @@ export interface WorkflowTrace {
 4. `workflowId` 可以由本轮执行生成，不得假设其等于 userId / sessionId / conversationId；
 5. 类型必须只依赖 abstractions，不 import 具体实现。
 
-### 7.4 输出兼容策略
+### 7.4 输出与失败时的 Trace 策略
 
-在 `ChatWorkflowOutput.metadata` 中新增：
+Workflow **失败时仍抛错**，不改为「失败也返回 `ChatWorkflowOutput`」。因此 trace 的获取路径须按结果区分：
+
+```txt
+成功 / degraded（正常 return）：
+  input.workflowOptions?.includeTrace === true
+  → ChatWorkflowOutput.metadata.trace
+
+失败（throw，无 output）：
+  workflow:error Observer payload 携带安全 Trace 摘要
+  → 宿主从已收集的 Observer 事件还原，或读取 error 事件中的 trace
+```
+
+在 `ChatWorkflowOutput.metadata` 中新增（仅成功/降级返回时有效）：
 
 ```ts
 trace?: WorkflowTrace;
 ```
 
-但仅当：
+仅当 `input.workflowOptions?.includeTrace === true` 时填充。
+
+`workflow:error` 建议扩充 payload（不改变现有 `message` 字段语义）：
 
 ```ts
-input.workflowOptions?.includeTrace === true;
+{
+  sessionId?,
+  message: string;           // 安全摘要，保持现有行为
+  trace?: WorkflowTrace;     // 截至失败点的步骤轨迹，status 为 failed
+}
 ```
 
-时返回完整 trace。
+V1 约束：
 
-无论是否返回 trace，Observer 事件都应完整发射，以供 demo 或宿主实时消费。
+1. **不改变**现有「关键路径失败 → throw」的异常语义；
+2. **不新增**自定义 `WorkflowExecutionError` 类（除非后续阶段确有需要）；
+3. 失败场景的 trace 以 `workflow:error` + 已发射的 Observer 事件为准，demo 应能据此展示失败步骤；
+4. 无论是否 `includeTrace`，Observer 事件（含 `workflow:error` 中的 trace）都应完整发射。
 
-这样可以避免把调试负担变成正式调用的固定响应体成本。
+这样可以避免把调试负担变成正式调用的固定响应体成本，也避免为「错误也返回 trace」而破坏现有调用方。
 
 ---
 
@@ -606,18 +622,20 @@ summary:*
 
 ### 8.2 统一 Workflow Step 事件载荷与向后兼容
 
+现有消费者（含 demo）已按 `payload.step` 解析步骤，例如 `tool:model-generate-with-tools:start`。**`step` 必须保持旧值不变**；规范名通过新字段 `workflowStep` 提供。
+
 `workflow:step` 建议统一携带：
 
 ```ts
 {
   workflowId,
-  /** 规范步骤名，对应 WorkflowStepName */
-  step,
   /**
-   * 兼容字段：保留改造前 payload.step 原值（如 tool:model-generate-with-tools:start）。
-   * 已有 demo / 宿主若按旧字符串解析，可继续读取此字段。
+   * 保持改造前 payload.step 的既有字符串，旧消费者继续读此字段。
+   * 例：tool:model-generate-with-tools:start
    */
-  legacyStep?: string,
+  step: string,
+  /** 新规范步骤名，对应 WorkflowStepName；新消费者优先读此字段。 */
+  workflowStep?: WorkflowStepName,
   phase: "start" | "end" | "skipped" | "failed" | "degraded",
   sessionId?,
   durationMs?,
@@ -629,22 +647,24 @@ summary:*
 }
 ```
 
-规范名与遗留字符串映射示例：
+规范名与既有 `step` 映射示例：
 
 ```txt
-tool:model-generate-with-tools:start  →  step: model:generate, legacyStep 保留原值
-tool:follow-up-generate:start         →  step: model:follow-up-generate
-tool:list:start                       →  step: tool:list
+step: tool:model-generate-with-tools:start  →  workflowStep: model:generate
+step: tool:follow-up-generate:start         →  workflowStep: model:follow-up-generate
+step: tool:list:start                       →  workflowStep: tool:list
 ```
 
 要求：
 
-1. **不得删除或重命名**已有 `payload.step` 值；新消费者优先读 `step`，旧消费者可继续读 `legacyStep` 或原 `step`；
-2. `summary` 必须是可展示摘要；
-3. `error.message` 必须是安全摘要；
-4. `CoreObserver.emit()` 失败仍不得打断 Workflow；
-5. 不为展示方便在 `ai-core` 内写 console；
-6. demo 将这些事件转换为时间线（阶段 8 再做 UI 打磨）。
+1. **不得删除或重命名**已有 `payload.step` 值；旧消费者只读 `step` 即可；
+2. 新消费者读 `workflowStep`（缺失时可回退解析 `step`）；
+3. **不使用** `legacyStep` 等易误导的字段名；
+4. `summary` 必须是可展示摘要；
+5. `error.message` 必须是安全摘要；
+6. `CoreObserver.emit()` 失败仍不得打断 Workflow；
+7. 不为展示方便在 `ai-core` 内写 console；
+8. demo 将这些事件转换为时间线（阶段 8 再做 UI 打磨）。
 
 ### 8.3 三层可观测职责（避免重复发射）
 
@@ -655,10 +675,11 @@ tool:list:start                       →  step: tool:list
   → Provider 级细粒度，保留现有语义，不强行与 trace 逐步一一对应
 
 workflow:step
-  → Workflow 级中间步骤，供实时时间线；扩充 payload，不替代模块事件
+  → Workflow 级中间步骤，供实时时间线；`step` 保持旧值，新增 `workflowStep`
 
-WorkflowTrace（metadata.trace，includeTrace 时）
-  → 单轮结束后的结构化快照，供调试面板静态展示
+WorkflowTrace
+  → 成功/降级：metadata.trace（includeTrace 时）
+  → 失败：workflow:error.payload.trace
 ```
 
 原则：
@@ -672,7 +693,12 @@ WorkflowTrace（metadata.trace，includeTrace 时）
 
 ```txt
 Observer event：实时流动，可用于 UI 时间线 / 外部日志
-WorkflowTrace：本轮结束后的静态快照，可用于调试面板
+
+WorkflowTrace（成功/降级 return + includeTrace）：
+  ChatWorkflowOutput.metadata.trace
+
+WorkflowTrace（失败 throw）：
+  workflow:error.payload.trace + 已收集的 Observer 事件
 ```
 
 ---
@@ -785,8 +811,9 @@ Workflow 状态为 degraded
 
 ```txt
 整轮 Workflow 失败（与当前实现一致，属关键路径）
-发出 workflow:error
+发出 workflow:error（含 trace 摘要）
 不应静默伪装成「无工具」
+调用方 throw，不从 metadata.trace 取失败轨迹
 ```
 
 #### 场景 D：模型主生成失败
@@ -797,8 +824,9 @@ Workflow 状态为 degraded
 
 ```txt
 模型内部重试 / fallback 信息仍按阶段 1 输出
-最终失败时 Workflow 发出 workflow:error
-调用方收到安全摘要错误
+最终失败时 Workflow 发出 workflow:error（payload 含截至失败点的 trace 摘要）
+调用方收到安全摘要错误（throw，无 ChatWorkflowOutput）
+demo 仍可从 observerEvents 看到失败步骤轨迹
 ```
 
 #### 场景 E：替换 Workflow
