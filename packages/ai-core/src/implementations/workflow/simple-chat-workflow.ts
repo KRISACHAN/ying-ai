@@ -31,6 +31,7 @@ import type {
   ChatWorkflowOutput,
 } from "../../abstractions/workflow";
 import type {
+  WorkflowErrorEventPayload,
   WorkflowStepEventPayload,
   WorkflowStepName,
   WorkflowStepStatus,
@@ -465,11 +466,11 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         type: "workflow:error",
         timestamp: new Date(),
         payload: {
-          sessionId,
           workflowId: recorder.workflowId,
+          ...(sessionId !== undefined ? { sessionId } : {}),
           message: toSafeMessage(error),
           trace: recorder.snapshot("failed"),
-        },
+        } satisfies WorkflowErrorEventPayload,
       });
       throw error;
     }
@@ -493,6 +494,7 @@ interface RunWorkflowStepOptions<TResult> {
   workflowStep: WorkflowStepName;
   legacyStep: string;
   sessionId?: string;
+  startSummary?: Record<string, unknown>;
   run: () => Promise<TResult>;
   status?: (result: TResult) => WorkflowStepStatus;
   summarize?: (result: TResult) => Record<string, unknown>;
@@ -509,6 +511,8 @@ async function runWorkflowStep<TResult>(
     workflowStep: options.workflowStep,
     phase: "start",
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    ...(options.startSummary !== undefined ? options.startSummary : {}),
+    ...(options.startSummary !== undefined ? { summary: options.startSummary } : {}),
   });
 
   try {
@@ -526,6 +530,7 @@ async function runWorkflowStep<TResult>(
       phase: status === "success" ? "end" : status,
       ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
       ...(traceStep.durationMs !== undefined ? { durationMs: traceStep.durationMs } : {}),
+      ...(summary !== undefined ? summary : {}),
       ...(summary !== undefined ? { summary } : {}),
     });
 
@@ -629,6 +634,10 @@ async function generateWithTools(
     workflowStep: "model:generate",
     legacyStep: firstStep,
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    startSummary: {
+      messageCount: options.messages.length,
+      toolsEnabled: hasTools,
+    },
     run: () =>
       options.model.generate({
         messages: options.messages,
@@ -677,6 +686,10 @@ async function generateWithTools(
     workflowStep: "model:follow-up-generate",
     legacyStep: "tool:follow-up-generate",
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    startSummary: {
+      messageCount: followUpMessages.length,
+      toolResultCount: toolResults.length,
+    },
     run: () =>
       options.model.generate({
         messages: followUpMessages,
@@ -1007,11 +1020,24 @@ function formatGender(gender: CompanionGender): string {
  * 只暴露安全的错误摘要，不透传底层错误对象。
  */
 function toSafeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "SimpleChatWorkflow execution failed";
+  const message = error instanceof Error ? error.message : "SimpleChatWorkflow execution failed";
+  return redactSensitiveMessage(message);
 }
 
 function toTraceError(error: unknown): WorkflowTraceError {
   return { message: toSafeMessage(error) };
+}
+
+function redactSensitiveMessage(message: string): string {
+  const redacted = message
+    .replace(/\b(?:postgres(?:ql)?|mysql|mongodb):\/\/\S+/gi, "[redacted-connection-string]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(
+      /\b(api[_-]?key|token|secret|password)=([^&\s]+)/gi,
+      (_match, key: string) => `${key}=[redacted]`,
+    );
+
+  return redacted.length > 300 ? `${redacted.slice(0, 297)}...` : redacted;
 }
 
 interface LoadSummaryOptions {

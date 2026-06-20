@@ -282,7 +282,9 @@ export function ChatPanel() {
 
       {result !== null ? <PromptDebugPanel result={result} debugContext={debugContext} /> : null}
 
-      {result !== null ? <WorkflowTracePanel result={result} events={events} /> : null}
+      {result !== null || findWorkflowErrorTrace(events) !== undefined ? (
+        <WorkflowTracePanel result={result} events={events} />
+      ) : null}
 
       {result !== null ? (
         <div className="result-grid">
@@ -310,10 +312,11 @@ function WorkflowTracePanel({
   result,
   events,
 }: {
-  result: ChatWorkflowOutput;
+  result: ChatWorkflowOutput | null;
   events: SerializedCoreEvent[];
 }) {
-  const trace = result.metadata?.trace as WorkflowTrace | undefined;
+  const trace =
+    (result?.metadata?.trace as WorkflowTrace | undefined) ?? findWorkflowErrorTrace(events);
   const workflowStepEvents = events.filter((event) => event.type === "workflow:step");
 
   return (
@@ -353,6 +356,34 @@ function WorkflowTracePanel({
       </pre>
     </div>
   );
+}
+
+function findWorkflowErrorTrace(events: SerializedCoreEvent[]): WorkflowTrace | undefined {
+  for (const event of [...events].reverse()) {
+    if (
+      event.type !== "workflow:error" ||
+      typeof event.payload !== "object" ||
+      event.payload === null
+    ) {
+      continue;
+    }
+
+    const trace = (event.payload as { trace?: unknown }).trace;
+    if (isWorkflowTrace(trace)) {
+      return trace;
+    }
+  }
+
+  return undefined;
+}
+
+function isWorkflowTrace(value: unknown): value is WorkflowTrace {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const trace = value as { workflowId?: unknown; steps?: unknown };
+  return typeof trace.workflowId === "string" && Array.isArray(trace.steps);
 }
 
 function MemoryDbPanel({

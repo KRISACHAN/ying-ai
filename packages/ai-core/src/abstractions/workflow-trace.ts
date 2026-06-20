@@ -53,3 +53,10 @@ export interface WorkflowStepEventPayload {
   summary?: Record<string, unknown>;
   error?: WorkflowTraceError;
 }
+
+export interface WorkflowErrorEventPayload {
+  workflowId: string;
+  sessionId?: string;
+  message: string;
+  trace?: WorkflowTrace;
+}

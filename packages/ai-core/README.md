@@ -389,14 +389,34 @@ console.log(result.metadata?.trace?.steps.map((step) => [step.step, step.status]
 
 `workflowOptions.timeoutMs` 只用于计时与 `trace.budgetExceeded` 标记，不会取消底层 Provider 调用。关键路径失败仍会抛错；失败时可从 `workflow:error` Observer 事件的 `payload.trace` 获取截至失败点的轨迹。
 
-替换 Workflow 时，宿主只需要注入新的 `ChatWorkflow` 实现，不应反向修改 Model / Memory / Emotion / Tool / Safety Provider 接口：
+替换 Workflow 时，宿主只需要注入新的 `ChatWorkflow` 实现，不应反向修改 Model / Memory / Emotion / Tool / Safety Provider 接口。最小 smoke 可以在宿主侧内联一个 `ChatWorkflow`：
 
 ```ts
+import { createCompanionCore, type ChatWorkflow } from "@ying-companion/ai-core";
+
+const customWorkflow: ChatWorkflow = {
+  meta: {
+    id: "workflow.host-smoke",
+    kind: "workflow",
+    name: "Host Smoke Workflow",
+  },
+  async execute() {
+    return {
+      text: "来自替换 Workflow 的固定回复",
+      metadata: { smoke: true },
+    };
+  },
+};
+
 const core = createCompanionCore({
   model,
-  workflow: new CustomChatWorkflow(),
+  workflow: customWorkflow,
 });
+
+console.log(core.inspect().providers.workflow.id); // workflow.host-smoke
 ```
+
+`apps/model-runtime-demo` 为了阶段 7 调试默认传入 `workflowOptions.includeTrace: true`；正式宿主可保持默认 false，仅在需要展示调试时间线时开启。
 
 启用真实情绪状态机时，宿主显式注入 `ModelEmotionEngine`，并负责保存/回传上轮情绪：
 
