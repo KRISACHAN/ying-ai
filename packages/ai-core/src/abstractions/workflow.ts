@@ -19,6 +19,7 @@ import type { CoreProvider } from "./provider";
 import type { SafetyCheckResult } from "./safety";
 import type { ConversationSummary, SummaryOptions, SummaryScope } from "./summary";
 import type { ToolDefinition, ToolResult } from "./tool";
+import type { WorkflowTrace } from "./workflow-trace";
 
 /** 单轮聊天的输入；history 由宿主维护，Core 不持久化短期对话。 */
 export interface ChatWorkflowInput {
@@ -42,6 +43,15 @@ export interface ChatWorkflowInput {
   };
   /** 滚动摘要开关与阈值；enabled 默认 false。 */
   summaryOptions?: SummaryOptions;
+  workflowOptions?: {
+    /**
+     * 单轮总预算（毫秒）：仅用于 trace / Observer 标记是否超预算。
+     * 不取消、不中断任何 Provider 调用。
+     */
+    timeoutMs?: number;
+    /** 是否在成功/降级返回的 metadata.trace 中附带步骤轨迹；默认 false。 */
+    includeTrace?: boolean;
+  };
 }
 
 /**
@@ -107,6 +117,7 @@ export interface ChatWorkflowOutput {
     updatedSummary?: ConversationSummary | null;
     summarySkipped?: boolean;
     summarySkipReason?: string;
+    trace?: WorkflowTrace;
   };
   modelOutput?: GenerateOutput;
 }

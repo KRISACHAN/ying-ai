@@ -44,6 +44,10 @@ interface ChatRequestBody {
   sessionId?: string;
   scope?: ChatRequestScope;
   summaryOptions?: SummaryOptions;
+  workflowOptions?: {
+    timeoutMs?: number;
+    includeTrace?: boolean;
+  };
 }
 
 interface SerializedCoreEvent {
@@ -157,6 +161,24 @@ function validateRequestBody(raw: unknown): string | null {
       return "summaryOptions.recentMessageLimit 必须小于 summaryOptions.summarizeTriggerMessageCount";
     }
   }
+  if (body.workflowOptions !== undefined) {
+    if (typeof body.workflowOptions !== "object" || body.workflowOptions === null) {
+      return "workflowOptions 必须是对象";
+    }
+    const workflowOptions = body.workflowOptions as Record<string, unknown>;
+    if (
+      workflowOptions.includeTrace !== undefined &&
+      typeof workflowOptions.includeTrace !== "boolean"
+    ) {
+      return "workflowOptions.includeTrace 必须是布尔值";
+    }
+    if (
+      workflowOptions.timeoutMs !== undefined &&
+      (!Number.isInteger(workflowOptions.timeoutMs) || (workflowOptions.timeoutMs as number) < 1)
+    ) {
+      return "workflowOptions.timeoutMs 必须是正整数";
+    }
+  }
 
   return null;
 }
@@ -246,6 +268,12 @@ export async function POST(request: Request): Promise<Response> {
       scope,
       conversationId: sessionId,
       summaryOptions,
+      workflowOptions: {
+        includeTrace: body.workflowOptions?.includeTrace ?? true,
+        ...(body.workflowOptions?.timeoutMs !== undefined
+          ? { timeoutMs: body.workflowOptions.timeoutMs }
+          : {}),
+      },
     });
     const inspection = core.inspect();
 

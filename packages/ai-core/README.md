@@ -61,7 +61,7 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 | 子目录                                  | 默认实现                    | 作用                                                                                     |
 | --------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
 | `model/openai.ts`                       | `OpenAICompatibleModel`     | Vercel AI SDK 适配；`generate` / `stream`、重试与降级                                    |
-| `workflow/simple-chat-workflow.ts`      | `SimpleChatWorkflow`        | 当前 V1 聊天主链路（阶段 3～6）：记忆、情绪、本地工具二次生成                            |
+| `workflow/simple-chat-workflow.ts`      | `SimpleChatWorkflow`        | V1 参考编排（阶段 3～7）：完整单轮流程、工具循环、Workflow Trace                         |
 | `workflow/disabled-chat-workflow.ts`    | `DisabledChatWorkflow`      | 显式禁用 Workflow 时 `execute` 抛错                                                      |
 | `persona/default-persona-provider.ts`   | `DefaultPersonaProvider`    | 默认角色「映映」                                                                         |
 | `memory/noop-memory-provider.ts`        | `NoopMemoryProvider`        | 未注入 memory 时的空实现                                                                 |
@@ -100,15 +100,14 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 | 4    | 长期记忆 + 滚动摘要 | ✅                                     |
 | 5    | 情绪状态机          | ✅                                     |
 | 6    | 工具调用多步循环    | ✅ 本地 Tool Registry + 非流式二次生成 |
-| 7    | 完整 Workflow 编排  | 🔜 演进 `SimpleChatWorkflow`           |
+| 7    | 完整 Workflow 编排  | ✅ Trace 契约 + 失败/降级语义固化      |
 | 8    | 调试 UI             | 部分在 demo                            |
 
 ---
 
-## 3. 完整开发后的真实调用流程
+## 3. 当前真实调用流程
 
-> 下图描述 **V1 全部阶段（1–7）完成后**，用户发送一条 prompt 到拿到最终回复的**真实端到端路径**。
-> 与当前实现的差异见各步骤标注。
+> 下图描述阶段 1–7 完成后，用户发送一条 prompt 到拿到最终回复的真实端到端路径。
 
 ### 3.1 参与方与数据流总览
 
@@ -215,15 +214,19 @@ flowchart TD
   Q -.->|失败| END
 ```
 
-**当前 `SimpleChatWorkflow` 与阶段 7 目标态的差异：**
+**当前 `SimpleChatWorkflow` 的 V1 编排约束：**
 
-| 步骤                | 目标态（阶段 7）                                               | 当前实现（阶段 6）                                     |
-| ------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
-| `Emotion.analyze`   | ✅ 拼入 prompt                                                 | ✅ 已接入；默认 `DisabledEmotionEngine` 返回 neutral   |
-| `Tool` 工具循环     | 可配置多轮 / 可演进为编排节点                                  | ✅ 非流式 generate，默认最多 1 轮工具 + 1 次二次生成   |
-| follow-up toolCalls | 可继续编排或中断恢复                                           | 不再执行，写入 `droppedToolCalls` / `toolCallsDropped` |
-| `Persona.load` 时机 | 与 recall / emotion 可并行                                     | 串行，且在 Safety 之后                                 |
-| 其余                | Safety / Summary / Memory recall / Model / Memory extract·save | ✅ 已实现                                              |
+| 步骤                | V1 行为                                                           |
+| ------------------- | ----------------------------------------------------------------- |
+| `Persona.load`      | 关键路径；失败终止本轮                                            |
+| `Safety`            | 输入/输出任一拒绝都会抛错，不返回未通过检查的文本                 |
+| `Summary.load`      | 辅助读取路径；失败降级为无摘要继续                                |
+| `Memory.recall`     | 辅助读取路径；失败降级为空召回继续                                |
+| `Emotion.analyze`   | 辅助读取路径；失败回退 previous/neutral 继续                      |
+| `ToolRegistry.list` | 关键路径；失败终止本轮                                            |
+| `Tool` 工具循环     | 非流式 generate，默认最多 1 轮工具 + 1 次二次生成                 |
+| follow-up toolCalls | 不再执行，写入 `droppedToolCalls` / `toolCallsDropped`            |
+| 写回路径            | `Summary.update/save`、`Memory.extract/save` 失败不阻断已生成回复 |
 
 > 默认 `createCompanionCore({ model })` 仍使用 `DisabledEmotionEngine`，不会额外触发情绪分析 LLM。
 > 宿主显式注入 `new ModelEmotionEngine({ model })` 后，Workflow 会分析意向情绪并把最终情绪拼入 prompt。
@@ -240,8 +243,8 @@ flowchart TD
 
 2. Workflow 开始
    ├─ observer.emit(workflow:start)
-   ├─ safety.guardInput(message)          → 不通过则抛错
    ├─ persona.load({ sessionId })          → CompanionPersona
+   ├─ safety.guardInput(message)          → 不通过则抛错
    ├─ summary.load(scope)                  → ConversationSummary | null（可选）
    ├─ memory.recall({ scope, query })      → 宿主注入的 PostgresMemoryProvider
    │    └─ embeddingProvider.embed(query)  → 向量
@@ -374,9 +377,25 @@ const result = await core.executeWorkflow({
   sessionId: "session-1",
   message: "你好",
   history: [],
+  workflowOptions: {
+    includeTrace: true,
+    timeoutMs: 30_000,
+  },
 });
 
 console.log(result.text);
+console.log(result.metadata?.trace?.steps.map((step) => [step.step, step.status]));
+```
+
+`workflowOptions.timeoutMs` 只用于计时与 `trace.budgetExceeded` 标记，不会取消底层 Provider 调用。关键路径失败仍会抛错；失败时可从 `workflow:error` Observer 事件的 `payload.trace` 获取截至失败点的轨迹。
+
+替换 Workflow 时，宿主只需要注入新的 `ChatWorkflow` 实现，不应反向修改 Model / Memory / Emotion / Tool / Safety Provider 接口：
+
+```ts
+const core = createCompanionCore({
+  model,
+  workflow: new CustomChatWorkflow(),
+});
 ```
 
 启用真实情绪状态机时，宿主显式注入 `ModelEmotionEngine`，并负责保存/回传上轮情绪：

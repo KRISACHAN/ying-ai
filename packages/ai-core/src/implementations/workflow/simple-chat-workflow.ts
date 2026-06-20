@@ -30,12 +30,19 @@ import type {
   ChatWorkflowInput,
   ChatWorkflowOutput,
 } from "../../abstractions/workflow";
+import type {
+  WorkflowStepEventPayload,
+  WorkflowStepName,
+  WorkflowStepStatus,
+  WorkflowTraceError,
+} from "../../abstractions/workflow-trace";
 import { formatEmotionForPrompt } from "../emotion/prompt-formatter";
 import { createNeutralEmotion } from "../emotion/transition";
 import { formatMemoriesForPrompt } from "../memory/prompt-formatter";
 import { splitForSummary, trimRecentHistory } from "../summary/history-utils";
 import { formatSummaryForPrompt } from "../summary/prompt-formatter";
 import { buildToolFollowUpMessages, toCoreToolCall, toModelTools } from "../tool/tool-adapter";
+import { WorkflowTraceRecorder } from "./workflow-trace-recorder";
 
 /** 未传 summaryOptions.recentMessageLimit 时的默认值。 */
 const DEFAULT_RECENT_MESSAGE_LIMIT = 12;
@@ -84,11 +91,12 @@ export class SimpleChatWorkflow implements ChatWorkflow {
     } = context.core;
     const sessionId = input.sessionId;
     const scope = resolveMemoryScope(input);
+    const recorder = new WorkflowTraceRecorder(input.workflowOptions?.timeoutMs);
 
     await safeEmit(observer, {
       type: "workflow:start",
       timestamp: new Date(),
-      payload: { sessionId },
+      payload: { sessionId, workflowId: recorder.workflowId },
     });
 
     try {
@@ -96,31 +104,56 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         throw new Error("ChatWorkflowInput.message is required");
       }
 
-      await safeEmit(observer, {
-        type: "persona:load:start",
-        timestamp: new Date(),
-        payload: { sessionId },
-      });
-      const loadedPersona = await persona.load(sessionId !== undefined ? { sessionId } : undefined);
-      await safeEmit(observer, {
-        type: "persona:load:end",
-        timestamp: new Date(),
-        payload: { sessionId, personaId: loadedPersona.id },
+      const loadedPersona = await runWorkflowStep({
+        observer,
+        recorder,
+        workflowStep: "persona:load",
+        legacyStep: "persona:load",
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        run: async () => {
+          await safeEmit(observer, {
+            type: "persona:load:start",
+            timestamp: new Date(),
+            payload: { sessionId },
+          });
+          const result = await persona.load(sessionId !== undefined ? { sessionId } : undefined);
+          await safeEmit(observer, {
+            type: "persona:load:end",
+            timestamp: new Date(),
+            payload: { sessionId, personaId: result.id },
+          });
+
+          return result;
+        },
+        summarize: (result) => ({ personaId: result.id }),
       });
 
-      await safeEmit(observer, {
-        type: "safety:input:start",
-        timestamp: new Date(),
-        payload: { sessionId },
-      });
-      const inputSafety = await safety.guardInput({
-        text: input.message,
-        ...(sessionId !== undefined && { sessionId }),
-      });
-      await safeEmit(observer, {
-        type: "safety:input:end",
-        timestamp: new Date(),
-        payload: { sessionId, allowed: inputSafety.allowed },
+      const inputSafety = await runWorkflowStep({
+        observer,
+        recorder,
+        workflowStep: "safety:input",
+        legacyStep: "safety:input",
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        run: async () => {
+          await safeEmit(observer, {
+            type: "safety:input:start",
+            timestamp: new Date(),
+            payload: { sessionId },
+          });
+          const result = await safety.guardInput({
+            text: input.message,
+            ...(sessionId !== undefined && { sessionId }),
+          });
+          await safeEmit(observer, {
+            type: "safety:input:end",
+            timestamp: new Date(),
+            payload: { sessionId, allowed: result.allowed },
+          });
+
+          return result;
+        },
+        status: (result) => (result.allowed ? "success" : "failed"),
+        summarize: (result) => ({ allowed: result.allowed }),
       });
       if (!inputSafety.allowed) {
         throw new Error("Input rejected by SafetyProvider");
@@ -134,12 +167,28 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       const summarizeTriggerMessageCount =
         input.summaryOptions?.summarizeTriggerMessageCount ??
         DEFAULT_SUMMARIZE_TRIGGER_MESSAGE_COUNT;
-      const summaryLoad = await loadSummary({
+      const summaryLoad = await runWorkflowStep({
         observer,
-        summary,
-        enabled: summaryEnabled,
-        ...(summaryScope !== undefined ? { scope: summaryScope } : {}),
+        recorder,
+        workflowStep: "summary:load",
+        legacyStep: "summary:load",
         ...(sessionId !== undefined ? { sessionId } : {}),
+        run: () =>
+          loadSummary({
+            observer,
+            summary,
+            enabled: summaryEnabled,
+            ...(summaryScope !== undefined ? { scope: summaryScope } : {}),
+            ...(sessionId !== undefined ? { sessionId } : {}),
+          }),
+        status: (result) =>
+          result.skipped ? (result.reason === "load_failed" ? "degraded" : "skipped") : "success",
+        summarize: (result) => ({
+          enabled: summaryEnabled,
+          hasSummary: result.summary !== null,
+          skipped: result.skipped,
+          reason: result.reason,
+        }),
       });
       const loadedSummary = summaryLoad.summary;
       const allMessagesBeforeGenerate: ChatMessage[] = [
@@ -150,31 +199,84 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         summaryEnabled && allMessagesBeforeGenerate.length > summarizeTriggerMessageCount
           ? trimRecentHistory(sanitizedHistory, { recentMessageLimit })
           : sanitizedHistory;
-      const recall = await recallMemories({
+      const recall = await runWorkflowStep({
         observer,
-        memory,
-        scope,
-        query: input.message,
-        limit: input.memoryOptions?.limit ?? 5,
-        minImportance: input.memoryOptions?.minImportance ?? 3,
+        recorder,
+        workflowStep: "memory:recall",
+        legacyStep: "memory:recall",
         ...(sessionId !== undefined ? { sessionId } : {}),
+        run: () =>
+          recallMemories({
+            observer,
+            memory,
+            scope,
+            query: input.message,
+            limit: input.memoryOptions?.limit ?? 5,
+            minImportance: input.memoryOptions?.minImportance ?? 3,
+            ...(sessionId !== undefined ? { sessionId } : {}),
+          }),
+        status: (result) => (result.degraded ? "degraded" : "success"),
+        summarize: (result) => ({
+          count: result.memories.length,
+          ...(result.embeddingVectorLength !== undefined
+            ? { embeddingVectorLength: result.embeddingVectorLength }
+            : {}),
+          ...(result.degraded ? { degraded: true, reason: result.reason } : {}),
+        }),
       });
       const recalledMemories = recall.memories;
-      const emotionResult = await analyzeAndTransitionEmotion({
+      const emotionResult = await runWorkflowStep({
         observer,
-        emotion,
-        message: input.message,
-        history: recentHistory,
-        persona: loadedPersona,
-        recalledMemories,
+        recorder,
+        workflowStep: "emotion:analyze",
+        legacyStep: "emotion:analyze",
         ...(sessionId !== undefined ? { sessionId } : {}),
-        ...(input.emotion !== undefined ? { previous: input.emotion } : {}),
+        run: () =>
+          analyzeAndTransitionEmotion({
+            observer,
+            emotion,
+            message: input.message,
+            history: recentHistory,
+            persona: loadedPersona,
+            recalledMemories,
+            ...(sessionId !== undefined ? { sessionId } : {}),
+            ...(input.emotion !== undefined ? { previous: input.emotion } : {}),
+          }),
+        status: (result) => (result.degraded ? "degraded" : "success"),
+        summarize: (result) => ({
+          previous: result.previous.current,
+          next: result.next.current,
+          ...(result.detected !== undefined ? { detected: result.detected.current } : {}),
+          ...(result.degraded ? { degraded: true, reason: result.reason } : {}),
+        }),
       });
-      const summaryContext = formatSummaryForPrompt(loadedSummary);
-      const memoryContext = formatMemoriesForPrompt(recalledMemories);
-      const emotionContext = formatEmotionForPrompt(emotionResult.next);
+      const promptContext = await runWorkflowStep({
+        observer,
+        recorder,
+        workflowStep: "prompt:build",
+        legacyStep: "prompt:build",
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        run: async () => {
+          const builtSummaryContext = formatSummaryForPrompt(loadedSummary);
+          const builtMemoryContext = formatMemoriesForPrompt(recalledMemories);
+          const builtEmotionContext = formatEmotionForPrompt(emotionResult.next);
+
+          return {
+            summaryContext: builtSummaryContext,
+            memoryContext: builtMemoryContext,
+            emotionContext: builtEmotionContext,
+          };
+        },
+        summarize: (result) => ({
+          hasSummaryContext: result.summaryContext !== undefined,
+          hasMemoryContext: result.memoryContext !== undefined,
+          hasEmotionContext: result.emotionContext !== undefined,
+        }),
+      });
+      const { summaryContext, memoryContext, emotionContext } = promptContext;
       const toolDefinitions = await listTools({
         observer,
+        recorder,
         tools,
         ...(sessionId !== undefined ? { sessionId } : {}),
       });
@@ -197,6 +299,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       };
       const generationResult = await generateWithTools({
         observer,
+        recorder,
         model,
         tools,
         messages,
@@ -206,41 +309,71 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       });
       const modelOutput = generationResult.finalOutput;
 
-      await safeEmit(observer, {
-        type: "safety:output:start",
-        timestamp: new Date(),
-        payload: { sessionId },
-      });
-      const outputSafety = await safety.guardOutput({
-        text: modelOutput.text,
-        ...(sessionId !== undefined && { sessionId }),
-      });
-      await safeEmit(observer, {
-        type: "safety:output:end",
-        timestamp: new Date(),
-        payload: { sessionId, allowed: outputSafety.allowed },
+      const outputSafety = await runWorkflowStep({
+        observer,
+        recorder,
+        workflowStep: "safety:output",
+        legacyStep: "safety:output",
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        run: async () => {
+          await safeEmit(observer, {
+            type: "safety:output:start",
+            timestamp: new Date(),
+            payload: { sessionId },
+          });
+          const result = await safety.guardOutput({
+            text: modelOutput.text,
+            ...(sessionId !== undefined && { sessionId }),
+          });
+          await safeEmit(observer, {
+            type: "safety:output:end",
+            timestamp: new Date(),
+            payload: { sessionId, allowed: result.allowed },
+          });
+
+          return result;
+        },
+        status: (result) => (result.allowed ? "success" : "failed"),
+        summarize: (result) => ({ allowed: result.allowed }),
       });
       if (!outputSafety.allowed) {
         throw new Error("Output rejected by SafetyProvider");
       }
 
-      const summaryResult = await updateAndSaveSummary({
+      const summaryResult = await runWorkflowStep({
         observer,
-        summary,
-        summaryUpdater,
-        enabled: summaryEnabled,
-        ...(summaryScope !== undefined ? { scope: summaryScope } : {}),
-        currentSummary: loadedSummary,
-        history: sanitizedHistory,
-        userMessage: input.message,
-        assistantMessage: modelOutput.text,
-        recentMessageLimit,
-        summarizeTriggerMessageCount,
+        recorder,
+        workflowStep: "summary:save",
+        legacyStep: "summary:save",
         ...(sessionId !== undefined ? { sessionId } : {}),
+        run: () =>
+          updateAndSaveSummary({
+            observer,
+            summary,
+            summaryUpdater,
+            enabled: summaryEnabled,
+            ...(summaryScope !== undefined ? { scope: summaryScope } : {}),
+            currentSummary: loadedSummary,
+            history: sanitizedHistory,
+            userMessage: input.message,
+            assistantMessage: modelOutput.text,
+            recentMessageLimit,
+            summarizeTriggerMessageCount,
+            ...(sessionId !== undefined ? { sessionId } : {}),
+          }),
+        status: (result) =>
+          result.skipped ? (result.reason.endsWith("_failed") ? "degraded" : "skipped") : "success",
+        summarize: (result) => ({
+          skipped: result.skipped,
+          reason: result.reason,
+          summarizedMessageCount: result.summarizedMessages.length,
+          hasUpdatedSummary: result.updatedSummary !== null,
+        }),
       });
 
       const memoryResult = await extractAndSaveMemories({
         observer,
+        recorder,
         memory,
         memoryExtractor,
         scope,
@@ -280,6 +413,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         ...(embeddingVectorLength !== undefined ? { embeddingVectorLength } : {}),
       };
 
+      const trace = recorder.snapshot();
       const output: ChatWorkflowOutput = {
         text: modelOutput.text,
         model: modelOutput.model,
@@ -306,6 +440,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
           updatedSummary: summaryResult.updatedSummary,
           summarySkipped: summaryResult.skipped,
           summarySkipReason: summaryResult.reason,
+          ...(input.workflowOptions?.includeTrace === true ? { trace } : {}),
         },
         modelOutput,
       };
@@ -313,7 +448,15 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       await safeEmit(observer, {
         type: "workflow:end",
         timestamp: new Date(),
-        payload: { sessionId, model: modelOutput.model, textLength: output.text.length },
+        payload: {
+          sessionId,
+          workflowId: recorder.workflowId,
+          model: modelOutput.model,
+          textLength: output.text.length,
+          durationMs: trace.durationMs,
+          budgetExceeded: trace.budgetExceeded,
+          status: trace.status,
+        },
       });
 
       return output;
@@ -321,7 +464,12 @@ export class SimpleChatWorkflow implements ChatWorkflow {
       await safeEmit(observer, {
         type: "workflow:error",
         timestamp: new Date(),
-        payload: { sessionId, message: toSafeMessage(error) },
+        payload: {
+          sessionId,
+          workflowId: recorder.workflowId,
+          message: toSafeMessage(error),
+          trace: recorder.snapshot("failed"),
+        },
       });
       throw error;
     }
@@ -339,44 +487,117 @@ async function safeEmit(observer: CoreObserver, event: CoreEvent): Promise<void>
   }
 }
 
+interface RunWorkflowStepOptions<TResult> {
+  observer: CoreObserver;
+  recorder: WorkflowTraceRecorder;
+  workflowStep: WorkflowStepName;
+  legacyStep: string;
+  sessionId?: string;
+  run: () => Promise<TResult>;
+  status?: (result: TResult) => WorkflowStepStatus;
+  summarize?: (result: TResult) => Record<string, unknown>;
+}
+
+async function runWorkflowStep<TResult>(
+  options: RunWorkflowStepOptions<TResult>,
+): Promise<TResult> {
+  const active = options.recorder.start(options.workflowStep);
+
+  await emitWorkflowStep(options.observer, {
+    workflowId: options.recorder.workflowId,
+    step: `${options.legacyStep}:start`,
+    workflowStep: options.workflowStep,
+    phase: "start",
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+  });
+
+  try {
+    const result = await options.run();
+    const status = options.status?.(result) ?? "success";
+    const summary = options.summarize?.(result);
+    const traceStep = options.recorder.end(active, status, {
+      ...(summary !== undefined ? { summary } : {}),
+    });
+
+    await emitWorkflowStep(options.observer, {
+      workflowId: options.recorder.workflowId,
+      step: `${options.legacyStep}:end`,
+      workflowStep: options.workflowStep,
+      phase: status === "success" ? "end" : status,
+      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      ...(traceStep.durationMs !== undefined ? { durationMs: traceStep.durationMs } : {}),
+      ...(summary !== undefined ? { summary } : {}),
+    });
+
+    return result;
+  } catch (error) {
+    const safeError = toTraceError(error);
+    const traceStep = options.recorder.end(active, "failed", { error: safeError });
+
+    await emitWorkflowStep(options.observer, {
+      workflowId: options.recorder.workflowId,
+      step: `${options.legacyStep}:failed`,
+      workflowStep: options.workflowStep,
+      phase: "failed",
+      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      ...(traceStep.durationMs !== undefined ? { durationMs: traceStep.durationMs } : {}),
+      error: safeError,
+    });
+
+    throw error;
+  }
+}
+
+async function emitWorkflowStep(
+  observer: CoreObserver,
+  payload: WorkflowStepEventPayload,
+): Promise<void> {
+  await safeEmit(observer, {
+    type: "workflow:step",
+    timestamp: new Date(),
+    payload,
+  });
+}
+
 interface ListToolsOptions {
   observer: CoreObserver;
+  recorder: WorkflowTraceRecorder;
   tools: ChatWorkflowExecutionContext["core"]["tools"];
   sessionId?: string;
 }
 
 async function listTools(options: ListToolsOptions): Promise<ToolDefinition[]> {
-  await safeEmit(options.observer, {
-    type: "workflow:step",
-    timestamp: new Date(),
-    payload: { step: "tool:list:start", sessionId: options.sessionId },
-  });
+  return runWorkflowStep({
+    observer: options.observer,
+    recorder: options.recorder,
+    workflowStep: "tool:list",
+    legacyStep: "tool:list",
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    run: async () => {
+      const definitions = await options.tools.list();
 
-  const definitions = await options.tools.list();
+      await safeEmit(options.observer, {
+        type: "tool:list",
+        timestamp: new Date(),
+        payload: {
+          sessionId: options.sessionId,
+          count: definitions.length,
+          tools: definitions.map((definition) => ({
+            name: definition.name,
+            description: definition.description,
+          })),
+        },
+      });
 
-  await safeEmit(options.observer, {
-    type: "tool:list",
-    timestamp: new Date(),
-    payload: {
-      sessionId: options.sessionId,
-      count: definitions.length,
-      tools: definitions.map((definition) => ({
-        name: definition.name,
-        description: definition.description,
-      })),
+      return definitions;
     },
+    summarize: (definitions) => ({ count: definitions.length }),
   });
-  await safeEmit(options.observer, {
-    type: "workflow:step",
-    timestamp: new Date(),
-    payload: { step: "tool:list:end", sessionId: options.sessionId, count: definitions.length },
-  });
-
-  return definitions;
 }
 
 interface GenerateWithToolsOptions {
   observer: CoreObserver;
+  recorder: WorkflowTraceRecorder;
   model: ChatWorkflowExecutionContext["core"]["model"];
   tools: ChatWorkflowExecutionContext["core"]["tools"];
   messages: ChatMessage[];
@@ -402,30 +623,24 @@ async function generateWithTools(
   const hasTools = options.modelTools !== undefined;
   const firstStep = hasTools ? "tool:model-generate-with-tools" : "model:generate";
 
-  await safeEmit(options.observer, {
-    type: "workflow:step",
-    timestamp: new Date(),
-    payload: {
-      step: `${firstStep}:start`,
-      sessionId: options.sessionId,
+  const firstOutput = await runWorkflowStep({
+    observer: options.observer,
+    recorder: options.recorder,
+    workflowStep: "model:generate",
+    legacyStep: firstStep,
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    run: () =>
+      options.model.generate({
+        messages: options.messages,
+        ...(options.modelTools !== undefined ? { tools: options.modelTools } : {}),
+      }),
+    summarize: (result) => ({
       messageCount: options.messages.length,
       toolsEnabled: hasTools,
-    },
-  });
-  const firstOutput = await options.model.generate({
-    messages: options.messages,
-    ...(options.modelTools !== undefined ? { tools: options.modelTools } : {}),
-  });
-  await safeEmit(options.observer, {
-    type: "workflow:step",
-    timestamp: new Date(),
-    payload: {
-      step: `${firstStep}:end`,
-      sessionId: options.sessionId,
-      model: firstOutput.model,
-      runtime: firstOutput.runtime,
-      toolCallCount: firstOutput.toolCalls?.length ?? 0,
-    },
+      model: result.model,
+      toolCallCount: result.toolCalls?.length ?? 0,
+      runtime: result.runtime,
+    }),
   });
 
   const toolCalls = firstOutput.toolCalls ?? [];
@@ -443,6 +658,7 @@ async function generateWithTools(
 
   const toolResults = await executeToolCalls({
     observer: options.observer,
+    recorder: options.recorder,
     tools: options.tools,
     toolCalls,
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
@@ -455,34 +671,28 @@ async function generateWithTools(
     toolResults,
   );
 
-  await safeEmit(options.observer, {
-    type: "workflow:step",
-    timestamp: new Date(),
-    payload: {
-      step: "tool:follow-up-generate:start",
-      sessionId: options.sessionId,
+  const finalOutput = await runWorkflowStep({
+    observer: options.observer,
+    recorder: options.recorder,
+    workflowStep: "model:follow-up-generate",
+    legacyStep: "tool:follow-up-generate",
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    run: () =>
+      options.model.generate({
+        messages: followUpMessages,
+        ...(options.modelTools !== undefined ? { tools: options.modelTools } : {}),
+      }),
+    summarize: (result) => ({
       messageCount: followUpMessages.length,
       toolResultCount: toolResults.length,
-    },
-  });
-  const finalOutput = await options.model.generate({
-    messages: followUpMessages,
-    ...(options.modelTools !== undefined ? { tools: options.modelTools } : {}),
+      model: result.model,
+      toolCallCount: result.toolCalls?.length ?? 0,
+      toolCallsDropped: (result.toolCalls?.length ?? 0) > 0,
+      runtime: result.runtime,
+    }),
   });
   const droppedToolCalls = finalOutput.toolCalls ?? [];
   const toolCallsDropped = droppedToolCalls.length > 0;
-  await safeEmit(options.observer, {
-    type: "workflow:step",
-    timestamp: new Date(),
-    payload: {
-      step: "tool:follow-up-generate:end",
-      sessionId: options.sessionId,
-      model: finalOutput.model,
-      runtime: finalOutput.runtime,
-      toolCallCount: finalOutput.toolCalls?.length ?? 0,
-      toolCallsDropped,
-    },
-  });
 
   return {
     finalOutput,
@@ -498,6 +708,7 @@ async function generateWithTools(
 
 interface ExecuteToolCallsOptions {
   observer: CoreObserver;
+  recorder: WorkflowTraceRecorder;
   tools: ChatWorkflowExecutionContext["core"]["tools"];
   toolCalls: ModelToolCall[];
   sessionId?: string;
@@ -505,48 +716,63 @@ interface ExecuteToolCallsOptions {
 }
 
 async function executeToolCalls(options: ExecuteToolCallsOptions): Promise<ToolResult[]> {
-  const results: ToolResult[] = [];
+  return runWorkflowStep({
+    observer: options.observer,
+    recorder: options.recorder,
+    workflowStep: "tool:execute",
+    legacyStep: "tool:execute",
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    run: async () => {
+      const results: ToolResult[] = [];
 
-  for (const modelToolCall of options.toolCalls) {
-    const coreCall = toCoreToolCall(modelToolCall);
+      for (const modelToolCall of options.toolCalls) {
+        const coreCall = toCoreToolCall(modelToolCall);
 
-    await safeEmit(options.observer, {
-      type: "tool:execute:start",
-      timestamp: new Date(),
-      payload: {
-        sessionId: options.sessionId,
-        toolCallId: coreCall.id,
-        name: coreCall.name,
-        arguments: coreCall.arguments,
-      },
-    });
-
-    const result = hasInvalidJsonArguments(modelToolCall, coreCall)
-      ? createInvalidArgumentsResult(modelToolCall)
-      : await options.tools.execute({
-          call: coreCall,
-          ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-          ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+        await safeEmit(options.observer, {
+          type: "tool:execute:start",
+          timestamp: new Date(),
+          payload: {
+            sessionId: options.sessionId,
+            toolCallId: coreCall.id,
+            name: coreCall.name,
+            arguments: coreCall.arguments,
+          },
         });
 
-    await safeEmit(options.observer, {
-      type: "tool:execute:end",
-      timestamp: new Date(),
-      payload: {
-        sessionId: options.sessionId,
-        toolCallId: result.toolCallId,
-        name: result.name,
-        ok: result.ok ?? true,
-        result: result.result,
-        error: result.error,
-        durationMs: result.metadata?.durationMs,
-      },
-    });
+        const result = hasInvalidJsonArguments(modelToolCall, coreCall)
+          ? createInvalidArgumentsResult(modelToolCall)
+          : await options.tools.execute({
+              call: coreCall,
+              ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+              ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+            });
 
-    results.push(result);
-  }
+        await safeEmit(options.observer, {
+          type: "tool:execute:end",
+          timestamp: new Date(),
+          payload: {
+            sessionId: options.sessionId,
+            toolCallId: result.toolCallId,
+            name: result.name,
+            ok: result.ok ?? true,
+            result: result.result,
+            error: result.error,
+            durationMs: result.metadata?.durationMs,
+          },
+        });
 
-  return results;
+        results.push(result);
+      }
+
+      return results;
+    },
+    status: (results) => (results.some((result) => result.ok === false) ? "degraded" : "success"),
+    summarize: (results) => ({
+      requestedCount: options.toolCalls.length,
+      resultCount: results.length,
+      failedCount: results.filter((result) => result.ok === false).length,
+    }),
+  });
 }
 
 function hasInvalidJsonArguments(
@@ -613,6 +839,8 @@ interface AnalyzeEmotionResult {
   previous: EmotionState;
   detected?: EmotionState;
   next: EmotionState;
+  degraded?: boolean;
+  reason?: string;
 }
 
 /** 分析伴侣意向情绪并计算最终情绪；失败时回退 previous/neutral，不阻断主链路。 */
@@ -658,7 +886,12 @@ async function analyzeAndTransitionEmotion(
       },
     });
 
-    return { previous, detected, next };
+    return {
+      previous,
+      detected,
+      next,
+      ...(failed ? { degraded: true, reason: "analyze_failed" } : {}),
+    };
   } catch (error) {
     await safeEmit(options.observer, {
       type: "emotion:analyze:end",
@@ -673,7 +906,7 @@ async function analyzeAndTransitionEmotion(
       },
     });
 
-    return { previous, next: previous };
+    return { previous, next: previous, degraded: true, reason: "analyze_failed" };
   }
 }
 
@@ -775,6 +1008,10 @@ function formatGender(gender: CompanionGender): string {
  */
 function toSafeMessage(error: unknown): string {
   return error instanceof Error ? error.message : "SimpleChatWorkflow execution failed";
+}
+
+function toTraceError(error: unknown): WorkflowTraceError {
+  return { message: toSafeMessage(error) };
 }
 
 interface LoadSummaryOptions {
@@ -1032,6 +1269,8 @@ interface RecallMemoriesOptions {
 interface RecallMemoriesResult {
   memories: RecalledMemory[];
   embeddingVectorLength?: number;
+  degraded?: boolean;
+  reason?: string;
 }
 
 /** 按 query 召回长期记忆；失败时返回空数组且不阻断主链路。 */
@@ -1083,12 +1322,13 @@ async function recallMemories(options: RecallMemoriesOptions): Promise<RecallMem
       payload: { ok: false, message: toSafeMessage(error) },
     });
 
-    return { memories: [] };
+    return { memories: [], degraded: true, reason: "recall_failed" };
   }
 }
 
 interface ExtractAndSaveOptions {
   observer: CoreObserver;
+  recorder: WorkflowTraceRecorder;
   memory: ChatWorkflowExecutionContext["core"]["memory"];
   memoryExtractor: ChatWorkflowExecutionContext["core"]["memoryExtractor"];
   scope: MemoryScope;
@@ -1105,99 +1345,148 @@ interface ExtractAndSaveResult {
   saved: MemoryRecord[];
   skipped: ExtractedMemory[];
   embeddingVectorLength?: number;
+  degraded?: boolean;
+  reason?: string;
 }
 
 /** 抽取本轮记忆并保存（importance < 3 在 Workflow 层过滤）；失败不阻断主链路。 */
 async function extractAndSaveMemories(
   options: ExtractAndSaveOptions,
 ): Promise<ExtractAndSaveResult> {
-  await safeEmit(options.observer, {
-    type: "memory:extract:start",
-    timestamp: new Date(),
-    payload: { sessionId: options.sessionId, scope: options.scope },
+  const extractResult = await runWorkflowStep({
+    observer: options.observer,
+    recorder: options.recorder,
+    workflowStep: "memory:extract",
+    legacyStep: "memory:extract",
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    run: async () => {
+      await safeEmit(options.observer, {
+        type: "memory:extract:start",
+        timestamp: new Date(),
+        payload: { sessionId: options.sessionId, scope: options.scope },
+      });
+
+      try {
+        const result = await options.memoryExtractor.extract({
+          scope: options.scope,
+          userMessage: options.userMessage,
+          assistantMessage: options.assistantMessage,
+          history: options.history.slice(-6),
+        });
+        const extracted = result.memories;
+
+        await safeEmit(options.observer, {
+          type: "memory:extract:end",
+          timestamp: new Date(),
+          payload: { ok: true, count: extracted.length, memories: extracted },
+        });
+
+        return { extracted };
+      } catch (error) {
+        await safeEmit(options.observer, {
+          type: "memory:extract:end",
+          timestamp: new Date(),
+          payload: { ok: false, message: toSafeMessage(error) },
+        });
+
+        return { extracted: [], degraded: true, reason: "extract_failed" };
+      }
+    },
+    status: (result) => (result.degraded ? "degraded" : "success"),
+    summarize: (result) => ({
+      extractedCount: result.extracted.length,
+      ...(result.degraded ? { degraded: true, reason: result.reason } : {}),
+    }),
   });
 
-  let extracted: ExtractedMemory[] = [];
+  const extracted = extractResult.extracted;
 
-  try {
-    const result = await options.memoryExtractor.extract({
-      scope: options.scope,
-      userMessage: options.userMessage,
-      assistantMessage: options.assistantMessage,
-      history: options.history.slice(-6),
-    });
-    extracted = result.memories;
-
-    await safeEmit(options.observer, {
-      type: "memory:extract:end",
-      timestamp: new Date(),
-      payload: { ok: true, count: extracted.length, memories: extracted },
-    });
-  } catch (error) {
-    await safeEmit(options.observer, {
-      type: "memory:extract:end",
-      timestamp: new Date(),
-      payload: { ok: false, message: toSafeMessage(error) },
-    });
-
-    return { extracted: [], saved: [], skipped: [] };
+  if (extractResult.degraded) {
+    return { extracted: [], saved: [], skipped: [], degraded: true, reason: "extract_failed" };
   }
 
   const memoriesToSave = extracted.filter((memory) => memory.importance >= 3);
   const preSaveSkipped = extracted.filter((memory) => memory.importance < 3);
 
-  await safeEmit(options.observer, {
-    type: "memory:save:start",
-    timestamp: new Date(),
-    payload: {
-      sessionId: options.sessionId,
-      scope: options.scope,
-      count: memoriesToSave.length,
+  return runWorkflowStep<ExtractAndSaveResult>({
+    observer: options.observer,
+    recorder: options.recorder,
+    workflowStep: "memory:save",
+    legacyStep: "memory:save",
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    run: async () => {
+      await safeEmit(options.observer, {
+        type: "memory:save:start",
+        timestamp: new Date(),
+        payload: {
+          sessionId: options.sessionId,
+          scope: options.scope,
+          count: memoriesToSave.length,
+        },
+      });
+
+      try {
+        const saveResult = await options.memory.save({
+          scope: options.scope,
+          memories: memoriesToSave,
+          source: {
+            ...(options.conversationId !== undefined
+              ? { conversationId: options.conversationId }
+              : {}),
+            ...(options.messageIds !== undefined ? { messageIds: options.messageIds } : {}),
+          },
+        });
+        const skipped = [...preSaveSkipped, ...(saveResult.skipped ?? [])];
+
+        await safeEmit(options.observer, {
+          type: "memory:save:end",
+          timestamp: new Date(),
+          payload: {
+            ok: true,
+            savedCount: saveResult.saved.length,
+            skippedCount: skipped.length,
+            saved: saveResult.saved.map(toMemoryDebugPayload),
+            ...(saveResult.embeddingVectorLength !== undefined
+              ? { embeddingVectorLength: saveResult.embeddingVectorLength }
+              : {}),
+          },
+        });
+
+        return {
+          extracted,
+          saved: saveResult.saved,
+          skipped,
+          ...(saveResult.embeddingVectorLength !== undefined
+            ? { embeddingVectorLength: saveResult.embeddingVectorLength }
+            : {}),
+        };
+      } catch (error) {
+        await safeEmit(options.observer, {
+          type: "memory:save:end",
+          timestamp: new Date(),
+          payload: { ok: false, message: toSafeMessage(error) },
+        });
+
+        return {
+          extracted,
+          saved: [],
+          skipped: preSaveSkipped,
+          degraded: true,
+          reason: "save_failed",
+        };
+      }
     },
-  });
-
-  try {
-    const saveResult = await options.memory.save({
-      scope: options.scope,
-      memories: memoriesToSave,
-      source: {
-        ...(options.conversationId !== undefined ? { conversationId: options.conversationId } : {}),
-        ...(options.messageIds !== undefined ? { messageIds: options.messageIds } : {}),
-      },
-    });
-    const skipped = [...preSaveSkipped, ...(saveResult.skipped ?? [])];
-
-    await safeEmit(options.observer, {
-      type: "memory:save:end",
-      timestamp: new Date(),
-      payload: {
-        ok: true,
-        savedCount: saveResult.saved.length,
-        skippedCount: skipped.length,
-        saved: saveResult.saved.map(toMemoryDebugPayload),
-        ...(saveResult.embeddingVectorLength !== undefined
-          ? { embeddingVectorLength: saveResult.embeddingVectorLength }
-          : {}),
-      },
-    });
-
-    return {
-      extracted,
-      saved: saveResult.saved,
-      skipped,
-      ...(saveResult.embeddingVectorLength !== undefined
-        ? { embeddingVectorLength: saveResult.embeddingVectorLength }
+    status: (result) => (result.degraded ? "degraded" : "success"),
+    summarize: (result) => ({
+      extractedCount: result.extracted.length,
+      savedCount: result.saved.length,
+      skippedCount: result.skipped.length,
+      ...(result.embeddingVectorLength !== undefined
+        ? { embeddingVectorLength: result.embeddingVectorLength }
         : {}),
-    };
-  } catch (error) {
-    await safeEmit(options.observer, {
-      type: "memory:save:end",
-      timestamp: new Date(),
-      payload: { ok: false, message: toSafeMessage(error) },
-    });
-
-    return { extracted, saved: [], skipped: preSaveSkipped };
-  }
+      ...(result.degraded ? { degraded: true, reason: result.reason } : {}),
+    }),
+  });
 }
 
 /** 将记忆对象裁剪为 Observer payload 可安全展示的字段。 */

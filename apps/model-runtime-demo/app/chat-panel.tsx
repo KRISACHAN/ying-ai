@@ -10,6 +10,7 @@ import type {
   EmotionState,
   RecalledMemory,
   SummaryOptions,
+  WorkflowTrace,
 } from "@ying-companion/ai-core";
 
 const DEFAULT_SESSION_ID = "demo-chat-session";
@@ -112,6 +113,7 @@ export function ChatPanel() {
             companionId,
           },
           summaryOptions,
+          workflowOptions: { includeTrace: true },
         }),
       });
 
@@ -280,6 +282,8 @@ export function ChatPanel() {
 
       {result !== null ? <PromptDebugPanel result={result} debugContext={debugContext} /> : null}
 
+      {result !== null ? <WorkflowTracePanel result={result} events={events} /> : null}
+
       {result !== null ? (
         <div className="result-grid">
           <DebugBlock title="Final Output" value={result.text} />
@@ -290,6 +294,7 @@ export function ChatPanel() {
           <DebugBlock title="Summary Metadata" value={pickSummaryMetadata(result)} />
           <DebugBlock title="Emotion Result" value={pickEmotionMetadata(result)} />
           <DebugBlock title="Tool Result" value={pickToolMetadata(result)} />
+          <DebugBlock title="Workflow Trace" value={result.metadata?.trace} />
           <DebugBlock title="Safety Result" value={result.safety} />
           <DebugBlock title="Persona Result" value={result.persona} />
           <DebugBlock title="Model Raw Output" value={result.modelOutput} />
@@ -298,6 +303,55 @@ export function ChatPanel() {
 
       <ObserverEventsPanel events={events} />
     </section>
+  );
+}
+
+function WorkflowTracePanel({
+  result,
+  events,
+}: {
+  result: ChatWorkflowOutput;
+  events: SerializedCoreEvent[];
+}) {
+  const trace = result.metadata?.trace as WorkflowTrace | undefined;
+  const workflowStepEvents = events.filter((event) => event.type === "workflow:step");
+
+  return (
+    <div className="debug-block">
+      <p className="section-title">Workflow Trace Panel</p>
+      {trace === undefined ? (
+        <pre className="output">（本轮未返回 metadata.trace）</pre>
+      ) : (
+        <>
+          <div className="memory-rows">
+            <Row label="Workflow ID" value={trace.workflowId} />
+            <Row label="Status" value={trace.status} />
+            <Row label="Duration" value={`${trace.durationMs ?? 0} ms`} />
+            <Row label="Budget" value={formatWorkflowBudget(trace)} />
+            <Row label="Steps" value={String(trace.steps.length)} />
+          </div>
+          <p className="section-subtitle">Step Timeline</p>
+          <pre className="output">
+            {trace.steps
+              .map((step, index) => {
+                const duration = step.durationMs !== undefined ? `${step.durationMs}ms` : "—";
+                const summary =
+                  step.summary !== undefined ? ` ${JSON.stringify(step.summary)}` : "";
+                const error = step.error !== undefined ? ` error=${step.error.message}` : "";
+
+                return `${index + 1}. ${step.step} / ${step.status} / ${duration}${summary}${error}`;
+              })
+              .join("\n")}
+          </pre>
+        </>
+      )}
+      <p className="section-subtitle">Workflow Step Observer Events</p>
+      <pre className="output">
+        {workflowStepEvents.length === 0
+          ? "（无 workflow:step 事件）"
+          : formatEvents(workflowStepEvents)}
+      </pre>
+    </div>
   );
 }
 
@@ -658,6 +712,14 @@ function formatProviderName(value: unknown): string {
   const name = typeof provider.name === "string" ? provider.name : "unknown";
 
   return `${name} (${id})`;
+}
+
+function formatWorkflowBudget(trace: WorkflowTrace): string {
+  if (trace.budgetMs === undefined) {
+    return "not set";
+  }
+
+  return `${trace.budgetMs} ms / exceeded=${trace.budgetExceeded === true ? "yes" : "no"}`;
 }
 
 function formatEmotionInline(emotion: EmotionState | null | undefined): string {
