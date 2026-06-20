@@ -191,7 +191,13 @@ Core 返回 text / emotion / metadata / trace
 
 失败分支见 §9.1：`assistant_message_id` 保持 null，user message 标记 `failed`，workflow_run 仍保存 trace。
 
-模型调用与数据库写入不能包在一个长事务中。模型成功后，如果写回失败，接口应明确返回“回复生成成功但宿主持久化失败”的错误状态，不能伪称会话已保存。
+**事务边界（必须遵守）：**
+
+```txt
+- 模型调用不能在数据库事务内执行
+- 模型成功返回后的宿主写回，必须在短事务内原子提交（见 §4.6「短事务规则」）
+- 若短事务 B 整体失败并回滚，user message 仍为 pending，接口返回 §9.2 的持久化失败语义
+```
 
 ---
 
@@ -391,10 +397,37 @@ created_at
 ```txt
 1. INSERT user message（status=pending）
 2. INSERT workflow_run（user_message_id 已填，assistant_message_id=null）
-3. 调用 Core
+3. 调用 Core（事务外）
 4. 成功：INSERT assistant message（status=completed）→ UPDATE workflow_runs.assistant_message_id → UPDATE user message status=completed
 5. 失败：UPDATE user message status=failed + error_summary；workflow_run 保存失败 trace（assistant_message_id 保持 null）
 ```
+
+**短事务规则：** 上述步骤 1～2、4～5 不能各自散落提交后留下半完成状态；Core 调用前后也不能共用同一长事务。
+
+```txt
+事务 A（创建待处理态）：
+1. INSERT user message（status=pending）
+2. INSERT workflow_run（user_message_id 已填，assistant_message_id=null，status=running 或等价初始态）
+→ COMMIT
+
+→ 调用 Core（事务外；不占连接池事务）
+
+Core 成功后 — 事务 B（成功写回，一次 COMMIT）：
+1. INSERT assistant message（status=completed）
+2. UPDATE workflow_runs（assistant_message_id、status、trace/debug snapshots、model 等）
+3. UPDATE user message（status=completed）
+4. UPDATE conversation（emotion_json、preview、title、updated_at）
+→ COMMIT
+
+Core 失败后 — 事务 C（失败写回，一次 COMMIT）：
+1. UPDATE user message（status=failed、error_summary）
+2. UPDATE workflow_runs（status=failed、error_summary、已收集 trace / observer 安全快照）
+→ COMMIT
+```
+
+若事务 B 任一步失败，**整笔 B 必须 ROLLBACK**，不得留下「assistant 已插入但 user 仍 pending」等不一致状态。此时 user message 保持事务 A 后的 `pending`，workflow_run 仍无 `assistant_message_id`；接口按 §9.2 返回「模型生成成功但宿主持久化失败」，可在响应当次临时展示生成文本。
+
+degraded 成功路径仍走事务 B：`workflow_runs.status=degraded`，assistant message 与 user completed 照常写入。
 
 UI 通过 `assistant_message_id` 或 `user_message_id` 查找 run；点击 assistant 消息时以 `assistant_message_id` 为主键查询。
 
@@ -1021,6 +1054,7 @@ packages/ai-core/**
 - emotion 在下一轮正确传入并在 UI 中恢复
 - summary 启用后重启服务仍可恢复
 - 历史 messages 不再由 ChatPanel 自己作为唯一来源维护
+- 成功/失败写回分别通过事务 B / C 原子提交，刷新后无半完成态
 ```
 
 人工验证：
@@ -1123,35 +1157,39 @@ packages/ai-core/**
 
 ### 9.1 模型或 Workflow 失败
 
+对应 §4.6 **事务 C**（一次 COMMIT）：
+
 ```txt
-- user message 已保存：保留，UPDATE status=failed，写入 error_summary（安全摘要）
+- user message：UPDATE status=failed，写入 error_summary（安全摘要）
 - assistant message：不 INSERT；workflow_runs.assistant_message_id 保持 null
-- workflow_runs：保存失败 run、error_summary 与安全 trace
-- conversation.updated_at：可更新为最近尝试时间，但 preview 不应覆盖为错误文本
+- workflow_runs：UPDATE status=failed、error_summary 与安全 trace / observer 快照
+- conversation.updated_at：可在事务 C 内一并更新为最近尝试时间，但 preview 不应覆盖为错误文本
 - 页面：显示本轮失败面板与可查看 trace；failed 的 user message 在右侧可见
 ```
 
-### 9.2 宿主写回失败
+### 9.2 宿主写回失败（事务 B 回滚）
 
-例如模型已成功生成回复，但 assistant message 保存失败：
+例如模型已成功生成回复，但 **事务 B** 提交失败（任一步 SQL 错误导致整笔 ROLLBACK）：
 
 ```txt
+- user message 保持 pending（事务 A 状态）；不得出现 assistant message
+- workflow_runs.assistant_message_id 仍为 null；trace 快照未写入
 - 不得声称该轮已完成
 - 返回明确错误：模型生成成功，但会话持久化失败
-- 可在当前页面临时显示生成文本，但必须显著提示刷新后可能丢失
-- 优先记录服务端安全错误与 observer events
+- 可在当前响应当次临时展示生成文本，但必须显著提示刷新后可能丢失
+- 不在事务外单独 PATCH 部分成功字段，避免半完成态
 ```
 
 V1 不做消息队列、补偿任务或可恢复写回；这些属于后续基础设施阶段。
 
 ### 9.3 记忆/情绪/摘要降级
 
-遵循阶段 7 既有语义：
+遵循 stage 7 既有语义；成功路径仍走 **事务 B**（一次 COMMIT）：
 
 ```txt
 Memory.recall / Emotion.analyze / Summary.load 失败
 → Core 正常返回 degraded
-→ 宿主保存 assistant message 与 workflow run
+→ 事务 B 写入 assistant message、workflow_runs（status=degraded）、user completed、conversation 更新
 → 调试 UI 明确标记 degraded
 ```
 
@@ -1182,6 +1220,7 @@ Memory.recall / Emotion.analyze / Summary.load 失败
 [ ] Summary 启用后重启 dev server 仍可恢复
 [ ] /debug/model-runtime 仍可独立验证阶段 1 模型运行时
 [ ] 模型失败时 user message 为 failed，无 assistant message，workflow_run 仍可查看
+[ ] 成功写回后刷新页面，assistant / user completed / workflow_run 关联一致，无 pending 残留
 [ ] 长期记忆管理页列表不含 score；score 仅出现在对话页本轮 recall 结果
 [ ] 页面和 API 响应中没有 API key、连接串、原始异常栈
 [ ] packages/ai-core 无计划外改动
