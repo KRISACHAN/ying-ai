@@ -151,6 +151,7 @@ apps/model-runtime-demo
 │   ├── createModel()
 │   ├── createCompanionCore()
 │   ├── 注入 PostgresMemoryProvider
+│   ├── CompanionMemoryAdminRepository（长期记忆 CRUD，§4.8）
 │   ├── 注入 PostgresSummaryProvider（本阶段新增宿主适配）
 │   └── 注入 DefaultPersonaProvider（由伴侣配置构建）
 │
@@ -167,15 +168,17 @@ apps/model-runtime-demo
 ```txt
 用户发送消息
 ↓
-宿主先持久化 user message（status=pending）
+宿主持久化 user message（status=pending）
 ↓
-读取 conversation / companion / recent messages / emotion / summary
+宿主创建 workflow_run（绑定 user_message_id；assistant_message_id 暂为 null）
+↓
+读取 conversation / companion / 已完成 messages / emotion / summary
 ↓
 宿主构造 Provider 并调用 core.executeWorkflow()
 ↓
 Core 返回 text / emotion / metadata / trace
 ↓
-宿主持久化 assistant message
+成功：宿主持久化 assistant message（status=completed）→ 回填 workflow_runs.assistant_message_id → user message 标记 completed
 ↓
 宿主持久化 conversation.emotion
 ↓
@@ -185,6 +188,8 @@ Core 返回 text / emotion / metadata / trace
 ↓
 返回对话结果与本轮调试信息
 ```
+
+失败分支见 §9.1：`assistant_message_id` 保持 null，user message 标记 `failed`，workflow_run 仍保存 trace。
 
 模型调用与数据库写入不能包在一个长事务中。模型成功后，如果写回失败，接口应明确返回“回复生成成功但宿主持久化失败”的错误状态，不能伪称会话已保存。
 
@@ -310,17 +315,20 @@ id
 conversation_id
 role                  # user | assistant
 content
+status                # pending | completed | failed
+error_summary         # nullable；安全摘要，失败时写入
 created_at
 ```
 
 可选字段：
 
 ```txt
-model
-workflow_run_id
+model                 # assistant 消息可记录最终模型
 ```
 
-短期历史由宿主从该表读取、排序、裁剪后传入 `ChatWorkflowInput.history`。Core 不负责保存它。
+**不在 `debug_messages` 存 `workflow_run_id`。** 与 run 的关联仅由 `debug_workflow_runs.user_message_id` / `assistant_message_id` 单向指向 message，避免循环外键与复杂写入顺序（见 §4.6）。
+
+传入 `ChatWorkflowInput.history` 时，宿主只读取 `status=completed` 的消息（按 `created_at` 正序、裁剪上限）。`pending` / `failed` 的 user message 可在 UI 展示，但不进入下一轮 history。Core 不负责保存短期历史。
 
 ### 4.5 conversation summaries
 
@@ -361,8 +369,8 @@ owner + companion + conversation
 ```txt
 id
 conversation_id
-user_message_id
-assistant_message_id
+user_message_id       NOT NULL → debug_messages.id
+assistant_message_id  NULL     → debug_messages.id；成功后再回填
 workflow_id
 status
 model
@@ -375,6 +383,20 @@ tool_snapshot_json
 error_summary
 created_at
 ```
+
+**关联方向（固定）：** 仅 `workflow_runs → messages`，不在 `debug_messages` 反向存 `workflow_run_id`。
+
+写入顺序：
+
+```txt
+1. INSERT user message（status=pending）
+2. INSERT workflow_run（user_message_id 已填，assistant_message_id=null）
+3. 调用 Core
+4. 成功：INSERT assistant message（status=completed）→ UPDATE workflow_runs.assistant_message_id → UPDATE user message status=completed
+5. 失败：UPDATE user message status=failed + error_summary；workflow_run 保存失败 trace（assistant_message_id 保持 null）
+```
+
+UI 通过 `assistant_message_id` 或 `user_message_id` 查找 run；点击 assistant 消息时以 `assistant_message_id` 为主键查询。
 
 持久化规则：
 
@@ -402,6 +424,38 @@ created_at
 原因：长期记忆 Scope 是 `owner + companion`，应可跨会话继续使用；会话删除不等于用户要求 AI 忘记全部长期关系记忆。
 
 后续若需要“清除记忆”或“删除伴侣”，必须作为独立能力设计，明确删除范围与审计语义。
+
+### 4.8 长期记忆管理适配层（CompanionMemoryAdminRepository）
+
+长期记忆 CRUD **不得**在 Route Handler 内复制 embedding / SQL 逻辑，否则将与 `PostgresMemoryProvider.save()` 的存储规则分叉。
+
+建议新增宿主侧（或 `packages/memory-postgres` 内）管理适配层，例如：
+
+```txt
+apps/model-runtime-demo/lib/memory/companion-memory-admin-repository.ts
+# 或 packages/memory-postgres/src/companion-memory-admin-repository.ts
+```
+
+职责：
+
+```ts
+list(scope: MemoryScope): Promise<MemoryRecord[]>
+create(input, scope): Promise<MemoryRecord>
+update(id, patch, scope): Promise<MemoryRecord>
+remove(id, scope): Promise<void>
+```
+
+规则（写死，与 Workflow 写入语义一致）：
+
+```txt
+- 只改 importance / type：不重新 embedding
+- 改 content：必须重新 embedding 后再 UPDATE
+- 删除：WHERE id + owner_type + owner_id + companion_id（禁止仅按 id 删除）
+- 新增：embed(content) + INSERT，去重规则与 PostgresMemoryProvider.save 一致（同 scope 下 type+content 重复则拒绝或 skipped）
+- 列表响应不含 embedding 向量；不含 score（score 是 recall 查询结果，见 §5.6）
+```
+
+Route Handler 只调用该 repository；Workflow 仍通过 `PostgresMemoryProvider` 写入，两者共用 `companion_memories` 表。
 
 ---
 
@@ -567,7 +621,7 @@ V1 不强制做“角色配置版本快照”。伴侣编辑后，现有会话�
 - systemPrompt（仅本地调试面板）
 
 记忆
-- recalled memories（本轮 Workflow 结果，只读）
+- recalled memories（本轮 Workflow 结果，只读；含 score）
 - extracted memories
 - saved / skipped memories
 - embedding vector length
@@ -601,18 +655,20 @@ Observer
 
 **路由：** `/companions/[id]/memories`（从伴侣编辑页、对话页顶栏、会话列表项均可跳转）
 
-**范围：** 仅操作 `companion_memories` 表中当前 `owner + companion` 下的记录；**不**经 `CompanionCore.executeWorkflow()`，直接由宿主 repository 读写 PostgreSQL。
+**范围：** 仅操作 `companion_memories` 表中当前 `owner + companion` 下的记录；**不**经 `CompanionCore.executeWorkflow()`，由 `CompanionMemoryAdminRepository`（§4.8）读写。
 
 **页面能力（最小集）：**
 
 ```txt
-- 列表：type、content、importance、created_at、score 预览（可选）
+- 列表：type、content、importance、created_at、updated_at
 - 按 type / importance 筛选（可选，至少支持按 companion 隔离列表）
-- 新增：手动写入一条记忆（宿主调用 embed + INSERT，复用 memory-postgres 写路径或等价 SQL）
-- 编辑：content、type、importance（可选是否允许改 embedding 重算）
+- 新增：通过 CompanionMemoryAdminRepository.create（embed + INSERT）
+- 编辑：content、type、importance（改 content 触发 re-embed，见 §4.8 规则）
 - 删除：单条删除，二次确认
 - 空状态与 DB 未连接时的明确提示
 ```
+
+**`score` 不在此页展示。** `score` 是 recall 查询的相似度，仅出现在对话页左侧「本轮 recalled memories」调试结果中。
 
 **与 Workflow 记忆的关系：**
 
@@ -743,7 +799,7 @@ GET /api/conversations/[id]/runs/[runId]
 
 首屏只加载最新若干 run 的轻量索引；用户点击某一条 AI 回复时再加载详情，避免历史长会话一次返回大量 Trace JSON。
 
-### 6.5 长期记忆管理 API（宿主直读写，不经 Core）
+### 6.5 长期记忆管理 API（经 CompanionMemoryAdminRepository，不经 Core）
 
 ```txt
 GET    /api/companions/[id]/memories
@@ -755,9 +811,9 @@ DELETE /api/companions/[id]/memories/[memoryId]
 约束：
 
 ```txt
+- Route Handler 只委托 CompanionMemoryAdminRepository（§4.8），不在 route 内拼 SQL / 调 embed
 - scope 由服务端从 LOCAL_DEBUG_OWNER + path companionId 构造
-- POST/PATCH 需触发 embedding（复用 OpenAIEmbeddingProvider + 与 memory-postgres 一致的表结构）
-- 响应不包含 embedding 原始向量（列表可返回 dimension 元数据）
+- 响应不包含 embedding 原始向量；列表不含 score
 - 与 Workflow memory.save 共用 companion_memories 表，保证 CRUD 后下一轮 recall 可观测
 ```
 
@@ -862,7 +918,9 @@ packages/ai-core/**
 
 ```txt
 - 建立 companions / conversations / messages / summaries / workflow_runs migration
+- messages 含 status / error_summary；workflow_runs 单向关联 user_message_id / assistant_message_id
 - 建立 repository 或 store 层
+- 实现 CompanionMemoryAdminRepository（§4.8）
 - 增加本地 debug owner 过滤
 - 实现 conversation 删除级联清理
 - 实现 PostgresSummaryProvider / PostgresSummaryUpdater
@@ -949,11 +1007,11 @@ packages/ai-core/**
 
 ```txt
 - 对话页加载 conversation / messages / companion
-- POST /messages 持久化 user message → workflow → assistant message
+- POST /messages：user message(pending) → workflow_run → Core → assistant(completed) / 失败回写
 - 回写 conversation emotion、preview、updatedAt
-- 服务端读取短期 history 并传入 Core
+- 服务端只读取 status=completed 的 messages 作为 history
 - 注入持久化 Summary Provider
-- 失败状态持久化 workflow run，不伪造 assistant message
+- 失败时 user message status=failed，不伪造 assistant message
 ```
 
 完成标准：
@@ -1015,8 +1073,7 @@ packages/ai-core/**
 - /companions/[id]/memories 页面与 §6.5 API
 - 列表、新增、编辑、单条删除（二次确认）
 - 顶栏从对话页 / 伴侣编辑页可跳转
-- 宿主 repository 直读写 companion_memories（不经 executeWorkflow）
-- 新增/编辑时 embed + INSERT/UPDATE，与 memory-postgres 表结构一致
+- API 经 CompanionMemoryAdminRepository，不在 route 内复制 embed/SQL
 ```
 
 完成标准：
@@ -1067,11 +1124,11 @@ packages/ai-core/**
 ### 9.1 模型或 Workflow 失败
 
 ```txt
-- user message 已保存：保留，并标记 pending/failed（字段实现可二选一）
-- assistant message：不保存伪回复
-- workflow_runs：保存失败 run 与安全摘要
+- user message 已保存：保留，UPDATE status=failed，写入 error_summary（安全摘要）
+- assistant message：不 INSERT；workflow_runs.assistant_message_id 保持 null
+- workflow_runs：保存失败 run、error_summary 与安全 trace
 - conversation.updated_at：可更新为最近尝试时间，但 preview 不应覆盖为错误文本
-- 页面：显示本轮失败面板与可查看 trace
+- 页面：显示本轮失败面板与可查看 trace；failed 的 user message 在右侧可见
 ```
 
 ### 9.2 宿主写回失败
@@ -1124,7 +1181,8 @@ Memory.recall / Emotion.analyze / Summary.load 失败
 [ ] 情绪在刷新后仍能恢复并传入下一轮
 [ ] Summary 启用后重启 dev server 仍可恢复
 [ ] /debug/model-runtime 仍可独立验证阶段 1 模型运行时
-[ ] 出现模型失败时能看到安全错误与失败 trace
+[ ] 模型失败时 user message 为 failed，无 assistant message，workflow_run 仍可查看
+[ ] 长期记忆管理页列表不含 score；score 仅出现在对话页本轮 recall 结果
 [ ] 页面和 API 响应中没有 API key、连接串、原始异常栈
 [ ] packages/ai-core 无计划外改动
 ```
