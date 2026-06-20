@@ -17,6 +17,18 @@
 
 本阶段只修改宿主应用、宿主侧持久化和调试 UI。除非发现可复现且能够明确归责于 `ai-core` 的缺陷，否则不修改 `packages/ai-core`。
 
+### 与 `03-plan.md` 的关系与差异
+
+`prompts/03-plan.md` 是 V1 **总路线图**；本文档是阶段 8 的**可执行规格**，以当前代码为准。两者冲突时，**以本文档为准**。
+
+主要差异：
+
+1. **范围**：`03-plan.md` 阶段 8 仅列「输入框、聊天记录、展示记忆/情绪/工具」；阶段 3～7 的 demo 已超额完成展示项。本文档聚焦**宿主持久化、会话/伴侣管理、调试数据回看、长期记忆独立管理**。
+2. **布局**：本文档要求对话页**左调试、右对话**；保留并迁移现有 `ChatPanel` 调试分组，而非从零重写。
+3. **owner 类型**：本地调试使用 `MemoryScope.ownerType = "custom"`（见 §4.1），不扩展 `ai-core` 联合类型。
+
+实施阶段 8 时无需回头修改 `03-plan.md`；全部阶段完成后可统一修订总路线图。
+
 ---
 
 ## 一、前置现状与阶段目标
@@ -49,11 +61,12 @@
 
 1. 创建对话前可设定当前 AI 伴侣属性；
 2. 可查看会话历史列表；
-3. 可进入任意会话继续聊天；
+3. 可进入任意会话继续聊天（左调试 · 右对话）；
 4. 可删除会话；
-5. 可在每轮聊天后查看本轮完整调试信息；
-6. 刷新页面后仍能恢复会话、短期历史、情绪与摘要；
-7. 不把用户系统、鉴权、多租户、商业化逻辑带入 Core。
+5. 可在每轮聊天后在左侧查看完整调试信息；
+6. 可在独立页面管理长期记忆（增删改查）；
+7. 刷新页面后仍能恢复会话、短期历史、情绪与摘要；
+8. 不把用户系统、鉴权、多租户、商业化逻辑带入 Core。
 ```
 
 ---
@@ -65,13 +78,15 @@
 ```txt
 - 伴侣创建/编辑表单
 - 对话历史列表页
-- 对话页
+- 对话页（左调试工作台 + 右对话模块，见 §5.4）
+- 长期记忆独立管理页（按伴侣 CRUD，见 §5.6；不与对话页混排）
 - 会话与消息持久化
 - 会话删除
 - 当前情绪与摘要持久化
 - 伴侣配置注入 PersonaProvider
 - 调试信息按“本轮消息”展示与持久化
-- 保留现有 Memory DB 健康状态与 Provider 信息展示
+- 保留并迁移现有 ChatPanel / Memory DB 健康状态与 Provider 信息展示
+- 保留 Model Runtime 独立验证入口（见 §5.1）
 ```
 
 ### 2.2 本阶段明确不做
@@ -82,8 +97,8 @@
 - 支付、套餐、角色市场
 - 文件上传、语音、图片、多模态
 - 消息编辑、消息撤回、消息搜索
-- 删除单条长期记忆
-- 删除伴侣及其全部长期记忆
+- 在对话页内嵌长期记忆增删改查（须在独立管理页完成，见 §5.6）
+- 删除伴侣及其全部长期记忆（伴侣删除本阶段仍不做）
 - 远程 Tool Call、MCP、LangChain、LangGraph
 - 流式工具调用
 - 修改 ai-core 的公开 Provider / Workflow 契约
@@ -106,7 +121,7 @@ packages/ai-core
 `apps/model-runtime-demo` 是宿主；它负责读取环境变量、创建 Provider、维护持久化状态，并将状态传入：
 
 ```ts
-core.executeWorkflow(input)
+core.executeWorkflow(input);
 ```
 
 ---
@@ -119,12 +134,14 @@ core.executeWorkflow(input)
 apps/model-runtime-demo
 ├── App UI
 │   ├── 伴侣设置页/弹窗
+│   ├── 长期记忆管理页（/companions/[id]/memories）
 │   ├── 会话历史列表
-│   ├── 对话页
-│   └── 调试工作台面板
+│   ├── 对话页（左：调试工作台 · 右：对话模块）
+│   └── Model Runtime 验证页（/debug/model-runtime）
 │
 ├── Route Handlers
 │   ├── 伴侣 CRUD
+│   ├── 长期记忆 CRUD（宿主直读写 companion_memories）
 │   ├── 会话 CRUD
 │   ├── 消息发送
 │   └── 调试运行记录读取
@@ -141,7 +158,8 @@ apps/model-runtime-demo
     ├── companions
     ├── conversations
     ├── messages
-    └── workflow_runs
+    ├── workflow_runs
+    └── companion_memories（长期记忆；Workflow 与记忆管理页共用）
 ```
 
 ### 3.2 一轮消息的宿主链路
@@ -178,12 +196,15 @@ Core 返回 text / emotion / metadata / trace
 
 本阶段没有用户系统，但数据库结构不得把“当前机器只有一个人”写死。
 
-宿主统一使用固定本地 owner：
+宿主统一使用固定本地 owner（须符合 `MemoryScope.ownerType` 联合类型，**不修改 `ai-core`**）：
 
 ```txt
-ownerType = "local-debug"
+ownerType = "custom"
 ownerId   = "local-debug-owner"
 ```
+
+常量建议定义为 `LOCAL_DEBUG_OWNER = { type: "custom", id: "local-debug-owner" } as const`。
+`ownerType` 不使用 `"local-debug"` 字面量——该值不在 Core 类型中；语义上 `"custom"` 表示「宿主自定义 owner」，本地调试与未来用户系统切换均适用。
 
 该值只存在于宿主侧，不传给前端自由修改。
 
@@ -233,6 +254,19 @@ personality         必填；文本或标签合并后保存
 speaking_style      可选
 background          可选
 custom_instructions 可选；仅补充角色设定，不允许覆盖宿主安全边界
+```
+
+**Persona 映射（runtime builder）：** 从 `debug_companions` 行构造 `DefaultPersonaProvider` 时：
+
+```txt
+id              ← companion.id
+name            ← name
+gender          ← gender
+relationship    ← relationship
+personality     ← personality
+speakingStyle   ← speaking_style
+background      ← background（若有）
+systemPrompt    ← custom_instructions（若有；作为补充设定拼入，不覆盖 Safety 边界）
 ```
 
 本阶段不做角色市场，也不做复杂角色卡 schema。保留文本字段是为了先验证 Persona 对聊天行为的影响。
@@ -379,11 +413,15 @@ created_at
 /                              → 会话历史列表
 /companions/new                → 创建伴侣
 /companions/[id]/edit          → 编辑伴侣
+/companions/[id]/memories      → 该伴侣的长期记忆管理（独立页，见 §5.6）
 /conversations/new?companionId=... → 创建会话后跳转
-/conversations/[id]            → 对话页 + 调试工作台
+/conversations/[id]            → 对话页：左调试工作台 + 右对话模块
+/debug/model-runtime           → 保留阶段 1 Model Runtime 独立验证（迁移现有 ModelRuntimePanel）
 ```
 
 不需要单独做“正式首页”。根路径直接作为调试会话列表即可。
+
+`ModelRuntimePanel` 从当前首页迁出至 `/debug/model-runtime`，避免与新的会话列表/对话页职责混杂；阶段 1 能力仍可通过该路由手工验收。
 
 ### 5.2 伴侣设定流程
 
@@ -445,27 +483,41 @@ V1 不强制做“角色配置版本快照”。伴侣编辑后，现有会话�
 
 本阶段不做分页、搜索、置顶、归档。
 
-### 5.4 对话页
+### 5.4 对话页布局（左调试 · 右对话）
 
-页面建议采用三栏或两栏可收起布局：
-
-```txt
-左侧：会话列表（桌面端）
-中间：消息流 + 输入框
-右侧：调试面板（可折叠）
-```
-
-窄屏下可退化为：
+对话页 `/conversations/[id]` **必须**采用左右分栏，职责固定：
 
 ```txt
-消息流
-↓
-输入框
-↓
-调试面板 Drawer / Sheet
+┌─────────────────────────────────────────────────────────────┐
+│  顶栏：伴侣名 · 会话标题 · 返回列表 · 跳转长期记忆管理        │
+├──────────────────────────┬──────────────────────────────────┤
+│  左侧：调试工作台         │  右侧：对话模块                   │
+│  （可滚动，占宽 ~50%）    │  （消息流 + 输入框，占宽 ~50%）    │
+│                          │                                  │
+│  - 本轮 run 选择器        │  - 历史消息（正序）               │
+│  - 运行总览 / Trace       │  - pending / 失败状态             │
+│  - Persona / scope        │  - 输入框 + 发送                  │
+│  - Prompt Debug           │                                  │
+│  - 记忆（本轮 recall/     │                                  │
+│    extract/save 结果）    │                                  │
+│  - 情绪 / 工具 / Observer │                                  │
+│  - Memory DB health       │                                  │
+│  - Summary 控件（可选）   │                                  │
+└──────────────────────────┴──────────────────────────────────┘
 ```
 
-消息流：
+原则：
+
+```txt
+- **左侧** = 当前会话相关的全部可观测信息与阶段状态（迁移自现有 ChatPanel 调试分组，不丢弃）
+- **右侧** = 纯对话交互（消息列表 + 输入），不在右侧堆叠 Trace / Prompt / Observer
+- 点击某条 assistant 消息时，左侧切换到对应 workflow_run（见 §5.5）
+- 窄屏下左侧可收起到 Drawer / Sheet，但桌面端默认并排可见
+```
+
+**不在对话页内做长期记忆 CRUD。** 本轮 recall/extract/save 的**观测结果**仍在左侧「记忆」分组展示；对 `companion_memories` 表的增删改查须通过 §5.6 独立入口完成。
+
+右侧消息流：
 
 ```txt
 - 从 debug_messages 读取并按 created_at 正序显示
@@ -473,9 +525,10 @@ V1 不强制做“角色配置版本快照”。伴侣编辑后，现有会话�
 - 发送期间显示 pending 状态
 - 发送失败时保留用户消息并显示失败提示
 - 不伪造 assistant 回复
+- 可点击 assistant 消息，联动左侧加载该轮 workflow_run
 ```
 
-输入框：
+右侧输入框：
 
 ```txt
 - Enter 发送，Shift + Enter 换行（或沿用当前 Ctrl/Cmd + Enter，二选一并保持一致）
@@ -483,9 +536,11 @@ V1 不强制做“角色配置版本快照”。伴侣编辑后，现有会话�
 - 请求完成后滚动到底部
 ```
 
-### 5.5 调试面板
+会话列表仍只在 `/` 展示，不嵌入对话页分栏（避免三栏拥挤）。若后续需要，可在顶栏提供「会话切换」下拉，本阶段非必须。
 
-调试面板是阶段 8 的核心，不是装饰。
+### 5.5 调试工作台（左侧栏）
+
+左侧栏是阶段 8 的核心可观测面，**优先迁移**现有 `chat-panel.tsx` 中的调试分组，而非重写。
 
 建议按“本轮 AI 回复”选择 `workflow_run` 展示以下分组：
 
@@ -512,10 +567,11 @@ V1 不强制做“角色配置版本快照”。伴侣编辑后，现有会话�
 - systemPrompt（仅本地调试面板）
 
 记忆
-- recalled memories
+- recalled memories（本轮 Workflow 结果，只读）
 - extracted memories
 - saved / skipped memories
 - embedding vector length
+- 链接至「长期记忆管理」页（§5.6），不在此分组内做 CRUD
 
 情绪
 - previous / detected / next
@@ -538,6 +594,44 @@ Observer
 - 长文本使用折叠与复制按钮，避免页面无法阅读
 - 对 JSON 提供格式化展示，不要求编辑
 ```
+
+### 5.6 长期记忆管理页（独立入口）
+
+长期记忆的**增删改查**不与对话页混排，单独提供管理界面，便于调试「写入 / 召回 / 隔离」而不干扰聊天流。
+
+**路由：** `/companions/[id]/memories`（从伴侣编辑页、对话页顶栏、会话列表项均可跳转）
+
+**范围：** 仅操作 `companion_memories` 表中当前 `owner + companion` 下的记录；**不**经 `CompanionCore.executeWorkflow()`，直接由宿主 repository 读写 PostgreSQL。
+
+**页面能力（最小集）：**
+
+```txt
+- 列表：type、content、importance、created_at、score 预览（可选）
+- 按 type / importance 筛选（可选，至少支持按 companion 隔离列表）
+- 新增：手动写入一条记忆（宿主调用 embed + INSERT，复用 memory-postgres 写路径或等价 SQL）
+- 编辑：content、type、importance（可选是否允许改 embedding 重算）
+- 删除：单条删除，二次确认
+- 空状态与 DB 未连接时的明确提示
+```
+
+**与 Workflow 记忆的关系：**
+
+```txt
+- Workflow 的 memory.extract / memory.save 仍走 Core，结果可在对话页左侧「记忆」分组观测
+- 本页 CRUD 用于人工补数、修正错误记忆、验证 recall 隔离，不替代 Workflow 自动抽取
+- 删除会话（§4.7）仍不删除此处长期记忆；在本页删除单条记忆才移除对应 row
+```
+
+**API 建议（宿主侧，不经 Core）：**
+
+```txt
+GET    /api/companions/[id]/memories
+POST   /api/companions/[id]/memories
+PATCH  /api/companions/[id]/memories/[memoryId]
+DELETE /api/companions/[id]/memories/[memoryId]
+```
+
+所有请求由服务端注入 `LOCAL_DEBUG_OWNER` 与 path 中的 `companionId` 作为 scope，禁止客户端传 owner。
 
 ---
 
@@ -586,7 +680,9 @@ POST /api/conversations/[id]/messages
 请求仅接收：
 
 ```ts
-{ message: string }
+{
+  message: string;
+}
 ```
 
 不允许客户端传入：
@@ -646,6 +742,24 @@ GET /api/conversations/[id]/runs/[runId]
 ```
 
 首屏只加载最新若干 run 的轻量索引；用户点击某一条 AI 回复时再加载详情，避免历史长会话一次返回大量 Trace JSON。
+
+### 6.5 长期记忆管理 API（宿主直读写，不经 Core）
+
+```txt
+GET    /api/companions/[id]/memories
+POST   /api/companions/[id]/memories
+PATCH  /api/companions/[id]/memories/[memoryId]
+DELETE /api/companions/[id]/memories/[memoryId]
+```
+
+约束：
+
+```txt
+- scope 由服务端从 LOCAL_DEBUG_OWNER + path companionId 构造
+- POST/PATCH 需触发 embedding（复用 OpenAIEmbeddingProvider + 与 memory-postgres 一致的表结构）
+- 响应不包含 embedding 原始向量（列表可返回 dimension 元数据）
+- 与 Workflow memory.save 共用 companion_memories 表，保证 CRUD 后下一轮 recall 可观测
+```
 
 ---
 
@@ -858,44 +972,70 @@ packages/ai-core/**
 确认 history、emotion、summary 与新的 assistant 回复连续。
 ```
 
-### 08-06：调试工作台产品化
+### 08-06：对话页左右分栏与调试工作台迁移
 
-目标：把阶段 7 已有调试数据改造成可读、可回看的 UI。
+目标：实现「左调试 · 右对话」布局，迁移现有 ChatPanel 调试能力。
 
 要做：
 
 ```txt
-- 每条 assistant message 关联 workflow run
-- 右侧/Drawer 调试面板
-- 时间线、记忆、情绪、工具、Prompt、Observer 分组
+- 对话页左右分栏布局（§5.4）
+- 右侧：消息流 + 输入框（纯对话）
+- 左侧：迁移 chat-panel.tsx 调试分组（Trace / Prompt / 本轮记忆 / 情绪 / 工具 / Observer / Memory DB health）
+- 每条 assistant message 关联 workflow run；点击消息切换左侧 run
 - JSON 格式化、折叠、复制
-- 当前 run 与历史 run 切换
-- 保留 Memory DB health / provider meta
+- 当前 run 与历史 run 切换（从 workflow_runs 加载）
+- ModelRuntimePanel 迁至 /debug/model-runtime
 ```
 
 完成标准：
 
 ```txt
-- 一轮成功、degraded、失败都能看到安全 trace
-- 能定位本轮使用的模型、是否 fallback、记忆召回数、工具结果与情绪变化
-- 旧会话重新打开后也能查看该轮调试记录
+- 桌面端默认左调试、右对话并排可见
+- 一轮成功、degraded、失败在左侧均能看到安全 trace
+- 右侧不包含 Trace / Prompt 等调试堆叠
+- 旧会话重新打开后左侧仍可查看历史 run
 - 页面不展示 secrets 或连接串
 ```
 
 人工验证：
 
 ```txt
-分别触发：
-- 普通聊天
-- 记忆写入与召回
-- get_current_time 工具
-- search_memory 工具
-- 模型失败或无效配置
-
-确认每种场景都有对应 WorkflowTrace / Observer / 安全错误摘要。
+分别触发：普通聊天、记忆写入与召回、get_current_time、search_memory、模型失败；
+确认左侧有对应 WorkflowTrace / Observer，右侧仅显示对话消息。
 ```
 
-### 08-07：手工验收与文档收束
+### 08-07：长期记忆独立管理页
+
+目标：在对话页之外提供 companion_memories 的增删改查。
+
+要做：
+
+```txt
+- /companions/[id]/memories 页面与 §6.5 API
+- 列表、新增、编辑、单条删除（二次确认）
+- 顶栏从对话页 / 伴侣编辑页可跳转
+- 宿主 repository 直读写 companion_memories（不经 executeWorkflow）
+- 新增/编辑时 embed + INSERT/UPDATE，与 memory-postgres 表结构一致
+```
+
+完成标准：
+
+```txt
+- 手动新增一条记忆后，同 companion 新会话聊天可 recall 到
+- 编辑/删除后列表与 DB 一致
+- 不同 companion 的记忆列表互不可见
+- 对话页左侧「记忆」分组仅展示本轮 Workflow 结果，不提供 CRUD 表单
+```
+
+人工验证：
+
+```txt
+在记忆管理页手动写入「测试偏好 A」→ 新建会话发送相关 prompt → 左侧看到 recalled；
+删除该条记忆后再聊，确认不再 recall。
+```
+
+### 08-08：手工验收与文档收束
 
 目标：在无单元测试/E2E 的前提下，保留明确的人工验证路径。
 
@@ -969,16 +1109,21 @@ Memory.recall / Emotion.analyze / Summary.load 失败
 [ ] 创建伴侣时可设置名称、性别、性格、说话风格等 Persona 属性
 [ ] 可用已有伴侣创建新会话
 [ ] 会话列表展示标题、伴侣、预览和更新时间
+[ ] 对话页为左调试、右对话分栏；右侧仅消息与输入
+[ ] 左侧展示 Trace / Prompt / 情绪 / 工具 / Observer 等阶段状态
 [ ] 打开会话后可看到持久化历史消息
 [ ] 刷新页面后可继续同一个会话
 [ ] 不同 companion 的长期记忆不互相召回
 [ ] 同 companion 的不同会话可召回共享长期记忆
 [ ] 删除会话会删除该会话消息/摘要/run，但不会删除长期记忆
+[ ] 长期记忆管理页可列表、新增、编辑、删除单条记忆
+[ ] 手动写入的长期记忆可在聊天中被 recall
 [ ] 发送一条普通消息可看到 WorkflowTrace
-[ ] 触发记忆后可看到 extracted / saved / recalled memories
+[ ] 触发记忆后可看到 extracted / saved / recalled memories（左侧，只读）
 [ ] 触发工具后可看到 tool call / tool result
 [ ] 情绪在刷新后仍能恢复并传入下一轮
 [ ] Summary 启用后重启 dev server 仍可恢复
+[ ] /debug/model-runtime 仍可独立验证阶段 1 模型运行时
 [ ] 出现模型失败时能看到安全错误与失败 trace
 [ ] 页面和 API 响应中没有 API key、连接串、原始异常栈
 [ ] packages/ai-core 无计划外改动
@@ -995,8 +1140,10 @@ Memory.recall / Emotion.analyze / Summary.load 失败
 
 - 可配置伴侣 Persona
 - 可创建、继续、删除会话
+- 对话页左调试、右对话，阶段状态与聊天分离
 - 可持久化短期消息、情绪和摘要
 - 可复用 PostgreSQL + pgvector 长期记忆
+- 可在独立页面管理长期记忆（增删改查）
 - 可验证工具调用
 - 可追踪 Workflow 生命周期
 - 可回看每轮调试结果
