@@ -16,7 +16,7 @@ import {
   type RecalledMemory,
 } from "../../abstractions/memory";
 import type { CoreEvent, CoreObserver } from "../../abstractions/observer";
-import type { CompanionGender, CompanionPersona } from "../../abstractions/persona";
+import type { CompanionPersona } from "../../abstractions/persona";
 import {
   resolveSummaryScope,
   type ConversationSummary,
@@ -40,6 +40,7 @@ import type {
 import { formatEmotionForPrompt } from "../emotion/prompt-formatter";
 import { createNeutralEmotion } from "../emotion/transition";
 import { formatMemoriesForPrompt } from "../memory/prompt-formatter";
+import { buildPersonaSystemPrompt } from "../persona/persona-prompt-builder";
 import { splitForSummary, trimRecentHistory } from "../summary/history-utils";
 import { formatSummaryForPrompt } from "../summary/prompt-formatter";
 import { buildToolFollowUpMessages, toCoreToolCall, toModelTools } from "../tool/tool-adapter";
@@ -281,12 +282,13 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         tools,
         ...(sessionId !== undefined ? { sessionId } : {}),
       });
-      const systemPrompt = buildPersonaSystemPrompt(loadedPersona, {
+      const prompt = buildPersonaSystemPrompt(loadedPersona, {
         ...(summaryContext !== undefined ? { summaryContext } : {}),
         ...(memoryContext !== undefined ? { memoryContext } : {}),
         ...(emotionContext !== undefined ? { emotionContext } : {}),
         toolDefinitions,
       });
+      const { persona: effectivePersona, personaPrompt, systemPrompt } = prompt;
       const messages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
         ...recentHistory,
@@ -400,6 +402,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         nextEmotion: emotionResult.next,
         recentHistory,
         summarizedMessages: summaryResult.summarizedMessages,
+        personaPrompt,
         systemPrompt,
         messages,
         toolDefinitions,
@@ -419,7 +422,7 @@ export class SimpleChatWorkflow implements ChatWorkflow {
         text: modelOutput.text,
         model: modelOutput.model,
         raw: modelOutput.raw,
-        persona: loadedPersona,
+        persona: effectivePersona,
         memories: recalledMemories,
         emotion: emotionResult.next,
         toolResults: generationResult.toolResults,
@@ -920,99 +923,6 @@ async function analyzeAndTransitionEmotion(
     });
 
     return { previous, next: previous, degraded: true, reason: "analyze_failed" };
-  }
-}
-
-/** 将 Persona、摘要、长期记忆与情绪上下文拼成最终 system prompt。 */
-function buildPersonaSystemPrompt(
-  persona: CompanionPersona,
-  context: {
-    summaryContext?: string;
-    memoryContext?: string;
-    emotionContext?: string;
-    toolDefinitions?: ToolDefinition[];
-  },
-): string {
-  const { summaryContext, memoryContext, emotionContext, toolDefinitions } = context;
-  const lines: string[] = [
-    "你是一个 AI 伴侣角色，请始终以该角色身份与用户对话。",
-    "",
-    `角色名称：${persona.name}`,
-    `性别：${formatGender(persona.gender)}`,
-  ];
-
-  if (persona.relationship) {
-    lines.push(`关系：${persona.relationship}`);
-  }
-  if (persona.personality) {
-    lines.push(`性格：${persona.personality}`);
-  }
-  if (persona.speakingStyle) {
-    lines.push(`说话风格：${persona.speakingStyle}`);
-  }
-  if (persona.background) {
-    lines.push(`背景：${persona.background}`);
-  }
-
-  if (persona.systemPrompt) {
-    lines.push("", "额外角色指令：", persona.systemPrompt);
-  }
-
-  if (summaryContext !== undefined) {
-    lines.push("", summaryContext);
-  }
-
-  if (memoryContext !== undefined) {
-    lines.push("", memoryContext);
-  }
-
-  if (emotionContext !== undefined) {
-    lines.push("", emotionContext);
-  }
-
-  if ((toolDefinitions?.length ?? 0) > 0) {
-    lines.push(
-      "",
-      "可用工具说明：",
-      "如需当前时间、长期记忆补充或当前情绪状态，可以调用可用工具。",
-      "工具结果返回后，请自然使用这些信息回复用户，不要暴露内部工具调用过程。",
-    );
-  }
-
-  lines.push(
-    "",
-    "回复要求：",
-    "1. 使用自然、亲近、有陪伴感的语气；",
-    "2. 不要声称自己拥有真实人类身份；",
-    "3. 不要编造你无法知道的长期记忆；",
-    "4. 如果上下文不足，可以温和询问用户；",
-    "5. 情绪只影响语气和关注点，不要直接暴露情绪标签；",
-  );
-
-  if (summaryContext !== undefined && memoryContext !== undefined) {
-    lines.push("6. 可以自然参考会话摘要与长期上下文，但不要暴露内部系统。");
-  } else if (summaryContext !== undefined) {
-    lines.push("6. 可以自然参考会话摘要，但不要暴露内部系统。");
-  } else if (memoryContext !== undefined) {
-    lines.push("6. 可以自然参考长期上下文，但不要暴露长期记忆系统。");
-  } else {
-    lines.push("6. 只能依据本轮输入与传入的短期历史回答。");
-  }
-
-  return lines.join("\n");
-}
-
-/** 将 CompanionGender 枚举转为中文展示文案，用于 system prompt。 */
-function formatGender(gender: CompanionGender): string {
-  switch (gender) {
-    case "female":
-      return "女性";
-    case "male":
-      return "男性";
-    case "non_binary":
-      return "非二元";
-    default:
-      return "未指定";
   }
 }
 

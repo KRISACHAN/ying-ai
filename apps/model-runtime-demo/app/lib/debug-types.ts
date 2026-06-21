@@ -16,7 +16,18 @@ export interface DebugCompanion {
   name: string;
   gender: CompanionGender;
   relationship: string;
+  userDisplayName: string;
   userAddress: string;
+  profile: {
+    hobbies?: string[];
+  };
+  appearance: {
+    heightCm?: number;
+    weightKg?: number;
+    hair?: string;
+    bodyType?: string;
+    additionalTraits?: Record<string, string>;
+  };
   personality: string;
   speakingStyle: string;
   background: string;

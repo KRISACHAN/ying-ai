@@ -108,6 +108,12 @@ body {
   font-size: 14px;
 }
 
+.button-secondary {
+  border-color: #d9dee7;
+  background: #ffffff;
+  color: #1c2430;
+}
+
 .output {
   min-height: 240px;
   margin: 20px 0 0;
@@ -316,6 +322,22 @@ body {
   gap: 14px;
 }
 
+.form-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-fields:has(input:only-of-type) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .full-span {
   grid-column: 1 / -1;
 }
@@ -473,6 +495,7 @@ body {
 @media (max-width: 900px) {
   .start-panel,
   .form-grid,
+  .inline-fields,
   .conversation-grid,
   .memory-admin {
     grid-template-columns: 1fr;

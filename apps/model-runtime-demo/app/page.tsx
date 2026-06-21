@@ -75,6 +75,9 @@ export default async function Page() {
             {"\n"}
             psql -d ying_companion_dev -f
             apps/model-runtime-demo/migrations/0001_create_debug_workspace.sql
+            {"\n"}
+            psql -d ying_companion_dev -f
+            apps/model-runtime-demo/migrations/0002_extend_debug_companion_persona.sql
           </pre>
         </section>
       </main>

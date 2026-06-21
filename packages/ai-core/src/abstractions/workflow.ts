@@ -87,6 +87,8 @@ export interface ChatWorkflowDebugContext {
   droppedToolCalls?: ModelToolCall[];
   /** 工具执行后传入二次生成的消息。 */
   toolFollowUpMessages?: ChatMessage[];
+  /** buildPersonaPrompt 结果，仅包含 normalize 后的 Persona 段落。 */
+  personaPrompt: string;
   /** buildPersonaSystemPrompt 完整结果。 */
   systemPrompt: string;
   /** 首次传入 model.generate 的 messages；二次生成输入见 toolFollowUpMessages。 */

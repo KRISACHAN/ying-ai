@@ -563,6 +563,10 @@ function PromptDebugPanel({
       <p className="section-title">Prompt / Context Debug Panel</p>
       <p className="section-subtitle">scope</p>
       <pre className="output">{JSON.stringify(debugContext.scope, null, 2)}</pre>
+      <p className="section-subtitle">Effective Persona（normalize 后）</p>
+      <pre className="output">{JSON.stringify(result.persona ?? null, null, 2)}</pre>
+      <p className="section-subtitle">Persona Prompt Preview</p>
+      <pre className="output">{debugContext.personaPrompt}</pre>
       <p className="section-subtitle">Conversation Summary（生成前加载）</p>
       <pre className="output">{formatSummary(loadedSummary)}</pre>
       <p className="section-subtitle">Updated Summary（本轮生成后）</p>
@@ -577,7 +581,9 @@ function PromptDebugPanel({
           <pre className="output">{debugContext.summaryContext}</pre>
         </>
       ) : null}
-      <p className="section-subtitle">System Prompt（含 Persona + Summary + 长期记忆 + 情绪块）</p>
+      <p className="section-subtitle">
+        Final System Prompt（Persona + Summary + 长期记忆 + 情绪块）
+      </p>
       <pre className="output">{debugContext.systemPrompt}</pre>
       <p className="section-subtitle">Long-term Memory Block（memoryContext）</p>
       <pre className="output">

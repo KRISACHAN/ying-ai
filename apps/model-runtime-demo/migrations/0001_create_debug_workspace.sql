@@ -5,7 +5,10 @@ CREATE TABLE IF NOT EXISTS debug_companions (
   name TEXT NOT NULL,
   gender TEXT NOT NULL,
   relationship TEXT,
+  user_display_name TEXT,
   user_address TEXT,
+  profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+  appearance JSONB NOT NULL DEFAULT '{}'::jsonb,
   personality TEXT NOT NULL,
   speaking_style TEXT,
   background TEXT,
@@ -21,6 +24,11 @@ ON debug_companions (owner_type, owner_id, updated_at DESC);
 -- before user_address was added to the CREATE TABLE block above.
 ALTER TABLE debug_companions
 ADD COLUMN IF NOT EXISTS user_address TEXT;
+
+ALTER TABLE debug_companions
+  ADD COLUMN IF NOT EXISTS user_display_name TEXT,
+  ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS appearance JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS debug_conversations (
   id TEXT PRIMARY KEY,

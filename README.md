@@ -10,18 +10,18 @@ Enterprise AI companion monorepo — admin backend, user-facing frontend, and a 
 
 The goal is a **pluggable AI companion core** that product apps (admin API + user web) can embed. V1 focuses on the SDK itself — no auth, user accounts, or deployment yet. Scope details: [`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md).
 
-**Current milestone:** V1.0 packaged — see the frozen V1 roadmap and stage specs under [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/).
+**Current milestone:** V1.0 packaged; V1.1 stage 1 extends Persona profile fields and prompt previewing. See V1.1 specs under [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/).
 
 ---
 
 ## Architecture
 
-| Part                  | Path                                                  | Status                                                                                   |
-| --------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **AI Core SDK**       | [`packages/ai-core`](packages/ai-core/)               | V1.0 core complete — runtime, abstractions, chat, memory, emotion, tools, workflow       |
-| **Runtime debug app** | [`apps/model-runtime-demo`](apps/model-runtime-demo/) | V1.0 debug workbench — persisted conversations, memories, workflow traces, observability |
-| **Product API**       | [`apps/api`](apps/api/)                               | Scaffold — planned RBAC backend                                                          |
-| **Product web**       | [`apps/web`](apps/web/)                               | Scaffold — planned user frontend                                                         |
+| Part                  | Path                                                  | Status                                                                |
+| --------------------- | ----------------------------------------------------- | --------------------------------------------------------------------- |
+| **AI Core SDK**       | [`packages/ai-core`](packages/ai-core/)               | V1.0 core complete; V1.1 Persona profile + prompt builder in progress |
+| **Runtime debug app** | [`apps/model-runtime-demo`](apps/model-runtime-demo/) | V1.0 debug workbench; V1.1 Persona editing and prompt preview         |
+| **Product API**       | [`apps/api`](apps/api/)                               | Scaffold — planned RBAC backend                                       |
+| **Product web**       | [`apps/web`](apps/web/)                               | Scaffold — planned user frontend                                      |
 
 ```mermaid
 flowchart LR

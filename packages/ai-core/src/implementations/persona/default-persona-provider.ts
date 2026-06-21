@@ -39,6 +39,22 @@ export class DefaultPersonaProvider implements PersonaProvider {
       persona.systemPrompt = this.persona.systemPrompt;
     }
 
+    if (this.persona?.userDisplayName !== undefined) {
+      persona.userDisplayName = this.persona.userDisplayName;
+    }
+
+    if (this.persona?.userAddress !== undefined) {
+      persona.userAddress = this.persona.userAddress;
+    }
+
+    if (this.persona?.profile !== undefined) {
+      persona.profile = this.persona.profile;
+    }
+
+    if (this.persona?.appearance !== undefined) {
+      persona.appearance = this.persona.appearance;
+    }
+
     if (this.persona?.metadata !== undefined) {
       persona.metadata = this.persona.metadata;
     }

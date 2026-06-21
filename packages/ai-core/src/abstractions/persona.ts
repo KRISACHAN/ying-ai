@@ -18,6 +18,18 @@ export interface CompanionPersona {
   speakingStyle?: string;
   background?: string;
   systemPrompt?: string;
+  userDisplayName?: string;
+  userAddress?: string;
+  profile?: {
+    hobbies?: string[];
+  };
+  appearance?: {
+    heightCm?: number;
+    weightKg?: number;
+    hair?: string;
+    bodyType?: string;
+    additionalTraits?: Record<string, string>;
+  };
   metadata?: Record<string, unknown>;
 }
 

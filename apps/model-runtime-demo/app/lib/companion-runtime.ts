@@ -70,7 +70,7 @@ export async function createConversationRuntime(input: {
     scope,
     fallbackEmotion: input.emotion ?? createNeutralDemoEmotion(),
   });
-  const hostSystemPrompt = buildHostPersonaSystemPrompt(input.companion);
+  const systemPrompt = input.companion.customInstructions.trim();
   const core = createCompanionCore({
     model,
     observer,
@@ -83,10 +83,14 @@ export async function createConversationRuntime(input: {
       name: input.companion.name,
       gender: input.companion.gender,
       relationship: input.companion.relationship,
+      userDisplayName: input.companion.userDisplayName,
+      userAddress: input.companion.userAddress,
+      profile: input.companion.profile,
+      appearance: input.companion.appearance,
       personality: input.companion.personality,
       speakingStyle: input.companion.speakingStyle,
       background: input.companion.background,
-      ...(hostSystemPrompt !== undefined ? { systemPrompt: hostSystemPrompt } : {}),
+      ...(systemPrompt !== "" ? { systemPrompt } : {}),
     }),
   });
 
@@ -96,21 +100,6 @@ export async function createConversationRuntime(input: {
     memoryRuntime,
     scope,
   };
-}
-
-function buildHostPersonaSystemPrompt(companion: DebugCompanion): string | undefined {
-  const parts = [];
-
-  if (companion.userAddress.trim() !== "") {
-    parts.push(`你对用户的固定称呼是「${companion.userAddress.trim()}」。`);
-    parts.push("在自然、合适的时候使用这个称呼，不要每句话都机械重复。");
-  }
-
-  if (companion.customInstructions.trim() !== "") {
-    parts.push(companion.customInstructions.trim());
-  }
-
-  return parts.length > 0 ? parts.join("\n") : undefined;
 }
 
 export function serializeEvents(events: CoreEvent[]): SerializedCoreEvent[] {

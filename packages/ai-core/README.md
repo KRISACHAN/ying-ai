@@ -32,7 +32,7 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 | `provider.ts`     | Provider 基础  | `CoreProvider` + `CoreProviderMeta`：所有插槽的统一父类型与稳定 `meta.id`                                        |
 | `core-context.ts` | 依赖注入上下文 | `CompanionCoreContext`：工厂装配后的 Provider 集合；`ChatWorkflowCoreContext` 供 Workflow 使用                   |
 | `model.ts`        | 模型运行时     | `ChatModel`、`GenerateInput/Output`、`ModelRuntimeInfo`；Core 与 LLM 的唯一边界                                  |
-| `persona.ts`      | 伴侣角色       | `PersonaProvider`、`CompanionPersona`：名称、性别、性格、说话风格等，拼入 system prompt                          |
+| `persona.ts`      | 伴侣角色       | `PersonaProvider`、`CompanionPersona`：名称、性别、性格、说话风格、用户称呼、兴趣与外貌设定等                    |
 | `memory.ts`       | 长期记忆       | `MemoryProvider`（recall/save）、`MemoryExtractor`（抽取）、`EmbeddingProvider`（向量化）、`MemoryScope`（隔离） |
 | `summary.ts`      | 滚动摘要       | `SummaryProvider`（load/save）、`SummaryUpdater`（压缩旧消息为 `ConversationSummary`）                           |
 | `emotion.ts`      | 情绪状态机     | `EmotionEngine`：`analyze` 识别情绪、`transition` 做状态转移（阶段 5 接入 Workflow）                             |
@@ -64,6 +64,7 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 | `workflow/simple-chat-workflow.ts`      | `SimpleChatWorkflow`        | V1 参考编排（阶段 3～7）：完整单轮流程、工具循环、Workflow Trace                         |
 | `workflow/disabled-chat-workflow.ts`    | `DisabledChatWorkflow`      | 显式禁用 Workflow 时 `execute` 抛错                                                      |
 | `persona/default-persona-provider.ts`   | `DefaultPersonaProvider`    | 默认角色「映映」                                                                         |
+| `persona/persona-prompt-builder.ts`     | Persona Prompt Builder      | normalize 结构化 Persona，生成可预览 Persona 段落与最终 system prompt                    |
 | `memory/noop-memory-provider.ts`        | `NoopMemoryProvider`        | 未注入 memory 时的空实现                                                                 |
 | `memory/in-memory-memory-provider.ts`   | `InMemoryMemoryProvider`    | 进程内关键词 recall（开发调试用）                                                        |
 | `memory/model-memory-extractor.ts`      | `ModelMemoryExtractor`      | LLM + Zod 结构化记忆抽取                                                                 |
@@ -328,17 +329,17 @@ flowchart LR
 
 ### 4.2 单轮流程中的 AI / LLM 知识点
 
-| 知识点                 | 出现在哪一步                        | 说明                                     |
-| ---------------------- | ----------------------------------- | ---------------------------------------- |
-| **Chat Completion**    | 主 `generate`、工具二次生成         | `ChatMessage[]` → 文本回复               |
-| **RAG**                | `Memory.recall`                     | query 向量化 → TopK → 注入 system prompt |
-| **结构化输出（JSON）** | `MemoryExtractor`、`SummaryUpdater` | LLM + Zod schema 校验                    |
-| **滚动上下文窗口**     | `Summary` + `recentHistory`         | 长对话压缩旧消息，控制 token             |
-| **Persona Prompting**  | `buildPersonaSystemPrompt`          | 角色、性别、性格驱动回复风格             |
-| **Emotion Prompting**  | `Emotion.analyze`（阶段 5）         | 情绪连续性注入 prompt                    |
-| **Function Calling**   | 主 `generate` + Tool 循环（阶段 6） | `toolCalls` → execute → re-generate      |
-| **Embedding**          | recall / save                       | 语义检索与持久化（在 `memory-postgres`） |
-| **主模型重试与降级**   | 每次 `generate`                     | `ModelRuntimeInfo` 记录尝试与错误摘要    |
+| 知识点                 | 出现在哪一步                                      | 说明                                                 |
+| ---------------------- | ------------------------------------------------- | ---------------------------------------------------- |
+| **Chat Completion**    | 主 `generate`、工具二次生成                       | `ChatMessage[]` → 文本回复                           |
+| **RAG**                | `Memory.recall`                                   | query 向量化 → TopK → 注入 system prompt             |
+| **结构化输出（JSON）** | `MemoryExtractor`、`SummaryUpdater`               | LLM + Zod schema 校验                                |
+| **滚动上下文窗口**     | `Summary` + `recentHistory`                       | 长对话压缩旧消息，控制 token                         |
+| **Persona Prompting**  | `buildPersonaPrompt` / `buildPersonaSystemPrompt` | 结构化 Persona、用户称呼、兴趣与外貌设定驱动回复风格 |
+| **Emotion Prompting**  | `Emotion.analyze`（阶段 5）                       | 情绪连续性注入 prompt                                |
+| **Function Calling**   | 主 `generate` + Tool 循环（阶段 6）               | `toolCalls` → execute → re-generate                  |
+| **Embedding**          | recall / save                                     | 语义检索与持久化（在 `memory-postgres`）             |
+| **主模型重试与降级**   | 每次 `generate`                                   | `ModelRuntimeInfo` 记录尝试与错误摘要                |
 
 ### 4.3 记忆与隔离
 

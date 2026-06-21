@@ -14,12 +14,37 @@ const GENDERS: Array<{ value: CompanionGender; label: string }> = [
   { value: "unknown", label: "未指定" },
 ];
 
+interface TraitInput {
+  id: string;
+  key: string;
+  value: string;
+}
+
 export function CompanionForm({ companion }: { companion?: DebugCompanion }) {
   const router = useRouter();
   const [name, setName] = useState(companion?.name ?? "");
   const [gender, setGender] = useState<CompanionGender>(companion?.gender ?? "female");
   const [relationship, setRelationship] = useState(companion?.relationship ?? "AI 伴侣");
+  const [userDisplayName, setUserDisplayName] = useState(companion?.userDisplayName ?? "");
   const [userAddress, setUserAddress] = useState(companion?.userAddress ?? "");
+  const [hobbies, setHobbies] = useState<string[]>(
+    companion?.profile.hobbies !== undefined && companion.profile.hobbies.length > 0
+      ? companion.profile.hobbies
+      : [""],
+  );
+  const [heightCm, setHeightCm] = useState(formatOptionalNumber(companion?.appearance.heightCm));
+  const [weightKg, setWeightKg] = useState(formatOptionalNumber(companion?.appearance.weightKg));
+  const [hair, setHair] = useState(companion?.appearance.hair ?? "");
+  const [bodyType, setBodyType] = useState(companion?.appearance.bodyType ?? "");
+  const [additionalTraits, setAdditionalTraits] = useState<TraitInput[]>(
+    companion?.appearance.additionalTraits !== undefined
+      ? Object.entries(companion.appearance.additionalTraits).map(([key, value], index) => ({
+          id: `trait-${index}-${key}`,
+          key,
+          value,
+        }))
+      : [],
+  );
   const [personality, setPersonality] = useState(companion?.personality ?? "");
   const [speakingStyle, setSpeakingStyle] = useState(companion?.speakingStyle ?? "");
   const [background, setBackground] = useState(companion?.background ?? "");
@@ -41,7 +66,18 @@ export function CompanionForm({ companion }: { companion?: DebugCompanion }) {
             name,
             gender,
             relationship,
+            userDisplayName,
             userAddress,
+            hobbies: hobbies.map((item) => item.trim()).filter((item) => item.length > 0),
+            heightCm: parsePositiveNumber(heightCm),
+            weightKg: parsePositiveNumber(weightKg),
+            hair,
+            bodyType,
+            additionalTraits: Object.fromEntries(
+              additionalTraits
+                .map((item) => [item.key.trim(), item.value.trim()] as const)
+                .filter(([key, value]) => key.length > 0 && value.length > 0),
+            ),
             personality,
             speakingStyle,
             background,
@@ -110,6 +146,142 @@ export function CompanionForm({ companion }: { companion?: DebugCompanion }) {
           onChange={(event) => setUserAddress(event.target.value)}
         />
       </label>
+      <label className="scope-field">
+        <span>我的显示名</span>
+        <input
+          className="scope-input"
+          value={userDisplayName}
+          placeholder="例如：陈大鱼头"
+          onChange={(event) => setUserDisplayName(event.target.value)}
+        />
+      </label>
+      <div className="scope-field full-span">
+        <span>伴侣兴趣</span>
+        <div className="form-stack">
+          {hobbies.map((hobby, index) => (
+            <div className="inline-fields" key={`hobby-${index}`}>
+              <input
+                className="scope-input"
+                value={hobby}
+                placeholder="例如：烘焙"
+                onChange={(event) => {
+                  const next = [...hobbies];
+                  next[index] = event.target.value;
+                  setHobbies(next);
+                }}
+              />
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => setHobbies(hobbies.filter((_, itemIndex) => itemIndex !== index))}
+              >
+                删除
+              </button>
+            </div>
+          ))}
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={() => setHobbies([...hobbies, ""])}
+          >
+            添加兴趣
+          </button>
+        </div>
+      </div>
+      <label className="scope-field">
+        <span>身高（cm）</span>
+        <input
+          className="scope-input"
+          inputMode="decimal"
+          min="0"
+          type="number"
+          value={heightCm}
+          onChange={(event) => setHeightCm(event.target.value)}
+        />
+      </label>
+      <label className="scope-field">
+        <span>体重（kg）</span>
+        <input
+          className="scope-input"
+          inputMode="decimal"
+          min="0"
+          type="number"
+          value={weightKg}
+          onChange={(event) => setWeightKg(event.target.value)}
+        />
+      </label>
+      <label className="scope-field">
+        <span>发型</span>
+        <input
+          className="scope-input"
+          value={hair}
+          placeholder="例如：黑色长直发"
+          onChange={(event) => setHair(event.target.value)}
+        />
+      </label>
+      <label className="scope-field">
+        <span>身材</span>
+        <input
+          className="scope-input"
+          value={bodyType}
+          placeholder="例如：匀称"
+          onChange={(event) => setBodyType(event.target.value)}
+        />
+      </label>
+      <div className="scope-field full-span">
+        <span>其他特征</span>
+        <div className="form-stack">
+          {additionalTraits.map((trait) => (
+            <div className="inline-fields" key={trait.id}>
+              <input
+                className="scope-input"
+                value={trait.key}
+                placeholder="特征名，例如：穿衣风格"
+                onChange={(event) =>
+                  setAdditionalTraits(
+                    additionalTraits.map((item) =>
+                      item.id === trait.id ? { ...item, key: event.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <input
+                className="scope-input"
+                value={trait.value}
+                placeholder="描述，例如：简约温柔"
+                onChange={(event) =>
+                  setAdditionalTraits(
+                    additionalTraits.map((item) =>
+                      item.id === trait.id ? { ...item, value: event.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() =>
+                  setAdditionalTraits(additionalTraits.filter((item) => item.id !== trait.id))
+                }
+              >
+                删除
+              </button>
+            </div>
+          ))}
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={() =>
+              setAdditionalTraits([
+                ...additionalTraits,
+                { id: `trait-${Date.now()}`, key: "", value: "" },
+              ])
+            }
+          >
+            添加特征
+          </button>
+        </div>
+      </div>
       <label className="scope-field full-span">
         <span>性格</span>
         <textarea
@@ -154,4 +326,14 @@ export function CompanionForm({ companion }: { companion?: DebugCompanion }) {
       </div>
     </div>
   );
+}
+
+function parsePositiveNumber(value: string): number | undefined {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function formatOptionalNumber(value: number | undefined): string {
+  return value !== undefined ? String(value) : "";
 }

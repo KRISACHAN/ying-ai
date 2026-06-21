@@ -24,6 +24,7 @@ export * from "./core/companion-core-factory";
 export { ModelRuntimeError } from "./errors/model-runtime-error";
 export { createModel, type CreateModelOptions } from "./factories/model.factory";
 export * from "./implementations/persona/default-persona-provider";
+export * from "./implementations/persona/persona-prompt-builder";
 export * from "./implementations/memory/disabled-memory-provider";
 export * from "./implementations/memory/noop-memory-provider";
 export * from "./implementations/memory/in-memory-memory-provider";

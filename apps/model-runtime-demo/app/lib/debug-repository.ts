@@ -13,7 +13,7 @@ import type {
   SummaryScope,
 } from "@ying-companion/ai-core";
 
-import { createId, getDebugPool, toSafeErrorMessage } from "./debug-db";
+import { createId, ensureDebugWorkspaceSchema, getDebugPool, toSafeErrorMessage } from "./debug-db";
 import { LOCAL_DEBUG_OWNER } from "./debug-owner";
 import type {
   ConversationDetail,
@@ -38,7 +38,10 @@ interface CompanionRow {
   name: string;
   gender: CompanionGender;
   relationship: string | null;
+  user_display_name: string | null;
   user_address: string | null;
+  profile: unknown;
+  appearance: unknown;
   personality: string;
   speaking_style: string | null;
   background: string | null;
@@ -105,11 +108,32 @@ export interface CompanionFormInput {
   name: string;
   gender: CompanionGender;
   relationship?: string;
+  userDisplayName?: string;
   userAddress?: string;
+  hobbies?: string[];
+  heightCm?: number;
+  weightKg?: number;
+  hair?: string;
+  bodyType?: string;
+  additionalTraits?: Record<string, string>;
   personality: string;
   speakingStyle?: string;
   background?: string;
   customInstructions?: string;
+}
+
+interface NormalizedCompanionInput {
+  name: string;
+  gender: CompanionGender;
+  relationship: string;
+  userDisplayName: string;
+  userAddress: string;
+  profile: DebugCompanion["profile"];
+  appearance: DebugCompanion["appearance"];
+  personality: string;
+  speakingStyle: string;
+  background: string;
+  customInstructions: string;
 }
 
 export class DebugRepository {
@@ -119,7 +143,12 @@ export class DebugRepository {
     this.pool = pool;
   }
 
+  private async ready(): Promise<void> {
+    await ensureDebugWorkspaceSchema(this.pool);
+  }
+
   public async listCompanions(): Promise<DebugCompanion[]> {
+    await this.ready();
     const result = await this.pool.query<CompanionRow>(
       `
         SELECT *
@@ -134,6 +163,7 @@ export class DebugRepository {
   }
 
   public async getCompanion(id: string): Promise<DebugCompanion | null> {
+    await this.ready();
     const result = await this.pool.query<CompanionRow>(
       `
         SELECT *
@@ -147,6 +177,7 @@ export class DebugRepository {
   }
 
   public async createCompanion(input: CompanionFormInput): Promise<DebugCompanion> {
+    await this.ready();
     const normalized = normalizeCompanionInput(input);
     const id = createId("companion");
     const result = await this.pool.query<CompanionRow>(
@@ -158,13 +189,16 @@ export class DebugRepository {
           name,
           gender,
           relationship,
+          user_display_name,
           user_address,
+          profile,
+          appearance,
           personality,
           speaking_style,
           background,
           custom_instructions
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
         RETURNING *
       `,
       [
@@ -174,7 +208,10 @@ export class DebugRepository {
         normalized.name,
         normalized.gender,
         normalized.relationship,
+        normalized.userDisplayName,
         normalized.userAddress,
+        toJsonParam(normalized.profile),
+        toJsonParam(normalized.appearance),
         normalized.personality,
         normalized.speakingStyle,
         normalized.background,
@@ -186,6 +223,7 @@ export class DebugRepository {
   }
 
   public async updateCompanion(id: string, input: CompanionFormInput): Promise<DebugCompanion> {
+    await this.ready();
     const normalized = normalizeCompanionInput(input);
     const result = await this.pool.query<CompanionRow>(
       `
@@ -194,11 +232,14 @@ export class DebugRepository {
           name = $4,
           gender = $5,
           relationship = $6,
-          user_address = $7,
-          personality = $8,
-          speaking_style = $9,
-          background = $10,
-          custom_instructions = $11,
+          user_display_name = $7,
+          user_address = $8,
+          profile = $9::jsonb,
+          appearance = $10::jsonb,
+          personality = $11,
+          speaking_style = $12,
+          background = $13,
+          custom_instructions = $14,
           updated_at = NOW()
         WHERE owner_type = $1 AND owner_id = $2 AND id = $3
         RETURNING *
@@ -210,7 +251,10 @@ export class DebugRepository {
         normalized.name,
         normalized.gender,
         normalized.relationship,
+        normalized.userDisplayName,
         normalized.userAddress,
+        toJsonParam(normalized.profile),
+        toJsonParam(normalized.appearance),
         normalized.personality,
         normalized.speakingStyle,
         normalized.background,
@@ -779,7 +823,7 @@ export class PostgresDebugSummaryProvider implements SummaryProvider {
   }
 }
 
-function normalizeCompanionInput(input: CompanionFormInput): Required<CompanionFormInput> {
+function normalizeCompanionInput(input: CompanionFormInput): NormalizedCompanionInput {
   const name = input.name.trim();
   const personality = input.personality.trim();
 
@@ -797,7 +841,10 @@ function normalizeCompanionInput(input: CompanionFormInput): Required<CompanionF
     name,
     gender: input.gender,
     relationship: input.relationship?.trim() || "AI 伴侣",
+    userDisplayName: input.userDisplayName?.trim() || "",
     userAddress: input.userAddress?.trim() || "",
+    profile: normalizeCompanionProfile(input.hobbies),
+    appearance: normalizeCompanionAppearance(input),
     personality,
     speakingStyle: input.speakingStyle?.trim() || "",
     background: input.background?.trim() || "",
@@ -811,7 +858,10 @@ function rowToCompanion(row: CompanionRow): DebugCompanion {
     name: row.name,
     gender: row.gender,
     relationship: row.relationship ?? "AI 伴侣",
+    userDisplayName: row.user_display_name ?? "",
     userAddress: row.user_address ?? "",
+    profile: normalizeProfileJson(row.profile),
+    appearance: normalizeAppearanceJson(row.appearance),
     personality: row.personality,
     speakingStyle: row.speaking_style ?? "",
     background: row.background ?? "",
@@ -860,6 +910,114 @@ function rowToSummary(row: SummaryRow): ConversationSummary {
     updatedAt: row.updated_at,
     ...(row.metadata !== null ? { metadata: row.metadata } : {}),
   };
+}
+
+function normalizeCompanionProfile(hobbies: string[] | undefined): DebugCompanion["profile"] {
+  const normalized = hobbies?.map((item) => item.trim()).filter((item) => item.length > 0);
+
+  return normalized !== undefined && normalized.length > 0 ? { hobbies: normalized } : {};
+}
+
+function normalizeCompanionAppearance(
+  input: Pick<
+    CompanionFormInput,
+    "heightCm" | "weightKg" | "hair" | "bodyType" | "additionalTraits"
+  >,
+): DebugCompanion["appearance"] {
+  const appearance: DebugCompanion["appearance"] = {};
+
+  if (input.heightCm !== undefined && Number.isFinite(input.heightCm) && input.heightCm > 0) {
+    appearance.heightCm = input.heightCm;
+  }
+  if (input.weightKg !== undefined && Number.isFinite(input.weightKg) && input.weightKg > 0) {
+    appearance.weightKg = input.weightKg;
+  }
+  if (input.hair?.trim()) {
+    appearance.hair = input.hair.trim();
+  }
+  if (input.bodyType?.trim()) {
+    appearance.bodyType = input.bodyType.trim();
+  }
+
+  const additionalTraits = normalizeAdditionalTraits(input.additionalTraits);
+  if (additionalTraits !== undefined) {
+    appearance.additionalTraits = additionalTraits;
+  }
+
+  return appearance;
+}
+
+function normalizeProfileJson(value: unknown): DebugCompanion["profile"] {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const hobbies = Array.isArray(value.hobbies)
+    ? value.hobbies.filter((item): item is string => typeof item === "string")
+    : undefined;
+
+  return normalizeCompanionProfile(hobbies);
+}
+
+function normalizeAppearanceJson(value: unknown): DebugCompanion["appearance"] {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const input: Pick<
+    CompanionFormInput,
+    "heightCm" | "weightKg" | "hair" | "bodyType" | "additionalTraits"
+  > = {};
+
+  if (typeof value.heightCm === "number") {
+    input.heightCm = value.heightCm;
+  }
+  if (typeof value.weightKg === "number") {
+    input.weightKg = value.weightKg;
+  }
+  if (typeof value.hair === "string") {
+    input.hair = value.hair;
+  }
+  if (typeof value.bodyType === "string") {
+    input.bodyType = value.bodyType;
+  }
+  if (isStringRecord(value.additionalTraits)) {
+    input.additionalTraits = value.additionalTraits;
+  }
+
+  return normalizeCompanionAppearance(input);
+}
+
+function normalizeAdditionalTraits(
+  traits: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (traits === undefined) {
+    return undefined;
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(traits)) {
+    const key = rawKey.trim();
+    const value = rawValue.trim();
+
+    if (key !== "" && value !== "") {
+      normalized[key] = value;
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return Object.values(value).every((item) => typeof item === "string");
 }
 
 function rowToRunDetail(row: RunRow): WorkflowRunDetail {
@@ -1016,8 +1174,29 @@ export function validateCompanionPayload(raw: unknown): CompanionFormInput {
   if (typeof body.relationship === "string") {
     input.relationship = body.relationship;
   }
+  if (typeof body.userDisplayName === "string") {
+    input.userDisplayName = body.userDisplayName;
+  }
   if (typeof body.userAddress === "string") {
     input.userAddress = body.userAddress;
+  }
+  if (Array.isArray(body.hobbies)) {
+    input.hobbies = body.hobbies.filter((item): item is string => typeof item === "string");
+  }
+  if (typeof body.heightCm === "number") {
+    input.heightCm = body.heightCm;
+  }
+  if (typeof body.weightKg === "number") {
+    input.weightKg = body.weightKg;
+  }
+  if (typeof body.hair === "string") {
+    input.hair = body.hair;
+  }
+  if (typeof body.bodyType === "string") {
+    input.bodyType = body.bodyType;
+  }
+  if (isStringRecord(body.additionalTraits)) {
+    input.additionalTraits = body.additionalTraits;
   }
   if (typeof body.speakingStyle === "string") {
     input.speakingStyle = body.speakingStyle;
