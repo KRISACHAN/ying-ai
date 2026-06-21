@@ -12,12 +12,19 @@ import type {
   WorkflowRunListItem,
 } from "./lib/debug-types";
 
+interface EphemeralOutput {
+  text: string;
+  model: string | null;
+  trace?: unknown;
+}
+
 interface SendResponse {
   ok: boolean;
   userMessage?: DebugMessage;
   assistantMessage?: DebugMessage;
   conversation?: ConversationDetail["conversation"];
   workflowRun?: WorkflowRunDetail;
+  ephemeralOutput?: EphemeralOutput;
   error?: { message: string };
 }
 
@@ -81,6 +88,51 @@ export function ConversationWorkspace({
         body: JSON.stringify({ message }),
       });
       const body = (await response.json()) as SendResponse;
+
+      if (!body.ok && body.ephemeralOutput !== undefined) {
+        const ephemeralOutput = body.ephemeralOutput;
+        const messageText = body.error?.message ?? "模型生成成功，但会话持久化失败";
+        setError(messageText);
+        setMessages((previous) => {
+          const withoutOptimistic = previous.filter((item) => item.id !== optimistic.id);
+          const nextUser = body.userMessage ?? {
+            ...optimistic,
+            errorSummary: messageText,
+          };
+          const assistantMessage: DebugMessage = {
+            id: `ephemeral-${Date.now()}`,
+            conversationId: initialDetail.conversation.id,
+            role: "assistant",
+            content: ephemeralOutput.text,
+            status: "failed",
+            errorSummary: "临时输出，刷新后可能丢失",
+            model: ephemeralOutput.model,
+            createdAt: new Date().toISOString(),
+          };
+
+          return [...withoutOptimistic, nextUser, assistantMessage];
+        });
+
+        if (body.workflowRun !== undefined) {
+          const workflowRun = body.workflowRun;
+          setRuns((previous) => [
+            {
+              id: workflowRun.id,
+              userMessageId: workflowRun.userMessageId,
+              assistantMessageId: workflowRun.assistantMessageId,
+              status: workflowRun.status,
+              workflowId: workflowRun.workflowId,
+              model: workflowRun.model,
+              errorSummary: workflowRun.errorSummary,
+              createdAt: workflowRun.createdAt,
+            },
+            ...previous.filter((item) => item.id !== workflowRun.id),
+          ]);
+          setSelectedRun(workflowRun);
+        }
+
+        return;
+      }
 
       if (!body.ok || body.userMessage === undefined || body.workflowRun === undefined) {
         setError(body.error?.message ?? "发送失败");
@@ -163,31 +215,15 @@ export function ConversationWorkspace({
     <div className="conversation-grid">
       <RunDebugPanel
         run={selectedRun}
+        runs={runs}
+        selectedRunId={selectedRun?.id ?? ""}
+        onSelectRun={selectRun}
         health={memoryHealth}
         summary={initialDetail.summary}
         memoriesHref={`/companions/${initialDetail.companion.id}/memories`}
       />
 
       <section className="chat-pane">
-        <div className="run-selector">
-          <label className="scope-field">
-            <span>本轮 run</span>
-            <select
-              className="scope-input"
-              value={selectedRun?.id ?? ""}
-              onChange={(event) => void selectRun(event.target.value)}
-            >
-              <option value="">选择 run</option>
-              {runs.map((run) => (
-                <option key={run.id} value={run.id}>
-                  {run.status} ·{" "}
-                  {new Date(run.createdAt).toLocaleString("zh-CN", { hour12: false })}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
         <div className="message-list">
           {messages.map((message) => {
             const linkedRun = runByAssistantMessage.get(message.id);

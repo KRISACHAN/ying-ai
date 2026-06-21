@@ -20,6 +20,9 @@ MEMORY_POSTGRES_TABLE=companion_memories
 
 `OPENAI_FALLBACK_MODEL` 为空时不启用降级。重试次数为空或非法时按 `0` 处理。
 
+Stage 8 工作台（`/`、`/conversations/*`、`/companions/*`）需要 `DATABASE_URL`
+和 `apps/model-runtime-demo/migrations/0001_create_debug_workspace.sql`，否则会直接报错。下面的长期记忆降级策略仅适用于聊天运行时的 memory provider，以及 legacy `/api/chat` 调试入口。
+
 长期记忆 provider 按以下固定策略选择（不静默回退，便于区分「真连上 Postgres」与「配置错误」）：
 
 - `DATABASE_URL` 缺失：使用进程内 `InMemoryMemoryProvider`（重启丢失），面板显示 `disabled`；
@@ -70,10 +73,11 @@ DATABASE_URL=postgresql://localhost:5432/ying_companion_dev
 服务端根据 conversation / companion 构造 `scope`、history、emotion、summaryScope 与
 Provider，调用 `core.executeWorkflow()` 后短事务写回 assistant message、workflow run、
 conversation emotion 与 preview。旧的 `POST /api/chat` 保留为兼容调试入口，但 Stage 8
-工作台不再依赖浏览器 state 作为关键状态真相。
+工作台不再依赖浏览器 state 作为关键状态真相；该 legacy 入口仍接受客户端 scope /
+history / emotion，仅用于阶段 1～7 的手动验证，后续会移除或隔离。
 
 - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
-- **滚动摘要**：Stage 8 工作台默认使用 `debug_conversation_summaries` 持久化摘要；重启 dev server 后仍可恢复。
+- **滚动摘要**：Stage 8 工作台接入 `debug_conversation_summaries` 持久化摘要，但默认关闭；启用后重启 dev server 仍可恢复。
 - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，100% 还原本轮发给模型的 system prompt、Conversation Summary、长期记忆块、Recent History 与当前用户输入。滚动摘要开启后重点查看 `summaryContext`、`recentHistory`、`summarizedMessages`、Conversation Summary、Updated Summary 与 Summary Events。
 - **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
 - **scope 隔离**：工作台固定使用 `ownerType=custom`、`ownerId=local-debug-owner`，长期记忆按 `owner + companion` 隔离；删除会话不会删除长期记忆。

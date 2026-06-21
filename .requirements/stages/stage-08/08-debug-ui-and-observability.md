@@ -247,6 +247,7 @@ owner_id
 name
 gender
 relationship
+user_address
 personality
 speaking_style
 background
@@ -261,6 +262,7 @@ updated_at
 name                必填
  gender              必填；使用 ai-core 当前支持的 CompanionGender
 relationship        可选；默认“AI 伴侣”
+user_address        可选；伴侣对用户的固定称呼，由宿主拼入补充 persona
 personality         必填；文本或标签合并后保存
 speaking_style      可选
 background          可选
@@ -274,6 +276,7 @@ id              ← companion.id
 name            ← name
 gender          ← gender
 relationship    ← relationship
+userAddress      ← user_address（若有；作为“对用户的称呼”补充设定）
 personality     ← personality
 speakingStyle   ← speaking_style
 background      ← background（若有）

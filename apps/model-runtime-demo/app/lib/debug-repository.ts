@@ -563,18 +563,52 @@ export class DebugRepository {
     conversationId: string;
     runId: string;
     userMessageId: string;
+    output: ChatWorkflowOutput;
+    observerEvents: SerializedCoreEvent[];
     error: unknown;
-  }): Promise<void> {
+  }): Promise<WorkflowRunDetail> {
     const errorSummary = toSafeErrorMessage(input.error);
+    const trace = input.output.metadata?.trace ?? null;
+    const workflowId = trace?.workflowId ?? null;
+    const debugContext = input.output.metadata?.debugContext ?? null;
+    const memorySnapshot = pickMemorySnapshot(input.output);
+    const emotionSnapshot = pickEmotionSnapshot(input.output);
+    const toolSnapshot = pickToolSnapshot(input.output);
 
-    await this.pool.query(
+    const result = await this.pool.query<RunRow>(
       `
         UPDATE debug_workflow_runs
-        SET status = 'failed', error_summary = $4
+        SET
+          workflow_id = $4,
+          status = 'failed',
+          model = $5,
+          trace_json = $6,
+          observer_events_json = $7,
+          debug_context_json = $8,
+          memory_snapshot_json = $9,
+          emotion_snapshot_json = $10,
+          tool_snapshot_json = $11,
+          error_summary = $12
         WHERE id = $1 AND conversation_id = $2 AND user_message_id = $3
+        RETURNING *
       `,
-      [input.runId, input.conversationId, input.userMessageId, errorSummary],
+      [
+        input.runId,
+        input.conversationId,
+        input.userMessageId,
+        workflowId,
+        input.output.model ?? null,
+        toJsonParam(trace),
+        toJsonParam(input.observerEvents),
+        toJsonParam(debugContext),
+        toJsonParam(memorySnapshot),
+        toJsonParam(emotionSnapshot),
+        toJsonParam(toolSnapshot),
+        errorSummary,
+      ],
     );
+
+    return rowToRunDetail(requireRow(result.rows[0]));
   }
 
   public async listRuns(conversationId: string): Promise<WorkflowRunListItem[]> {

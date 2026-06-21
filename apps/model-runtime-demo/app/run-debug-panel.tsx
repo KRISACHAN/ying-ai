@@ -2,22 +2,34 @@
 
 import type { ConversationSummary, EmotionState, WorkflowTrace } from "@ying-companion/ai-core";
 
-import type { MemoryHealthView, WorkflowRunDetail } from "./lib/debug-types";
+import type { MemoryHealthView, WorkflowRunDetail, WorkflowRunListItem } from "./lib/debug-types";
 
 interface RunDebugPanelProps {
   run: WorkflowRunDetail | null;
+  runs: WorkflowRunListItem[];
+  selectedRunId: string;
+  onSelectRun: (runId: string) => void | Promise<void>;
   health: MemoryHealthView | null;
   summary: ConversationSummary | null;
   memoriesHref: string;
 }
 
-export function RunDebugPanel({ run, health, summary, memoriesHref }: RunDebugPanelProps) {
+export function RunDebugPanel({
+  run,
+  runs,
+  selectedRunId,
+  onSelectRun,
+  health,
+  summary,
+  memoriesHref,
+}: RunDebugPanelProps) {
   const debugContext = run?.debugContext ?? null;
 
   if (run === null) {
     return (
       <aside className="debug-pane">
         <h2>调试工作台</h2>
+        <RunSelector runs={runs} selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
         <p className="hint">选择或发送一条 AI 回复后，这里会展示对应 workflow run。</p>
         <MemoryHealthBlock health={health} />
       </aside>
@@ -35,6 +47,7 @@ export function RunDebugPanel({ run, health, summary, memoriesHref }: RunDebugPa
           管理长期记忆
         </a>
       </div>
+      <RunSelector runs={runs} selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
 
       <section className="debug-section">
         <h3>运行总览</h3>
@@ -104,6 +117,40 @@ export function RunDebugPanel({ run, health, summary, memoriesHref }: RunDebugPa
         <DebugPre title="Observer Events" value={run.observerEvents} />
       </section>
     </aside>
+  );
+}
+
+function RunSelector({
+  runs,
+  selectedRunId,
+  onSelectRun,
+}: {
+  runs: WorkflowRunListItem[];
+  selectedRunId: string;
+  onSelectRun: (runId: string) => void | Promise<void>;
+}) {
+  return (
+    <div className="run-selector">
+      <label className="scope-field">
+        <span>本轮 run</span>
+        <select
+          className="scope-input"
+          value={selectedRunId}
+          onChange={(event) => {
+            if (event.target.value !== "") {
+              void onSelectRun(event.target.value);
+            }
+          }}
+        >
+          <option value="">选择 run</option>
+          {runs.map((run) => (
+            <option key={run.id} value={run.id}>
+              {run.status} · {new Date(run.createdAt).toLocaleString("zh-CN", { hour12: false })}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 

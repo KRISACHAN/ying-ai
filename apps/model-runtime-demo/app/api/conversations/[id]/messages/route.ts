@@ -20,7 +20,10 @@ export async function POST(
   const { id } = await context.params;
   let pending: Awaited<ReturnType<DebugRepository["createPendingRun"]>> | undefined;
   let runtime: ConversationRuntime | undefined;
-  let outputGenerated = false;
+  let generatedOutput:
+    | Awaited<ReturnType<ConversationRuntime["core"]["executeWorkflow"]>>
+    | undefined;
+  let generatedObserverEvents: ReturnType<typeof serializeEvents> = [];
 
   try {
     const raw = (await request.json()) as { message?: unknown };
@@ -70,7 +73,8 @@ export async function POST(
     });
     const outputWithMeta = attachProviderMetadata(output, runtime);
     const observerEvents = serializeEvents(runtime.observer.events);
-    outputGenerated = true;
+    generatedOutput = outputWithMeta;
+    generatedObserverEvents = observerEvents;
     const completed = await repository.completeRun({
       conversationId: id,
       runId: pending.run.id,
@@ -87,34 +91,73 @@ export async function POST(
       workflowRun: completed.run,
     });
   } catch (error) {
-    if (pending !== undefined && !outputGenerated) {
-      await repository
-        .failRun({
+    if (pending !== undefined && generatedOutput === undefined) {
+      const safeMessage = toSafeRuntimeMessage(error);
+
+      try {
+        await repository.failRun({
           conversationId: id,
           runId: pending.run.id,
           userMessageId: pending.userMessage.id,
-          error: new Error(toSafeRuntimeMessage(error)),
+          error: new Error(safeMessage),
           observerEvents: runtime !== undefined ? serializeEvents(runtime.observer.events) : [],
-        })
-        .catch(() => {});
+        });
+      } catch (failureWriteError) {
+        return jsonResponse(
+          {
+            ok: false,
+            error: {
+              message: `${safeMessage}；失败状态写回也失败：${toSafeRuntimeMessage(failureWriteError)}`,
+            },
+          },
+          500,
+        );
+      }
     }
 
-    if (pending !== undefined && outputGenerated) {
+    if (pending !== undefined && generatedOutput !== undefined) {
       const safeMessage = toSafeRuntimeMessage(error);
-      await repository
-        .markRunPersistenceFailure({
+      let workflowRun: Awaited<ReturnType<DebugRepository["markRunPersistenceFailure"]>>;
+
+      try {
+        workflowRun = await repository.markRunPersistenceFailure({
           conversationId: id,
           runId: pending.run.id,
           userMessageId: pending.userMessage.id,
+          output: generatedOutput,
+          observerEvents: generatedObserverEvents,
           error: new Error(`persistence failed after model output: ${safeMessage}`),
-        })
-        .catch(() => {});
+        });
+      } catch (failureWriteError) {
+        return jsonResponse(
+          {
+            ok: false,
+            userMessage: pending.userMessage,
+            error: {
+              message: `模型生成成功，但会话持久化失败；该轮刷新后可能丢失。${safeMessage}；失败状态写回也失败：${toSafeRuntimeMessage(failureWriteError)}`,
+            },
+            ephemeralOutput: {
+              text: generatedOutput.text,
+              model: generatedOutput.model ?? null,
+              trace: generatedOutput.metadata?.trace ?? null,
+            },
+          },
+          500,
+        );
+      }
 
       return jsonResponse(
         {
           ok: false,
+          userMessage: pending.userMessage,
+          workflowRun,
           error: {
             message: `模型生成成功，但会话持久化失败；该轮刷新后可能丢失。${safeMessage}`,
+          },
+          ephemeralOutput: {
+            text: generatedOutput.text,
+            model: generatedOutput.model ?? null,
+            trace: generatedOutput.metadata?.trace ?? null,
           },
         },
         500,

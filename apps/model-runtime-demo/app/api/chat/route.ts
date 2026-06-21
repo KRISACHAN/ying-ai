@@ -19,6 +19,8 @@ import {
 import { loadModelConfig } from "../../lib/model-config";
 import { resolveChatMemoryRuntime, type MemoryDatabaseStatus } from "../../lib/memory-config";
 
+// Deprecated legacy endpoint for the Stage 1-7 manual debug panel. Stage 8 conversations
+// must use /api/conversations/[id]/messages so client state is not treated as truth.
 // demo 级防护：限制单条消息长度与历史条数，避免不可控 token 成本。
 const MAX_MESSAGE_LENGTH = 8000;
 const MAX_HISTORY_LENGTH = 50;

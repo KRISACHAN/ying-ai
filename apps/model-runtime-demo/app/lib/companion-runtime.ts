@@ -21,7 +21,7 @@ import { loadModelConfig } from "./model-config";
 import { resolveChatMemoryRuntime, type MemoryRuntime } from "./memory-config";
 
 export const DEFAULT_SUMMARY_OPTIONS: Required<SummaryOptions> = {
-  enabled: true,
+  enabled: false,
   recentMessageLimit: 10,
   summarizeTriggerMessageCount: 14,
 };

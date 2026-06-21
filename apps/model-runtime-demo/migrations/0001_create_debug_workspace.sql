@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS debug_companions (
 CREATE INDEX IF NOT EXISTS debug_companions_owner_idx
 ON debug_companions (owner_type, owner_id, updated_at DESC);
 
+-- Backfill local databases that ran an earlier copy of this dev migration
+-- before user_address was added to the CREATE TABLE block above.
 ALTER TABLE debug_companions
 ADD COLUMN IF NOT EXISTS user_address TEXT;
 

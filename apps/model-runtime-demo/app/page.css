@@ -365,7 +365,7 @@ body {
 
 .chat-pane {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   gap: 14px;
   overflow: hidden;
 }
