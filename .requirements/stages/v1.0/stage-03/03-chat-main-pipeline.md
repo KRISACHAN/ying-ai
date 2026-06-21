@@ -363,7 +363,7 @@ packages/ai-core/src/implementations/workflow/simple-chat-workflow.ts
 可以拆出私有函数：
 
 ```ts
-function buildMessages(input: BuildMessagesInput): ChatMessage[]
+function buildMessages(input: BuildMessagesInput): ChatMessage[];
 ```
 
 但不需要导出。
@@ -673,9 +673,9 @@ await context.core.model.generate({
 不要在 `SimpleChatWorkflow` 内硬编码：
 
 ```ts
-model
-temperature
-maxTokens
+model;
+temperature;
+maxTokens;
 ```
 
 原因：
@@ -731,7 +731,7 @@ packages/ai-core/src/core/companion-core-factory.ts
 阶段 2 默认使用：
 
 ```ts
-workflow: options.workflow ?? new DisabledChatWorkflow()
+workflow: options.workflow ?? new DisabledChatWorkflow();
 ```
 
 ### 7.3 本阶段要求
@@ -739,7 +739,7 @@ workflow: options.workflow ?? new DisabledChatWorkflow()
 阶段 3 完成后，默认应该使用：
 
 ```ts
-workflow: options.workflow ?? new SimpleChatWorkflow()
+workflow: options.workflow ?? new SimpleChatWorkflow();
 ```
 
 原因：
@@ -873,11 +873,7 @@ Demo 不要做：
 示例：
 
 ```ts
-import {
-  createCompanionCore,
-  createModel,
-  DefaultPersonaProvider,
-} from "@ying-companion/ai-core";
+import { createCompanionCore, createModel, DefaultPersonaProvider } from "@ying-companion/ai-core";
 
 const model = createModel({
   apiKey,
@@ -1228,13 +1224,13 @@ packages/ai-core/src/core/companion-core-factory.ts
 从：
 
 ```ts
-workflow: options.workflow ?? new DisabledChatWorkflow()
+workflow: options.workflow ?? new DisabledChatWorkflow();
 ```
 
 改为：
 
 ```ts
-workflow: options.workflow ?? new SimpleChatWorkflow()
+workflow: options.workflow ?? new SimpleChatWorkflow();
 ```
 
 #### 为什么要做

@@ -332,5 +332,5 @@ pnpm --filter @ying-companion/model-runtime-demo dev
 ## 相关文档
 
 - ai-core 完整链路：[`packages/ai-core/README.md`](../ai-core/README.md)
-- 阶段 4 规格：[`.requirements/stages/stage-04/04-memory-system.md`](../../.requirements/stages/stage-04/04-memory-system.md)
+- V1.0 阶段 4 规格：[`.requirements/stages/v1.0/stage-04/04-memory-system.md`](../../.requirements/stages/v1.0/stage-04/04-memory-system.md)
 - 调试应用：[`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)

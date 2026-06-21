@@ -516,8 +516,8 @@ V1 工具循环只接入非流式 `generate`，默认最多执行 1 轮工具；
 
 ## 相关文档
 
-- 总体规划：[`.requirements/prompts/03-plan.md`](../../.requirements/prompts/03-plan.md)
+- V1.0 总体规划：[`.requirements/prompts/03-v1.0-plan.md`](../../.requirements/prompts/03-v1.0-plan.md)
 - V1 边界：[`.requirements/prompts/02-execution.md`](../../.requirements/prompts/02-execution.md)
-- 阶段规格：[`.requirements/stages/`](../../.requirements/stages/)
+- V1.0 阶段规格：[`.requirements/stages/v1.0/`](../../.requirements/stages/v1.0/)
 - 调试应用：[`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)
 - PostgreSQL 记忆：[`packages/memory-postgres`](../memory-postgres/README.md)

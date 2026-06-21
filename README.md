@@ -10,18 +10,18 @@ Enterprise AI companion monorepo — admin backend, user-facing frontend, and a 
 
 The goal is a **pluggable AI companion core** that product apps (admin API + user web) can embed. V1 focuses on the SDK itself — no auth, user accounts, or deployment yet. Scope details: [`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md).
 
-**Current milestone:** [Stage 1 — Model Runtime](.requirements/stages/stage-01/01-model-runtime.md).
+**Current milestone:** V1.0 packaged — see the frozen V1 roadmap and stage specs under [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/).
 
 ---
 
 ## Architecture
 
-| Part                  | Path                                                  | Status                                                         |
-| --------------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
-| **AI Core SDK**       | [`packages/ai-core`](packages/ai-core/)               | Stage 1 done — Model Runtime (generate/stream, retry/fallback) |
-| **Runtime debug app** | [`apps/model-runtime-demo`](apps/model-runtime-demo/) | Next.js app to exercise Stage 1 locally                        |
-| **Product API**       | [`apps/api`](apps/api/)                               | Scaffold — planned RBAC backend                                |
-| **Product web**       | [`apps/web`](apps/web/)                               | Scaffold — planned user frontend                               |
+| Part                  | Path                                                  | Status                                                                                   |
+| --------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **AI Core SDK**       | [`packages/ai-core`](packages/ai-core/)               | V1.0 core complete — runtime, abstractions, chat, memory, emotion, tools, workflow       |
+| **Runtime debug app** | [`apps/model-runtime-demo`](apps/model-runtime-demo/) | V1.0 debug workbench — persisted conversations, memories, workflow traces, observability |
+| **Product API**       | [`apps/api`](apps/api/)                               | Scaffold — planned RBAC backend                                                          |
+| **Product web**       | [`apps/web`](apps/web/)                               | Scaffold — planned user frontend                                                         |
 
 ```mermaid
 flowchart LR
@@ -65,10 +65,10 @@ Package READMEs: [web](apps/web/README.md) · [api](apps/api/README.md) · [mode
 
 ## Roadmap (V1)
 
-From [`.requirements/prompts/03-plan.md`](.requirements/prompts/03-plan.md):
+From the frozen V1.0 roadmap [`.requirements/prompts/03-v1.0-plan.md`](.requirements/prompts/03-v1.0-plan.md):
 
 ```txt
-Stage 1  Model Runtime              ← current
+Stage 1  Model Runtime
 Stage 2  Core abstractions & DI
 Stage 3  Chat main loop
 Stage 4  Memory (structured + vector RAG)
@@ -78,7 +78,7 @@ Stage 7  Workflow orchestration
 Stage 8  Debug UI & observability
 ```
 
-Stage specs: [`.requirements/stages/`](.requirements/README.md).
+V1.0 stage specs: [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/). Historical V1.0 reviews: [`.code-reviews/v1.0/`](.code-reviews/v1.0/).
 
 ---
 
@@ -121,7 +121,7 @@ More commands: [docs/ai/core/project-context.md](docs/ai/core/project-context.md
 
 ## Run the Model Runtime demo
 
-The fastest way to see Stage 1 working: a Next.js app that reads env vars, calls `@ying-companion/ai-core`, and shows streaming output plus retry/fallback info.
+The fastest way to inspect V1.0 locally is the Next.js debug workbench. It creates companions and conversations, calls `@ying-companion/ai-core`, and shows persisted messages, memories, workflow traces, observer events, retry/fallback info, and model output.
 
 ```bash
 cp apps/model-runtime-demo/.env.example apps/model-runtime-demo/.env

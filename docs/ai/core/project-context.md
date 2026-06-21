@@ -55,7 +55,7 @@ cd packages/ai-core && pnpm build
 
 - [`apps/web/README.md`](../../../apps/web/README.md) — web app specifics
 - [`apps/api/README.md`](../../../apps/api/README.md) — API specifics
-- [`apps/model-runtime-demo/README.md`](../../../apps/model-runtime-demo/README.md) — Stage 1 demo env vars and local run
+- [`apps/model-runtime-demo/README.md`](../../../apps/model-runtime-demo/README.md) — V1.0 debug workbench env vars and local run
 
 ## Tech Stack
 

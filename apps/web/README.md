@@ -15,7 +15,7 @@ Frontend web package for **ying-companion**. Supplements root [AGENTS.md](../../
 | **Planned purpose** | User-facing frontend application ([`.requirements/prompts/00-basic.md`](../../.requirements/prompts/00-basic.md)) |
 | **Current status**  | **Scaffold only** — TypeScript package with placeholder export; no framework app, pages, or UI yet                |
 
-Do **not** confuse with [`apps/model-runtime-demo`](../model-runtime-demo/README.md). That Next.js app is the **Stage 1 Model Runtime debug UI** and is separate from this production-oriented web package.
+Do **not** confuse with [`apps/model-runtime-demo`](../model-runtime-demo/README.md). That Next.js app is the **V1.0 AI Core debug workbench** and is separate from this production-oriented web package.
 
 V1 planning note ([`.requirements/prompts/02-execution.md`](../../.requirements/prompts/02-execution.md)): debug UI and final product UI may remain separate apps long term.
 
@@ -78,8 +78,8 @@ Or from `apps/web/`: `pnpm typecheck && pnpm lint`.
 
 ## Related Paths
 
-| Path                                                          | Purpose                                      |
-| ------------------------------------------------------------- | -------------------------------------------- |
-| [`apps/api/`](../api/README.md)                               | Planned admin / RBAC backend (also scaffold) |
-| [`apps/model-runtime-demo/`](../model-runtime-demo/README.md) | Stage 1 AI runtime debug app (Next.js)       |
-| [`.requirements/stages/`](../../.requirements/README.md)      | Executable stage specs                       |
+| Path                                                             | Purpose                                      |
+| ---------------------------------------------------------------- | -------------------------------------------- |
+| [`apps/api/`](../api/README.md)                                  | Planned admin / RBAC backend (also scaffold) |
+| [`apps/model-runtime-demo/`](../model-runtime-demo/README.md)    | V1.0 AI core debug workbench (Next.js)       |
+| [`.requirements/stages/v1.0/`](../../.requirements/stages/v1.0/) | V1.0 executable stage specs                  |

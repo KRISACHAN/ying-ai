@@ -25,27 +25,27 @@
 
 ## Project Snapshot
 
-| Layer           | Location                  | Status                                                      |
-| --------------- | ------------------------- | ----------------------------------------------------------- |
-| **AI Core SDK** | `packages/ai-core`        | Stage 1 **Model Runtime** — generate/stream, retry/fallback |
-| **Debug app**   | `apps/model-runtime-demo` | Next.js UI for Stage 1 runtime verification                 |
-| **Product API** | `apps/api`                | Scaffold — planned RBAC backend                             |
-| **Product web** | `apps/web`                | Scaffold — planned user frontend                            |
+| Layer           | Location                  | Status                                                                             |
+| --------------- | ------------------------- | ---------------------------------------------------------------------------------- |
+| **AI Core SDK** | `packages/ai-core`        | V1.0 core complete — runtime, abstractions, chat, memory, emotion, tools, workflow |
+| **Debug app**   | `apps/model-runtime-demo` | V1.0 persisted debug workbench and observability UI                                |
+| **Product API** | `apps/api`                | Scaffold — planned RBAC backend                                                    |
+| **Product web** | `apps/web`                | Scaffold — planned user frontend                                                   |
 
 **V1 boundary** ([`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in.
 
-**Current work:** [`.requirements/stages/stage-01/01-model-runtime.md`](.requirements/stages/stage-01/01-model-runtime.md). Full roadmap: [`.requirements/prompts/03-plan.md`](.requirements/prompts/03-plan.md).
+**Current package:** V1.0 is frozen under [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/) with reviews under [`.code-reviews/v1.0/`](.code-reviews/v1.0/). Full V1.0 roadmap: [`.requirements/prompts/03-v1.0-plan.md`](.requirements/prompts/03-v1.0-plan.md).
 
 ---
 
 ## `.requirements/` — what to build
 
-| When                    | Read                                                           |
-| ----------------------- | -------------------------------------------------------------- |
-| Product vision          | `prompts/00-basic.md`, `01-detail.md`                          |
-| V1 scope / constraints  | `prompts/02-execution.md`                                      |
-| Full roadmap            | `prompts/03-plan.md`                                           |
-| Implement current stage | `stages/stage-{NN}/{NN}-{topic}.md` (patches only for history) |
+| When                           | Read                                                                |
+| ------------------------------ | ------------------------------------------------------------------- |
+| Product vision                 | `prompts/00-basic.md`, `01-detail.md`                               |
+| V1 scope / constraints         | `prompts/02-execution.md`                                           |
+| Full V1.0 roadmap              | `prompts/03-v1.0-plan.md`                                           |
+| Implement / inspect V1.0 stage | `stages/v1.0/stage-{NN}/{NN}-{topic}.md` (patches only for history) |
 
 - **`prompts/`** — planning context (why and overall shape); not the live task checklist.
 - **`stages/`** — executable specs with acceptance criteria; read the main `{NN}-{topic}.md` before coding.
@@ -56,12 +56,12 @@ Full conventions: [`.requirements/README.md`](.requirements/README.md). Requirem
 
 ## `.code-reviews/` — review archive
 
-| When                           | Read / do                                                  |
-| ------------------------------ | ---------------------------------------------------------- |
-| Check if a commit was reviewed | `{n}-{7-char-sha}/` folder                                 |
-| Understand past findings       | `{tool}-review.md` in that folder                          |
-| Verify fixes                   | `{model}-followup.md` in same folder                       |
-| Write a new review             | `.codex/skills/code-review/` → `.code-reviews/{n}-{slug}/` |
+| When                                | Read / do                                                            |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| Check if a V1.0 commit was reviewed | `v1.0/{n}-{7-char-sha}/` folder                                      |
+| Understand past findings            | `{tool}-review.md` in that versioned folder                          |
+| Verify fixes                        | `{model}-followup.md` in same folder                                 |
+| Write a new review                  | `.codex/skills/code-review/` → `.code-reviews/{version}/{n}-{slug}/` |
 
 Full naming rules: [`.code-reviews/README.md`](.code-reviews/README.md). Follow-up skill: `.codex/skills/code-review-followup/`.
 
@@ -97,7 +97,7 @@ Shared tool map: [docs/ai/platforms.md](docs/ai/platforms.md). Tool-specific beh
 
 When editing under `apps/` or `packages/`, read that package's `README.md`:
 
-- [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — Stage 1 demo env vars and local run
+- [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — V1.0 debug workbench env vars and local run
 - [apps/web/README.md](apps/web/README.md) · [apps/api/README.md](apps/api/README.md) — product scaffolds
 
 ---
