@@ -61,6 +61,11 @@ export function normalizeCompanionPersona(persona: CompanionPersona): CompanionP
 
 export function buildPersonaPrompt(persona: CompanionPersona): string {
   const effectivePersona = normalizeCompanionPersona(persona);
+
+  return buildPersonaPromptFromNormalized(effectivePersona);
+}
+
+function buildPersonaPromptFromNormalized(effectivePersona: CompanionPersona): string {
   const lines: string[] = ["[伴侣身份]"];
 
   lines.push(`你叫${effectivePersona.name}，性别为${formatGender(effectivePersona.gender)}。`);
@@ -111,7 +116,7 @@ export function buildPersonaSystemPrompt(
   },
 ): { persona: CompanionPersona; personaPrompt: string; systemPrompt: string } {
   const effectivePersona = normalizeCompanionPersona(persona);
-  const personaPrompt = buildPersonaPrompt(effectivePersona);
+  const personaPrompt = buildPersonaPromptFromNormalized(effectivePersona);
   const { summaryContext, memoryContext, emotionContext, toolDefinitions } = context;
   const lines: string[] = [
     "你是一个 AI 伴侣角色，请始终以该角色身份与用户对话。",

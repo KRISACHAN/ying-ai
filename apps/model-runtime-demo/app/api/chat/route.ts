@@ -243,6 +243,7 @@ export async function POST(request: Request): Promise<Response> {
       fallbackEmotion: inputEmotion,
     });
 
+    // Legacy /api/chat 使用固定 Persona；V1.1 Persona Profile 验收请走 /conversations/*。
     // workflow 不显式注入：createCompanionCore 默认即 SimpleChatWorkflow（阶段 3 §7.3）。
     const core = createCompanionCore({
       model,

@@ -69,6 +69,9 @@ psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0002_extend_deb
 DATABASE_URL=postgresql://localhost:5432/ying_companion_dev
 ```
 
+首次 companion 读写会自动补齐 V1.1 Persona Profile 列，便于旧本地库继续运行；新环境和
+CI 仍建议显式执行上面的 migration，确保 schema 版本可审计。
+
 打开 Next.js 输出的本地地址：
 
 - `/`：会话历史列表。选择已有伴侣创建新会话，或进入伴侣创建页。

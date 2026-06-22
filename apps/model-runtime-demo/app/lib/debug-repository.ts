@@ -1208,7 +1208,9 @@ export function validateCompanionPayload(raw: unknown): CompanionFormInput {
     input.customInstructions = body.customInstructions;
   }
 
-  return normalizeCompanionInput(input);
+  // 只做请求体解析；normalize 由 createCompanion / updateCompanion 统一执行。
+  // 若此处提前 normalize，repository 二次 normalize 时会丢失 hobbies 等顶层字段。
+  return input;
 }
 
 export function validateMemoryType(value: unknown): (typeof VALID_MEMORY_TYPES)[number] {

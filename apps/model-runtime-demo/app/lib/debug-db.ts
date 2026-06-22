@@ -32,7 +32,13 @@ export function getDebugPool(env: NodeJS.ProcessEnv = process.env): Pool {
 /** Idempotent schema backfill for databases created before V1.1 Persona Profile. */
 export async function ensureDebugWorkspaceSchema(pool: Pool = getDebugPool()): Promise<void> {
   if (schemaReady === undefined) {
-    schemaReady = pool.query(ENSURE_PERSONA_PROFILE_COLUMNS_SQL).then(() => undefined);
+    schemaReady = pool.query(ENSURE_PERSONA_PROFILE_COLUMNS_SQL).then(
+      () => undefined,
+      (error: unknown) => {
+        schemaReady = undefined;
+        throw error;
+      },
+    );
   }
 
   await schemaReady;

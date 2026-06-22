@@ -8,6 +8,7 @@ import type {
   PersonaLoadInput,
   PersonaProvider,
 } from "../../abstractions/persona";
+import { normalizeCompanionPersona } from "./persona-prompt-builder";
 
 export class DefaultPersonaProvider implements PersonaProvider {
   public readonly meta = {
@@ -59,6 +60,6 @@ export class DefaultPersonaProvider implements PersonaProvider {
       persona.metadata = this.persona.metadata;
     }
 
-    return persona;
+    return normalizeCompanionPersona(persona);
   }
 }
