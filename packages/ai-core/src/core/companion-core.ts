@@ -11,6 +11,11 @@ import type {
 } from "../abstractions/core-context";
 import type { CoreProviderMeta } from "../abstractions/provider";
 import type { ChatWorkflowInput, ChatWorkflowOutput } from "../abstractions/workflow";
+import type {
+  ChatWorkflowStreamEvent,
+  SafeWorkflowError,
+  SafeWorkflowErrorCode,
+} from "../abstractions/workflow-stream";
 
 /** core.inspect() 的返回结构：各 Provider 的 meta 快照。 */
 export interface CompanionCoreInspection {
@@ -68,4 +73,122 @@ export class CompanionCore {
       core: core satisfies ChatWorkflowCoreContext,
     });
   }
+
+  /** 委托当前挂载的 ChatWorkflow 输出 Core 内部流事件。 */
+  public async *streamWorkflow(input: ChatWorkflowInput): AsyncIterable<ChatWorkflowStreamEvent> {
+    const { workflow, ...core } = this.context;
+
+    if (workflow.stream === undefined) {
+      const workflowId = createWorkflowId();
+
+      yield {
+        type: "workflow:start",
+        workflowId,
+        timestamp: new Date(),
+      };
+      yield {
+        type: "workflow:error",
+        workflowId,
+        error: {
+          code: "workflow_stream_not_supported",
+          message: "The configured ChatWorkflow does not support streamWorkflow().",
+          retryable: false,
+        },
+      };
+      return;
+    }
+
+    let workflowId: string | undefined;
+    let terminated = false;
+
+    try {
+      for await (const event of workflow.stream(input, {
+        core: core satisfies ChatWorkflowCoreContext,
+      })) {
+        workflowId = event.workflowId;
+
+        if (event.type === "workflow:finish" || event.type === "workflow:error") {
+          terminated = true;
+          yield event;
+          break;
+        }
+
+        yield event;
+      }
+    } catch (error) {
+      if (!terminated) {
+        yield {
+          type: "workflow:error",
+          workflowId: workflowId ?? createWorkflowId(),
+          error: toSafeWorkflowError(error),
+        };
+      }
+    }
+  }
+}
+
+function createWorkflowId(): string {
+  return `wf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function toSafeWorkflowError(error: unknown): SafeWorkflowError {
+  const safeError = normalizeSafeWorkflowError(error);
+
+  if (safeError !== null) {
+    return safeError;
+  }
+
+  return {
+    code: "workflow_failed",
+    message: "Workflow stream failed.",
+    retryable: false,
+  };
+}
+
+function normalizeSafeWorkflowError(error: unknown): SafeWorkflowError | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+
+  const candidate = error as Partial<SafeWorkflowError>;
+
+  if (!isSafeWorkflowErrorCode(candidate.code) || typeof candidate.message !== "string") {
+    return null;
+  }
+
+  return {
+    code: candidate.code,
+    message: candidate.message,
+    ...(candidate.retryable !== undefined ? { retryable: candidate.retryable } : {}),
+    ...(candidate.step !== undefined ? { step: candidate.step } : {}),
+    ...(candidate.details !== undefined ? { details: sanitizeSafeDetails(candidate.details) } : {}),
+  };
+}
+
+function isSafeWorkflowErrorCode(code: unknown): code is SafeWorkflowErrorCode {
+  return (
+    code === "workflow_stream_not_supported" ||
+    code === "input_safety_rejected" ||
+    code === "output_safety_rejected" ||
+    code === "model_stream_failed" ||
+    code === "tool_planning_failed" ||
+    code === "tool_execution_failed" ||
+    code === "post_process_failed" ||
+    code === "workflow_failed"
+  );
+}
+
+function sanitizeSafeDetails(
+  details: Record<string, string | number | boolean | null>,
+): Record<string, string | number | boolean | null> {
+  return Object.fromEntries(
+    Object.entries(details).filter(([, value]) => {
+      return (
+        value === null ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+      );
+    }),
+  );
 }

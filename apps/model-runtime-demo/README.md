@@ -87,6 +87,14 @@ conversation emotion 与 preview。旧的 `POST /api/chat` 保留为兼容调试
 工作台不再依赖浏览器 state 作为关键状态真相；该 legacy 入口仍接受客户端 scope /
 history / emotion，仅用于阶段 1～7 的手动验证，后续会移除或隔离。
 
+V1.1 stage-02 已在 Core 中冻结 `streamWorkflow()` 与 `ChatWorkflowStreamEvent` 契约，并在
+demo 宿主层新增 `app/lib/chat-stream-wire.ts` 作为 Core Event 到 JSON-safe Wire Event 的单一
+映射边界。当前阶段不改造聊天 Route，也不写真实 NDJSON；后续阶段会基于该映射接入
+`POST + fetch + ReadableStream + NDJSON`。
+
+本地契约样例位于 `app/lib/chat-stream-contract-verifier.ts`，覆盖正常完成、空白 delta、
+stream 不支持、步骤失败、output safety 拒绝、memory 写回降级与 Wire 序列化边界。
+
 - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
 - **滚动摘要**：Stage 8 工作台接入 `debug_conversation_summaries` 持久化摘要，但默认关闭；启用后重启 dev server 仍可恢复。
 - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，展示 Effective Persona、Persona Prompt Preview、最终 system prompt、Conversation Summary、长期记忆块、Recent History 与当前用户输入。滚动摘要开启后重点查看 `summaryContext`、`recentHistory`、`summarizedMessages`、Conversation Summary、Updated Summary 与 Summary Events。

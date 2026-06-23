@@ -17,6 +17,7 @@ export * from "./abstractions/emotion";
 export * from "./abstractions/tool";
 export * from "./abstractions/safety";
 export * from "./abstractions/workflow";
+export * from "./abstractions/workflow-stream";
 export * from "./abstractions/workflow-trace";
 export * from "./abstractions/model";
 export * from "./core/companion-core";

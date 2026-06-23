@@ -11,6 +11,7 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 - 定义 Persona、Memory、Emotion、Tool、Safety、Workflow 等全部能力插槽
 - 提供默认/占位实现，未接入完整能力时仍可运行
 - 通过 `CompanionCore.executeWorkflow()` 暴露单轮聊天入口
+- 通过 `CompanionCore.streamWorkflow()` 暴露 V1.1 工作流级 Core 事件流入口
 - **不读**环境变量、**不连**数据库、**不写**调试 UI（见 [`memory-postgres`](../memory-postgres/README.md) 与 [`model-runtime-demo`](../../apps/model-runtime-demo/README.md)）
 
 | 不包含                     | 归属                       |
@@ -27,26 +28,27 @@ AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象�
 
 ### 2.1 `abstractions/` — 公共契约（稳定 API）
 
-| 文件              | 模块           | 作用                                                                                                             |
-| ----------------- | -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `provider.ts`     | Provider 基础  | `CoreProvider` + `CoreProviderMeta`：所有插槽的统一父类型与稳定 `meta.id`                                        |
-| `core-context.ts` | 依赖注入上下文 | `CompanionCoreContext`：工厂装配后的 Provider 集合；`ChatWorkflowCoreContext` 供 Workflow 使用                   |
-| `model.ts`        | 模型运行时     | `ChatModel`、`GenerateInput/Output`、`ModelRuntimeInfo`；Core 与 LLM 的唯一边界                                  |
-| `persona.ts`      | 伴侣角色       | `PersonaProvider`、`CompanionPersona`：名称、性别、性格、说话风格、用户称呼、兴趣与外貌设定等                    |
-| `memory.ts`       | 长期记忆       | `MemoryProvider`（recall/save）、`MemoryExtractor`（抽取）、`EmbeddingProvider`（向量化）、`MemoryScope`（隔离） |
-| `summary.ts`      | 滚动摘要       | `SummaryProvider`（load/save）、`SummaryUpdater`（压缩旧消息为 `ConversationSummary`）                           |
-| `emotion.ts`      | 情绪状态机     | `EmotionEngine`：`analyze` 识别情绪、`transition` 做状态转移（阶段 5 接入 Workflow）                             |
-| `tool.ts`         | 工具调用       | `ToolRegistry`：注册工具、执行 `tool_call`、返回 `ToolResult`；V1 参数 schema 使用 Core 自己的 object 约定       |
-| `safety.ts`       | 内容安全       | `SafetyProvider`：`guardInput` / `guardOutput`，拒绝时 Workflow 抛错                                             |
-| `workflow.ts`     | 聊天编排       | `ChatWorkflow`、`ChatWorkflowInput/Output`：宿主与 Core 之间的主业务契约                                         |
-| `observer.ts`     | 可观测性       | `CoreObserver`、`CoreEvent`：各阶段 `*:start` / `*:end` 事件，供宿主展示调试信息                                 |
+| 文件                 | 模块           | 作用                                                                                                             |
+| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `provider.ts`        | Provider 基础  | `CoreProvider` + `CoreProviderMeta`：所有插槽的统一父类型与稳定 `meta.id`                                        |
+| `core-context.ts`    | 依赖注入上下文 | `CompanionCoreContext`：工厂装配后的 Provider 集合；`ChatWorkflowCoreContext` 供 Workflow 使用                   |
+| `model.ts`           | 模型运行时     | `ChatModel`、`GenerateInput/Output`、`ModelRuntimeInfo`；Core 与 LLM 的唯一边界                                  |
+| `persona.ts`         | 伴侣角色       | `PersonaProvider`、`CompanionPersona`：名称、性别、性格、说话风格、用户称呼、兴趣与外貌设定等                    |
+| `memory.ts`          | 长期记忆       | `MemoryProvider`（recall/save）、`MemoryExtractor`（抽取）、`EmbeddingProvider`（向量化）、`MemoryScope`（隔离） |
+| `summary.ts`         | 滚动摘要       | `SummaryProvider`（load/save）、`SummaryUpdater`（压缩旧消息为 `ConversationSummary`）                           |
+| `emotion.ts`         | 情绪状态机     | `EmotionEngine`：`analyze` 识别情绪、`transition` 做状态转移（阶段 5 接入 Workflow）                             |
+| `tool.ts`            | 工具调用       | `ToolRegistry`：注册工具、执行 `tool_call`、返回 `ToolResult`；V1 参数 schema 使用 Core 自己的 object 约定       |
+| `safety.ts`          | 内容安全       | `SafetyProvider`：`guardInput` / `guardOutput`，拒绝时 Workflow 抛错                                             |
+| `workflow.ts`        | 聊天编排       | `ChatWorkflow`、`ChatWorkflowInput/Output`：宿主与 Core 之间的主业务契约；`stream` 是 V1.1 可选能力              |
+| `workflow-stream.ts` | 流式协议       | `ChatWorkflowStreamEvent`、`SafeWorkflowError`：Core 内部流事件与安全错误 DTO                                    |
+| `observer.ts`        | 可观测性       | `CoreObserver`、`CoreEvent`：各阶段 `*:start` / `*:end` 事件，供宿主展示调试信息                                 |
 
 ### 2.2 `core/` — 门面与工厂
 
-| 文件                        | 作用                                                                                              |
-| --------------------------- | ------------------------------------------------------------------------------------------------- |
-| `companion-core.ts`         | `CompanionCore` 门面：`inspect()` 查看已挂载 Provider；`executeWorkflow()` 委托 Workflow          |
-| `companion-core-factory.ts` | `createCompanionCore()`：组装各 Provider 默认值；注入 `memory` 时自动配 `ModelMemoryExtractor` 等 |
+| 文件                        | 作用                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `companion-core.ts`         | `CompanionCore` 门面：`inspect()` 查看已挂载 Provider；`executeWorkflow()` / `streamWorkflow()` 委托 Workflow |
+| `companion-core-factory.ts` | `createCompanionCore()`：组装各 Provider 默认值；注入 `memory` 时自动配 `ModelMemoryExtractor` 等             |
 
 ### 2.3 `factories/` · `config/` · `errors/`
 

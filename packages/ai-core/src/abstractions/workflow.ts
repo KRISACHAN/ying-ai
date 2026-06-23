@@ -19,6 +19,7 @@ import type { CoreProvider } from "./provider";
 import type { SafetyCheckResult } from "./safety";
 import type { ConversationSummary, SummaryOptions, SummaryScope } from "./summary";
 import type { ToolDefinition, ToolResult } from "./tool";
+import type { ChatWorkflowStreamEvent } from "./workflow-stream";
 import type { WorkflowTrace } from "./workflow-trace";
 
 /** 单轮聊天的输入；history 由宿主维护，Core 不持久化短期对话。 */
@@ -135,4 +136,9 @@ export interface ChatWorkflow extends CoreProvider {
     input: ChatWorkflowInput,
     context: ChatWorkflowExecutionContext,
   ): Promise<ChatWorkflowOutput>;
+
+  stream?(
+    input: ChatWorkflowInput,
+    context: ChatWorkflowExecutionContext,
+  ): AsyncIterable<ChatWorkflowStreamEvent>;
 }
