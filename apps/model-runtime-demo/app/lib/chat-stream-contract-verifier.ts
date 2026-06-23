@@ -34,6 +34,7 @@ export async function buildV11StreamContractVerificationReport(): Promise<
   const reports = [
     verifyNormalWhitespaceDelta(),
     await verifyStreamUnsupported(),
+    await verifyMissingTerminalFallback(),
     verifyStartedStepFailure(),
     verifyOutputSafetyRejected(),
     verifyRecoverableMemorySaveDegraded(),
@@ -106,6 +107,33 @@ async function verifyStreamUnsupported(): Promise<ContractVerificationReport> {
       terminalEvent.error.code === "workflow_stream_not_supported" &&
       !events.some(isFinish) &&
       !events.some((event) => event.type === "text:delta") &&
+      serialized.ok,
+    details: `terminal=${terminalEvent?.type ?? "none"} serialized=${serialized.ok}`,
+  };
+}
+
+async function verifyMissingTerminalFallback(): Promise<ContractVerificationReport> {
+  const core = createCompanionCore({
+    model: new ContractVerifierModel(),
+    workflow: new UnterminatedStreamContractWorkflow(),
+  });
+  const events = await collectStreamEvents(
+    core.streamWorkflow({
+      message: "hello",
+    }),
+  );
+  const serialized = serializeWireEvents(events);
+  const terminalEvent = terminal(events);
+
+  return {
+    scenario: "missing terminal fallback",
+    eventSequence: sequence(events),
+    ok:
+      events.length === 2 &&
+      terminalEvent?.type === "workflow:error" &&
+      terminalEvent.error.code === "workflow_failed" &&
+      events.every((event) => event.workflowId === "wf_contract_unterminated") &&
+      !events.some(isFinish) &&
       serialized.ok,
     details: `terminal=${terminalEvent?.type ?? "none"} serialized=${serialized.ok}`,
   };
@@ -396,6 +424,34 @@ class ExecuteOnlyContractWorkflow implements ChatWorkflow {
     void context;
 
     return { text: "execute only" };
+  }
+}
+
+class UnterminatedStreamContractWorkflow implements ChatWorkflow {
+  public readonly meta = {
+    id: "workflow.contract-unterminated-stream",
+    kind: "workflow",
+    name: "Contract Unterminated Stream Workflow",
+  } as const;
+
+  public async execute(
+    input: ChatWorkflowInput,
+    context: ChatWorkflowExecutionContext,
+  ): Promise<ChatWorkflowOutput> {
+    void input;
+    void context;
+
+    return { text: "unterminated execute" };
+  }
+
+  public async *stream(
+    input: ChatWorkflowInput,
+    context: ChatWorkflowExecutionContext,
+  ): AsyncIterable<ChatWorkflowStreamEvent> {
+    void input;
+    void context;
+
+    yield start("wf_contract_unterminated");
   }
 }
 

@@ -8,6 +8,7 @@
     "build": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres build && next build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern next-env.d.ts",
+    "verify:stream-contract": "pnpm --filter @ying-companion/ai-core build && node scripts/verify-stream-contract.mjs",
     "clean": "rm -rf .next .turbo"
   },
   "dependencies": {

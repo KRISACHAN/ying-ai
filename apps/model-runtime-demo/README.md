@@ -94,6 +94,11 @@ demo 宿主层新增 `app/lib/chat-stream-wire.ts` 作为 Core Event 到 JSON-sa
 
 本地契约样例位于 `app/lib/chat-stream-contract-verifier.ts`，覆盖正常完成、空白 delta、
 stream 不支持、步骤失败、output safety 拒绝、memory 写回降级与 Wire 序列化边界。
+可用以下命令在控制台复现这些场景：
+
+```bash
+pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
+```
 
 - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
 - **滚动摘要**：Stage 8 工作台接入 `debug_conversation_summaries` 持久化摘要，但默认关闭；启用后重启 dev server 仍可恢复。

@@ -115,6 +115,18 @@ export class CompanionCore {
 
         yield event;
       }
+
+      if (!terminated) {
+        yield {
+          type: "workflow:error",
+          workflowId: workflowId ?? createWorkflowId(),
+          error: {
+            code: "workflow_failed",
+            message: "Workflow stream ended without a terminal event.",
+            retryable: false,
+          },
+        };
+      }
     } catch (error) {
       if (!terminated) {
         yield {
