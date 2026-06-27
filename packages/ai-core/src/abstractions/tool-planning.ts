@@ -4,7 +4,6 @@ import type { CoreProvider } from "./provider";
 export interface ToolPlanningInput {
   messages: ChatMessage[];
   tools: Record<string, unknown>;
-  model?: string;
 }
 
 export type ToolPlanningDegradationReason =

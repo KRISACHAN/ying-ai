@@ -40,7 +40,6 @@ export class DefaultToolPlanningProvider implements ToolPlanningProvider {
       const output = await this.model.generate({
         messages: [{ role: "system", content: PLANNER_SYSTEM_PROMPT }, ...input.messages],
         tools: input.tools,
-        ...(input.model !== undefined ? { model: input.model } : {}),
         requiredCapabilities: { toolCalling: true },
       });
       const calls = normalizeToolCalls(output.toolCalls);

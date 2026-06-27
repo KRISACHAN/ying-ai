@@ -18,21 +18,22 @@ import {
 
 import { ModelRuntimeError } from "../../errors/model-runtime-error";
 import { ModelCapabilityUnavailableError } from "../../errors/model-capability-unavailable-error";
-import type {
-  ChatMessage,
-  ChatModel,
-  GenerateInput,
-  GenerateOutput,
-  GenerateStreamChunk,
-  GenerateUsage,
-  ModelCapabilities,
-  ModelAttemptPhase,
-  ModelCapabilitySkipItem,
-  ModelProfile,
-  ModelRuntimeErrorItem,
-  ModelRuntimeInfo,
-  ModelToolCall,
-  RequiredModelCapabilities,
+import {
+  modelProfileSatisfiesCapabilities,
+  type ChatMessage,
+  type ChatModel,
+  type GenerateInput,
+  type GenerateOutput,
+  type GenerateStreamChunk,
+  type GenerateUsage,
+  type ModelAttemptPhase,
+  type ModelCapabilities,
+  type ModelCapabilitySkipItem,
+  type ModelProfile,
+  type ModelRuntimeErrorItem,
+  type ModelRuntimeInfo,
+  type ModelToolCall,
+  type RequiredModelCapabilities,
 } from "../../abstractions/model";
 import type { OpenAICompatibleConfig } from "../../config/model-config";
 
@@ -85,7 +86,7 @@ export class OpenAICompatibleModel implements ChatModel {
     const state = createRuntimeState();
     const requiredCapabilities = input.requiredCapabilities ?? {};
 
-    for (const plan of this.createAttemptPlans(input, requiredCapabilities, state)) {
+    for (const plan of this.createAttemptPlans(requiredCapabilities, state)) {
       for (let attempt = 1; attempt <= getMaxAttempts(plan.maxRetries); attempt++) {
         recordAttempt(state, plan.phase);
 
@@ -121,7 +122,7 @@ export class OpenAICompatibleModel implements ChatModel {
       requiredCapabilities,
     };
 
-    for (const plan of this.createAttemptPlans(streamInput, requiredCapabilities, state)) {
+    for (const plan of this.createAttemptPlans(requiredCapabilities, state)) {
       for (let attempt = 1; attempt <= getMaxAttempts(plan.maxRetries); attempt++) {
         recordAttempt(state, plan.phase);
         let hasYieldedText = false;
@@ -212,28 +213,26 @@ export class OpenAICompatibleModel implements ChatModel {
     return output;
   }
 
-  /** 构建主模型与可选降级模型的尝试计划；单次 generate 的 model 覆盖仅作用于主模型。 */
+  /** 构建主模型与可选降级模型的尝试计划。 */
   private createAttemptPlans(
-    input: GenerateInput,
     requiredCapabilities: RequiredModelCapabilities,
     state: RuntimeState,
   ): ModelAttemptPlan[] {
     const plans: ModelAttemptPlan[] = [];
-    const primaryProfile = this.createPrimaryProfileForInput(input);
     const primaryPlan: ModelAttemptPlan = {
       phase: "primary",
-      model: primaryProfile.model,
-      profile: primaryProfile,
+      model: this.primaryProfile.model,
+      profile: this.primaryProfile,
       maxRetries: normalizeMaxRetries(
         this.config.retry?.primaryMaxRetries,
         DEFAULT_PRIMARY_MAX_RETRIES,
       ),
     };
 
-    if (profileSatisfiesCapabilities(primaryProfile, requiredCapabilities)) {
+    if (modelProfileSatisfiesCapabilities(this.primaryProfile, requiredCapabilities)) {
       plans.push(primaryPlan);
     } else {
-      state.capabilitySkips.push(createCapabilitySkip(primaryProfile, requiredCapabilities));
+      state.capabilitySkips.push(createCapabilitySkip(this.primaryProfile, requiredCapabilities));
     }
 
     if (this.fallbackProfile !== undefined) {
@@ -247,7 +246,7 @@ export class OpenAICompatibleModel implements ChatModel {
         ),
       };
 
-      if (profileSatisfiesCapabilities(this.fallbackProfile, requiredCapabilities)) {
+      if (modelProfileSatisfiesCapabilities(this.fallbackProfile, requiredCapabilities)) {
         plans.push(fallbackPlan);
       } else {
         state.capabilitySkips.push(
@@ -257,22 +256,6 @@ export class OpenAICompatibleModel implements ChatModel {
     }
 
     return plans;
-  }
-
-  private createPrimaryProfileForInput(input: GenerateInput): ModelProfile {
-    if (input.model === undefined || input.model === this.primaryProfile.model) {
-      return this.primaryProfile;
-    }
-
-    if (input.modelProfileOverride?.capabilities === undefined) {
-      throw new ModelCapabilityUnavailableError(
-        "GenerateInput.model override requires modelProfileOverride.capabilities.",
-        input.requiredCapabilities ?? {},
-        [],
-      );
-    }
-
-    return createModelProfile(input.model, input.modelProfileOverride);
   }
 }
 
@@ -476,11 +459,13 @@ function createFinalModelError(
   requiredCapabilities: RequiredModelCapabilities,
   state: RuntimeState,
 ): Error {
+  if (state.errors.length > 0) {
+    return createModelRuntimeError(state);
+  }
+
   if (state.capabilitySkips.length > 0) {
     return new ModelCapabilityUnavailableError(
-      state.errors.length > 0
-        ? "No compatible fallback model is available after model runtime failures."
-        : "No model candidate satisfies the required capabilities.",
+      "No model candidate satisfies the required capabilities.",
       requiredCapabilities,
       state.capabilitySkips,
     );
@@ -511,17 +496,6 @@ function mergeRequiredCapabilities(
     ...(first ?? {}),
     ...second,
   };
-}
-
-function profileSatisfiesCapabilities(
-  profile: ModelProfile,
-  requiredCapabilities: RequiredModelCapabilities,
-): boolean {
-  return (
-    (requiredCapabilities.streaming !== true || profile.capabilities.streaming) &&
-    (requiredCapabilities.toolCalling !== true || profile.capabilities.toolCalling) &&
-    (requiredCapabilities.usage !== true || profile.capabilities.usage)
-  );
 }
 
 function createCapabilitySkip(

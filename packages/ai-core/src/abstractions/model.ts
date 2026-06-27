@@ -24,13 +24,6 @@ export interface GenerateInput {
    * Core 工具定义经实现层适配后的模型工具集合。
    */
   tools?: Record<string, unknown>;
-  /** 单次调用的主模型覆盖；不影响 factory 配置的 fallbackModel。 */
-  model?: string;
-  /**
-   * 仅兼容历史 model 覆盖调用。覆盖具体模型时必须同步提供能力覆盖，
-   * Adapter 会用实际请求目标推导 provider/model，不允许调用方伪造。
-   */
-  modelProfileOverride?: ModelProfileOverride;
   temperature?: number;
   maxTokens?: number;
   /** 本次调用必须满足的模型能力；未声明时保持 V1.0 兼容行为。 */
@@ -108,6 +101,17 @@ export interface RequiredModelCapabilities {
   streaming?: true;
   toolCalling?: true;
   usage?: true;
+}
+
+export function modelProfileSatisfiesCapabilities(
+  profile: ModelProfile,
+  requiredCapabilities: RequiredModelCapabilities,
+): boolean {
+  return (
+    (requiredCapabilities.streaming !== true || profile.capabilities.streaming) &&
+    (requiredCapabilities.toolCalling !== true || profile.capabilities.toolCalling) &&
+    (requiredCapabilities.usage !== true || profile.capabilities.usage)
+  );
 }
 
 /** 重试/降级过程的结构化调试信息。 */

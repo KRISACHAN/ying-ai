@@ -1,5 +1,6 @@
 import {
   createModel,
+  modelProfileSatisfiesCapabilities,
   type ChatModel,
   type CreateModelOptions,
   type ModelProfile,
@@ -54,11 +55,13 @@ export function createDefaultModelAdapterRegistry(): ModelAdapterRegistry {
   return registry;
 }
 
+const defaultModelAdapterRegistry = createDefaultModelAdapterRegistry();
+
 export function createConfiguredModel(
   config: ModelProviderConfig,
   options?: ModelFactoryOptions,
 ): ChatModel {
-  return createDefaultModelAdapterRegistry().create(config, options);
+  return defaultModelAdapterRegistry.create(config, options);
 }
 
 export function createOpenAICompatibleModelStrategy(): ModelAdapterStrategy<OpenAICompatibleModelConfig> {
@@ -99,7 +102,7 @@ function assertStrictCapabilityCompatibility(model: ChatModel, options: ModelFac
     (profile): profile is ModelProfile => profile !== undefined,
   );
   const incompatible = profiles.find(
-    (profile) => !profileSatisfiesCapabilities(profile, options.requiredCapabilities!),
+    (profile) => !modelProfileSatisfiesCapabilities(profile, options.requiredCapabilities!),
   );
 
   if (incompatible !== undefined) {
@@ -107,15 +110,4 @@ function assertStrictCapabilityCompatibility(model: ChatModel, options: ModelFac
       `模型 ${incompatible.provider}/${incompatible.model} 不满足 strict capabilities 配置。`,
     );
   }
-}
-
-function profileSatisfiesCapabilities(
-  profile: ModelProfile,
-  requiredCapabilities: RequiredModelCapabilities,
-): boolean {
-  return (
-    (requiredCapabilities.streaming !== true || profile.capabilities.streaming) &&
-    (requiredCapabilities.toolCalling !== true || profile.capabilities.toolCalling) &&
-    (requiredCapabilities.usage !== true || profile.capabilities.usage)
-  );
 }
