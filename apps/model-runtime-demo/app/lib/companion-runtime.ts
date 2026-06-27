@@ -1,9 +1,9 @@
 import {
   createCompanionCore,
-  createModel,
   DefaultPersonaProvider,
   LocalToolRegistry,
   ModelEmotionEngine,
+  ModelCapabilityUnavailableError,
   ModelRuntimeError,
   type ChatWorkflowOutput,
   type CoreEvent,
@@ -17,6 +17,7 @@ import {
 import { LOCAL_DEBUG_OWNER } from "./debug-owner";
 import { DebugRepository, PostgresDebugSummaryProvider } from "./debug-repository";
 import type { DebugCompanion, SerializedCoreEvent } from "./debug-types";
+import { createConfiguredModel } from "./model-factory";
 import { loadModelConfig } from "./model-config";
 import { resolveChatMemoryRuntime, type MemoryRuntime } from "./memory-config";
 
@@ -57,7 +58,7 @@ export async function createConversationRuntime(input: {
 }): Promise<ConversationRuntime> {
   const observer = new CollectingObserver();
   const config = loadModelConfig(process.env);
-  const model = createModel(config);
+  const model = createConfiguredModel(config);
   const memoryRuntime = await resolveChatMemoryRuntime(process.env);
   const repository = input.repository ?? new DebugRepository();
   const scope: MemoryScope = {
@@ -135,6 +136,14 @@ export function attachProviderMetadata(
 }
 
 export function toSafeRuntimeMessage(error: unknown): string {
+  if (error instanceof ModelCapabilityUnavailableError) {
+    const detail = error.capabilitySkips
+      .map((item) => `${item.profile.provider}/${item.profile.model}`)
+      .join("; ");
+
+    return detail ? `${error.message} (${detail})` : error.message;
+  }
+
   if (error instanceof ModelRuntimeError) {
     const detail = error.errors
       .map((item) => `phase: ${item.phase}, model: ${item.model}, attempt: ${item.attempt}`)

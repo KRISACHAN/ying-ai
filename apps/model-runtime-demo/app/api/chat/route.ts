@@ -1,10 +1,10 @@
 import {
   createCompanionCore,
-  createModel,
   DefaultPersonaProvider,
   InMemorySummaryProvider,
   LocalToolRegistry,
   ModelEmotionEngine,
+  ModelCapabilityUnavailableError,
   ModelRuntimeError,
   type ChatMessage,
   type ChatWorkflowOutput,
@@ -17,6 +17,7 @@ import {
 } from "@ying-companion/ai-core";
 
 import { loadModelConfig } from "../../lib/model-config";
+import { createConfiguredModel } from "../../lib/model-factory";
 import { resolveChatMemoryRuntime, type MemoryDatabaseStatus } from "../../lib/memory-config";
 
 // Deprecated legacy endpoint for the Stage 1-7 manual debug panel. Stage 8 conversations
@@ -202,7 +203,7 @@ export async function POST(request: Request): Promise<Response> {
     const body = raw as ChatRequestBody;
 
     const config = loadModelConfig(process.env);
-    const model = createModel(config);
+    const model = createConfiguredModel(config);
     // patch-0 §8.2 / §11.4：按 health snapshot 严格选择 Postgres / InMemory / Unavailable。
     // chat 热路径不探测 DB，仅读 /api/memory-health 写入的 snapshot。
     const memoryRuntime = await resolveChatMemoryRuntime(process.env);
@@ -538,6 +539,14 @@ function serializeEvents(events: CoreEvent[]): SerializedCoreEvent[] {
 }
 
 function toSafeMessage(error: unknown): string {
+  if (error instanceof ModelCapabilityUnavailableError) {
+    const detail = error.capabilitySkips
+      .map((item) => `${item.profile.provider}/${item.profile.model}`)
+      .join("; ");
+
+    return detail ? `${error.message} (${detail})` : error.message;
+  }
+
   if (error instanceof ModelRuntimeError) {
     const detail = error.errors
       .map((item) => `phase: ${item.phase}, model: ${item.model}, attempt: ${item.attempt}`)

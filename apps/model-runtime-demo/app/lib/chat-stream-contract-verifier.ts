@@ -462,6 +462,16 @@ class ContractVerifierModel implements ChatModel {
     name: "Contract Verifier Model",
   } as const;
 
+  public readonly primaryProfile = {
+    provider: "contract-verifier",
+    model: "contract-verifier",
+    capabilities: {
+      streaming: true,
+      toolCalling: false,
+      usage: false,
+    },
+  } as const;
+
   public async generate(input: GenerateInput): Promise<GenerateOutput> {
     void input;
 

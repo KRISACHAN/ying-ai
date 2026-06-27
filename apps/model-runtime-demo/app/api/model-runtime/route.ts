@@ -1,13 +1,15 @@
 import {
   createCompanionCore,
-  createModel,
   type CompanionCoreInspection,
+  ModelCapabilityUnavailableError,
   ModelRuntimeError,
+  type ModelCapabilitySkipItem,
   type ModelRuntimeErrorItem,
   type ModelRuntimeInfo,
 } from "@ying-companion/ai-core";
 
 import { loadModelConfig, maskSecret } from "../../lib/model-config";
+import { createConfiguredModel, describeModelFactoryResult } from "../../lib/model-factory";
 
 export async function POST() {
   const encoder = new TextEncoder();
@@ -16,7 +18,7 @@ export async function POST() {
     async start(controller) {
       try {
         const config = loadModelConfig(process.env);
-        const model = createModel(config);
+        const model = createConfiguredModel(config);
         const core = createCompanionCore({
           model,
         });
@@ -37,10 +39,14 @@ export async function POST() {
           ),
         );
         controller.enqueue(encoder.encode(`${formatCoreInspection(core.inspect())}\n\n`));
+        controller.enqueue(
+          encoder.encode(`${formatModelFactoryInfo(describeModelFactoryResult(model))}\n\n`),
+        );
         controller.enqueue(encoder.encode("[Model Stream]\n"));
 
         for await (const chunk of model.stream({
           messages: [{ role: "user", content: "你好，请用中文流式输出一句话，确认模型运行正常。" }],
+          requiredCapabilities: { streaming: true },
         })) {
           controller.enqueue(encoder.encode(chunk.text));
 
@@ -71,12 +77,26 @@ function formatRuntimeInfo(runtime: ModelRuntimeInfo): string {
   return [
     "[Model Runtime Result]",
     `used model: ${runtime.usedModel}`,
+    `used profile: ${formatProfile(runtime.usedProfile)}`,
     `fallback used: ${runtime.fallbackUsed ? "true" : "false"}`,
     `primary attempts: ${runtime.primaryAttempts}`,
     `fallback attempts: ${runtime.fallbackAttempts}`,
     "",
     "[Model Runtime Errors]",
     ...formatRuntimeErrors(runtime.errors),
+    "",
+    "[Capability Skips]",
+    ...formatCapabilitySkips(runtime.capabilitySkips ?? []),
+  ].join("\n");
+}
+
+function formatModelFactoryInfo(info: ReturnType<typeof describeModelFactoryResult>): string {
+  return [
+    "[Model Factory]",
+    `provider: ${info.provider}`,
+    `strategy: ${info.strategy}`,
+    `primary profile: ${formatProfile(info.primaryProfile)}`,
+    `fallback profile: ${formatProfile(info.fallbackProfile)}`,
   ].join("\n");
 }
 
@@ -101,6 +121,16 @@ function formatCoreInspection(inspection: CompanionCoreInspection): string {
 }
 
 function formatRuntimeError(error: unknown): string {
+  if (error instanceof ModelCapabilityUnavailableError) {
+    return [
+      "[Model Capability Error]",
+      error.message,
+      "",
+      "[Capability Skips]",
+      ...formatCapabilitySkips(error.capabilitySkips),
+    ].join("\n");
+  }
+
   if (error instanceof ModelRuntimeError) {
     return [
       "[Model Runtime Error]",
@@ -108,11 +138,35 @@ function formatRuntimeError(error: unknown): string {
       "",
       "[Model Runtime Errors]",
       ...formatRuntimeErrors(error.errors),
+      "",
+      "[Capability Skips]",
+      ...formatCapabilitySkips(error.capabilitySkips),
     ].join("\n");
   }
 
   const message = error instanceof Error ? error.message : "模型流式调用失败";
   return ["[Error]", message].join("\n");
+}
+
+function formatProfile(profile: ModelRuntimeInfo["usedProfile"]): string {
+  if (profile === undefined) {
+    return "(none)";
+  }
+
+  return `${profile.provider}/${profile.model} ${JSON.stringify(profile.capabilities)}`;
+}
+
+function formatCapabilitySkips(skips: ModelCapabilitySkipItem[]): string[] {
+  if (skips.length === 0) {
+    return ["none"];
+  }
+
+  return skips.map(
+    (skip) =>
+      `${skip.profile.provider}/${skip.profile.model}: required=${JSON.stringify(
+        skip.requiredCapabilities,
+      )}, capabilities=${JSON.stringify(skip.profile.capabilities)}`,
+  );
 }
 
 function formatRuntimeErrors(errors: ModelRuntimeErrorItem[]): string[] {

@@ -13,12 +13,20 @@ OPENAI_MODEL=
 OPENAI_FALLBACK_MODEL=
 OPENAI_PRIMARY_MAX_RETRIES=1
 OPENAI_FALLBACK_MAX_RETRIES=1
+OPENAI_MODEL_SUPPORTS_STREAMING=true
+OPENAI_MODEL_SUPPORTS_TOOL_CALLING=false
+OPENAI_MODEL_SUPPORTS_USAGE=false
+OPENAI_FALLBACK_MODEL_SUPPORTS_STREAMING=true
+OPENAI_FALLBACK_MODEL_SUPPORTS_TOOL_CALLING=false
+OPENAI_FALLBACK_MODEL_SUPPORTS_USAGE=false
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 DATABASE_URL=
 MEMORY_POSTGRES_TABLE=companion_memories
 ```
 
-`OPENAI_FALLBACK_MODEL` 为空时不启用降级。重试次数为空或非法时按 `0` 处理。
+`OPENAI_FALLBACK_MODEL` 为空时不启用降级。重试次数为空或非法时按 `0` 处理。能力覆盖变量为空时使用
+OpenAI-compatible adapter 默认值：`streaming=true`、`toolCalling=false`、`usage=false`。只有确认当前
+模型和网关支持工具调用或稳定 usage 后，才把对应能力显式设为 `true`。
 
 V1.1 Persona Profile 字段保存在 `debug_companions`：
 
@@ -91,6 +99,11 @@ V1.1 stage-02 已在 Core 中冻结 `streamWorkflow()` 与 `ChatWorkflowStreamEv
 demo 宿主层新增 `app/lib/chat-stream-wire.ts` 作为 Core Event 到 JSON-safe Wire Event 的单一
 映射边界。当前阶段不改造聊天 Route，也不写真实 NDJSON；后续阶段会基于该映射接入
 `POST + fetch + ReadableStream + NDJSON`。
+
+V1.1 stage-03 已将模型创建切到宿主侧 strategy registry：当前只注册 `openai-compatible`，未来
+Ollama 通过新 strategy 注册加入，不修改 `ai-core` Workflow。`/debug/model-runtime` 会展示
+primary / fallback 的 Effective Model Profile、runtime.usedProfile 与 capability skips；API Key
+只做脱敏展示，不进入 trace 或浏览器响应明文。
 
 本地契约样例位于 `app/lib/chat-stream-contract-verifier.ts`，覆盖正常完成、空白 delta、
 stream 不支持、步骤失败、output safety 拒绝、memory 写回降级与 Wire 序列化边界。

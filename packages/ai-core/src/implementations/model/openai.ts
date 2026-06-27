@@ -17,6 +17,7 @@ import {
 } from "ai";
 
 import { ModelRuntimeError } from "../../errors/model-runtime-error";
+import { ModelCapabilityUnavailableError } from "../../errors/model-capability-unavailable-error";
 import type {
   ChatMessage,
   ChatModel,
@@ -24,16 +25,26 @@ import type {
   GenerateOutput,
   GenerateStreamChunk,
   GenerateUsage,
+  ModelCapabilities,
   ModelAttemptPhase,
+  ModelCapabilitySkipItem,
+  ModelProfile,
   ModelRuntimeErrorItem,
   ModelRuntimeInfo,
   ModelToolCall,
+  RequiredModelCapabilities,
 } from "../../abstractions/model";
 import type { OpenAICompatibleConfig } from "../../config/model-config";
 
 const DEFAULT_PRIMARY_MAX_RETRIES = 0;
 const DEFAULT_FALLBACK_MAX_RETRIES = 0;
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";
+const DEFAULT_OPENAI_COMPATIBLE_CAPABILITIES: ModelCapabilities = {
+  streaming: true,
+  toolCalling: false,
+  usage: false,
+};
 /** 写入 runtime.errors 的单条错误消息上限，避免日志膨胀。 */
 const MAX_ERROR_MESSAGE_LENGTH = 240;
 
@@ -46,9 +57,20 @@ export class OpenAICompatibleModel implements ChatModel {
 
   private readonly config: OpenAICompatibleConfig;
   private readonly provider: ReturnType<typeof createOpenAICompatible>;
+  public readonly primaryProfile: ModelProfile;
+  public readonly fallbackProfile?: ModelProfile;
 
   public constructor(config: OpenAICompatibleConfig) {
     this.config = config;
+    this.primaryProfile = createModelProfile(config.model, config.primaryProfileOverride);
+
+    if (config.fallbackModel !== undefined && config.fallbackModel.trim() !== "") {
+      this.fallbackProfile = createModelProfile(
+        config.fallbackModel,
+        config.fallbackProfileOverride,
+      );
+    }
+
     // 模型实例配置不可变，重试循环复用同一 provider 工厂。
     this.provider = createOpenAICompatible({
       name: "openai-compatible",
@@ -61,8 +83,9 @@ export class OpenAICompatibleModel implements ChatModel {
   /** 非流式生成：按主模型 → 降级模型顺序重试，成功时附带 runtime 元信息。 */
   public async generate(input: GenerateInput): Promise<GenerateOutput> {
     const state = createRuntimeState();
+    const requiredCapabilities = input.requiredCapabilities ?? {};
 
-    for (const plan of this.createAttemptPlans(input)) {
+    for (const plan of this.createAttemptPlans(input, requiredCapabilities, state)) {
       for (let attempt = 1; attempt <= getMaxAttempts(plan.maxRetries); attempt++) {
         recordAttempt(state, plan.phase);
 
@@ -81,7 +104,7 @@ export class OpenAICompatibleModel implements ChatModel {
       }
     }
 
-    throw createModelRuntimeError(state.errors);
+    throw createFinalModelError(requiredCapabilities, state);
   }
 
   /**
@@ -90,14 +113,21 @@ export class OpenAICompatibleModel implements ChatModel {
    */
   public async *stream(input: GenerateInput): AsyncIterable<GenerateStreamChunk> {
     const state = createRuntimeState();
+    const requiredCapabilities = mergeRequiredCapabilities(input.requiredCapabilities, {
+      streaming: true,
+    });
+    const streamInput: GenerateInput = {
+      ...input,
+      requiredCapabilities,
+    };
 
-    for (const plan of this.createAttemptPlans(input)) {
+    for (const plan of this.createAttemptPlans(streamInput, requiredCapabilities, state)) {
       for (let attempt = 1; attempt <= getMaxAttempts(plan.maxRetries); attempt++) {
         recordAttempt(state, plan.phase);
         let hasYieldedText = false;
 
         try {
-          const result = streamText(this.createTextOptions(input, plan.model));
+          const result = streamText(this.createTextOptions(streamInput, plan.model));
 
           for await (const text of result.textStream) {
             hasYieldedText = true;
@@ -127,13 +157,13 @@ export class OpenAICompatibleModel implements ChatModel {
           state.errors.push(runtimeError);
 
           if (hasYieldedText) {
-            throw createModelRuntimeError(state.errors);
+            throw createModelRuntimeError(state);
           }
         }
       }
     }
 
-    throw createModelRuntimeError(state.errors);
+    throw createFinalModelError(requiredCapabilities, state);
   }
 
   /** 组装 AI SDK generateText/streamText 参数。 */
@@ -183,30 +213,66 @@ export class OpenAICompatibleModel implements ChatModel {
   }
 
   /** 构建主模型与可选降级模型的尝试计划；单次 generate 的 model 覆盖仅作用于主模型。 */
-  private createAttemptPlans(input: GenerateInput): ModelAttemptPlan[] {
-    const plans: ModelAttemptPlan[] = [
-      {
-        phase: "primary",
-        model: input.model ?? this.config.model,
-        maxRetries: normalizeMaxRetries(
-          this.config.retry?.primaryMaxRetries,
-          DEFAULT_PRIMARY_MAX_RETRIES,
-        ),
-      },
-    ];
+  private createAttemptPlans(
+    input: GenerateInput,
+    requiredCapabilities: RequiredModelCapabilities,
+    state: RuntimeState,
+  ): ModelAttemptPlan[] {
+    const plans: ModelAttemptPlan[] = [];
+    const primaryProfile = this.createPrimaryProfileForInput(input);
+    const primaryPlan: ModelAttemptPlan = {
+      phase: "primary",
+      model: primaryProfile.model,
+      profile: primaryProfile,
+      maxRetries: normalizeMaxRetries(
+        this.config.retry?.primaryMaxRetries,
+        DEFAULT_PRIMARY_MAX_RETRIES,
+      ),
+    };
 
-    if (this.config.fallbackModel !== undefined && this.config.fallbackModel.trim() !== "") {
-      plans.push({
+    if (profileSatisfiesCapabilities(primaryProfile, requiredCapabilities)) {
+      plans.push(primaryPlan);
+    } else {
+      state.capabilitySkips.push(createCapabilitySkip(primaryProfile, requiredCapabilities));
+    }
+
+    if (this.fallbackProfile !== undefined) {
+      const fallbackPlan: ModelAttemptPlan = {
         phase: "fallback",
-        model: this.config.fallbackModel,
+        model: this.fallbackProfile.model,
+        profile: this.fallbackProfile,
         maxRetries: normalizeMaxRetries(
           this.config.retry?.fallbackMaxRetries,
           DEFAULT_FALLBACK_MAX_RETRIES,
         ),
-      });
+      };
+
+      if (profileSatisfiesCapabilities(this.fallbackProfile, requiredCapabilities)) {
+        plans.push(fallbackPlan);
+      } else {
+        state.capabilitySkips.push(
+          createCapabilitySkip(this.fallbackProfile, requiredCapabilities),
+        );
+      }
     }
 
     return plans;
+  }
+
+  private createPrimaryProfileForInput(input: GenerateInput): ModelProfile {
+    if (input.model === undefined || input.model === this.primaryProfile.model) {
+      return this.primaryProfile;
+    }
+
+    if (input.modelProfileOverride?.capabilities === undefined) {
+      throw new ModelCapabilityUnavailableError(
+        "GenerateInput.model override requires modelProfileOverride.capabilities.",
+        input.requiredCapabilities ?? {},
+        [],
+      );
+    }
+
+    return createModelProfile(input.model, input.modelProfileOverride);
   }
 }
 
@@ -224,6 +290,7 @@ interface TextOptions {
 interface ModelAttemptPlan {
   phase: ModelAttemptPhase;
   model: string;
+  profile: ModelProfile;
   maxRetries: number;
 }
 
@@ -232,6 +299,7 @@ interface RuntimeState {
   primaryAttempts: number;
   fallbackAttempts: number;
   errors: ModelRuntimeErrorItem[];
+  capabilitySkips: ModelCapabilitySkipItem[];
 }
 
 /** 将 Core ChatMessage 转为 AI SDK ModelMessage。 */
@@ -328,6 +396,7 @@ function createRuntimeState(): RuntimeState {
     primaryAttempts: 0,
     fallbackAttempts: 0,
     errors: [],
+    capabilitySkips: [],
   };
 }
 
@@ -343,14 +412,21 @@ function recordAttempt(state: RuntimeState, phase: ModelAttemptPhase): void {
 
 /** 组装写入 GenerateOutput.runtime 的结构化元信息。 */
 function createRuntimeInfo(plan: ModelAttemptPlan, state: RuntimeState): ModelRuntimeInfo {
-  return {
+  const runtime: ModelRuntimeInfo = {
     // GenerateOutput.model 为紧凑业务字段；runtime.usedModel 供调试面板结构化展示。
     usedModel: plan.model,
     fallbackUsed: plan.phase === "fallback",
     primaryAttempts: state.primaryAttempts,
     fallbackAttempts: state.fallbackAttempts,
     errors: state.errors,
+    usedProfile: plan.profile,
   };
+
+  if (state.capabilitySkips.length > 0) {
+    runtime.capabilitySkips = state.capabilitySkips;
+  }
+
+  return runtime;
 }
 
 /** 规范化重试次数：非有限数回退默认值，负数截断为 0。 */
@@ -388,6 +464,73 @@ function toSafeErrorMessage(error: unknown): string {
 }
 
 /** 主模型与降级模型全部失败后抛出的统一错误。 */
-function createModelRuntimeError(errors: ModelRuntimeErrorItem[]): ModelRuntimeError {
-  return new ModelRuntimeError("Model runtime failed after retry and fallback attempts.", errors);
+function createModelRuntimeError(state: RuntimeState): ModelRuntimeError {
+  return new ModelRuntimeError(
+    "Model runtime failed after retry and fallback attempts.",
+    state.errors,
+    state.capabilitySkips,
+  );
+}
+
+function createFinalModelError(
+  requiredCapabilities: RequiredModelCapabilities,
+  state: RuntimeState,
+): Error {
+  if (state.capabilitySkips.length > 0) {
+    return new ModelCapabilityUnavailableError(
+      state.errors.length > 0
+        ? "No compatible fallback model is available after model runtime failures."
+        : "No model candidate satisfies the required capabilities.",
+      requiredCapabilities,
+      state.capabilitySkips,
+    );
+  }
+
+  return createModelRuntimeError(state);
+}
+
+function createModelProfile(
+  model: string,
+  override: OpenAICompatibleConfig["primaryProfileOverride"],
+): ModelProfile {
+  return {
+    provider: OPENAI_COMPATIBLE_PROVIDER,
+    model,
+    capabilities: {
+      ...DEFAULT_OPENAI_COMPATIBLE_CAPABILITIES,
+      ...(override?.capabilities ?? {}),
+    },
+  };
+}
+
+function mergeRequiredCapabilities(
+  first: RequiredModelCapabilities | undefined,
+  second: RequiredModelCapabilities,
+): RequiredModelCapabilities {
+  return {
+    ...(first ?? {}),
+    ...second,
+  };
+}
+
+function profileSatisfiesCapabilities(
+  profile: ModelProfile,
+  requiredCapabilities: RequiredModelCapabilities,
+): boolean {
+  return (
+    (requiredCapabilities.streaming !== true || profile.capabilities.streaming) &&
+    (requiredCapabilities.toolCalling !== true || profile.capabilities.toolCalling) &&
+    (requiredCapabilities.usage !== true || profile.capabilities.usage)
+  );
+}
+
+function createCapabilitySkip(
+  profile: ModelProfile,
+  requiredCapabilities: RequiredModelCapabilities,
+): ModelCapabilitySkipItem {
+  return {
+    profile,
+    requiredCapabilities,
+    reason: "capability_unavailable",
+  };
 }

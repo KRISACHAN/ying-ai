@@ -6,6 +6,7 @@ export type WorkflowStepName =
   | "memory:recall"
   | "emotion:analyze"
   | "tool:list"
+  | "tool:plan"
   | "prompt:build"
   | "model:generate"
   | "model:follow-up-generate"

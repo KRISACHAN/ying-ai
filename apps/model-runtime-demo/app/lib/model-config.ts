@@ -1,12 +1,15 @@
-import type { CreateModelOptions } from "@ying-companion/ai-core";
+import type { ModelCapabilities, ModelProfileOverride } from "@ying-companion/ai-core";
+
+import type { OpenAICompatibleModelConfig } from "./model-factory";
 
 /**
  * 仅供 demo 宿主使用：从环境变量读取模型运行时配置。
  *
  * 注意：`@ying-companion/ai-core` 不读取环境变量，配置必须由宿主读取后以参数传入。
  */
-export function loadModelConfig(env: NodeJS.ProcessEnv): CreateModelOptions {
-  const options: CreateModelOptions = {
+export function loadModelConfig(env: NodeJS.ProcessEnv): OpenAICompatibleModelConfig {
+  const options: OpenAICompatibleModelConfig = {
+    provider: "openai-compatible",
     apiKey: readRequiredEnv(env, "OPENAI_API_KEY"),
     model: readRequiredEnv(env, "OPENAI_MODEL"),
     retry: {
@@ -16,6 +19,8 @@ export function loadModelConfig(env: NodeJS.ProcessEnv): CreateModelOptions {
   };
   const baseUrl = readOptionalEnv(env, "OPENAI_BASE_URL");
   const fallbackModel = readOptionalEnv(env, "OPENAI_FALLBACK_MODEL");
+  const primaryProfileOverride = readProfileOverride(env, "OPENAI_MODEL");
+  const fallbackProfileOverride = readProfileOverride(env, "OPENAI_FALLBACK_MODEL");
 
   if (baseUrl !== undefined) {
     options.baseUrl = baseUrl;
@@ -23,6 +28,14 @@ export function loadModelConfig(env: NodeJS.ProcessEnv): CreateModelOptions {
 
   if (fallbackModel !== undefined) {
     options.fallbackModel = fallbackModel;
+  }
+
+  if (primaryProfileOverride !== undefined) {
+    options.primaryProfileOverride = primaryProfileOverride;
+  }
+
+  if (fallbackProfileOverride !== undefined) {
+    options.fallbackProfileOverride = fallbackProfileOverride;
   }
 
   return options;
@@ -54,4 +67,46 @@ export function maskSecret(value: string): string {
   }
 
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function readProfileOverride(
+  env: NodeJS.ProcessEnv,
+  prefix: "OPENAI_MODEL" | "OPENAI_FALLBACK_MODEL",
+): ModelProfileOverride | undefined {
+  const capabilities: Partial<ModelCapabilities> = {};
+  const streaming = readBooleanEnv(env, `${prefix}_SUPPORTS_STREAMING`);
+  const toolCalling = readBooleanEnv(env, `${prefix}_SUPPORTS_TOOL_CALLING`);
+  const usage = readBooleanEnv(env, `${prefix}_SUPPORTS_USAGE`);
+
+  if (streaming !== undefined) {
+    capabilities.streaming = streaming;
+  }
+
+  if (toolCalling !== undefined) {
+    capabilities.toolCalling = toolCalling;
+  }
+
+  if (usage !== undefined) {
+    capabilities.usage = usage;
+  }
+
+  return Object.keys(capabilities).length > 0 ? { capabilities } : undefined;
+}
+
+function readBooleanEnv(env: NodeJS.ProcessEnv, key: string): boolean | undefined {
+  const value = readOptionalEnv(env, key)?.toLowerCase();
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (["1", "true", "yes", "on"].includes(value)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(value)) {
+    return false;
+  }
+
+  throw new Error(`${key} must be a boolean-like value.`);
 }

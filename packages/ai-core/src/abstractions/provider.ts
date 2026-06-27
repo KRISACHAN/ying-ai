@@ -15,6 +15,7 @@ export type CoreProviderKind =
   | "embedding"
   | "emotion"
   | "tool"
+  | "tool-planning"
   | "safety"
   | "workflow"
   | "observer";

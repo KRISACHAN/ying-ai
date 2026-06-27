@@ -25,16 +25,16 @@
 
 ## Project Snapshot
 
-| Layer           | Location                  | Status                                                                             |
-| --------------- | ------------------------- | ---------------------------------------------------------------------------------- |
-| **AI Core SDK** | `packages/ai-core`        | V1.0 core complete — runtime, abstractions, chat, memory, emotion, tools, workflow |
-| **Debug app**   | `apps/model-runtime-demo` | V1.0 persisted debug workbench and observability UI                                |
-| **Product API** | `apps/api`                | Scaffold — planned RBAC backend                                                    |
-| **Product web** | `apps/web`                | Scaffold — planned user frontend                                                   |
+| Layer           | Location                  | Status                                                                         |
+| --------------- | ------------------------- | ------------------------------------------------------------------------------ |
+| **AI Core SDK** | `packages/ai-core`        | V1.1 in progress — persona/profile, stream contract, model provider strategy   |
+| **Debug app**   | `apps/model-runtime-demo` | V1.1 debug workbench — persisted state, persona config, provider observability |
+| **Product API** | `apps/api`                | Scaffold — planned RBAC backend                                                |
+| **Product web** | `apps/web`                | Scaffold — planned user frontend                                               |
 
 **V1 boundary** ([`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in.
 
-**Current package:** V1.0 is frozen under [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/) with reviews under [`.code-reviews/v1.0/`](.code-reviews/v1.0/). Full V1.0 roadmap: [`.requirements/prompts/03-v1.0-plan.md`](.requirements/prompts/03-v1.0-plan.md).
+**Current package:** V1.0 is frozen under [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/) with reviews under [`.code-reviews/v1.0/`](.code-reviews/v1.0/). V1.1 execution is tracked under [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/) with roadmap [`.requirements/prompts/04-v1.1-plan.md`](.requirements/prompts/04-v1.1-plan.md).
 
 ---
 
@@ -45,7 +45,9 @@
 | Product vision                 | `prompts/00-basic.md`, `01-detail.md`                               |
 | V1 scope / constraints         | `prompts/02-execution.md`                                           |
 | Full V1.0 roadmap              | `prompts/03-v1.0-plan.md`                                           |
+| Full V1.1 roadmap              | `prompts/04-v1.1-plan.md`                                           |
 | Implement / inspect V1.0 stage | `stages/v1.0/stage-{NN}/{NN}-{topic}.md` (patches only for history) |
+| Implement / inspect V1.1 stage | `stages/v1.1/stage-{NN}/{NN}-{topic}.md`                            |
 
 - **`prompts/`** — planning context (why and overall shape); not the live task checklist.
 - **`stages/`** — executable specs with acceptance criteria; read the main `{NN}-{topic}.md` before coding.

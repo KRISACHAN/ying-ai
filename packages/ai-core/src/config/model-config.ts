@@ -1,3 +1,5 @@
+import type { ModelProfileOverride } from "../abstractions/model";
+
 /**
  * 模型运行时配置类型。
  *
@@ -17,6 +19,8 @@ export interface OpenAICompatibleConfig {
   apiKey: string;
   baseUrl?: string;
   model: string;
+  primaryProfileOverride?: ModelProfileOverride;
   fallbackModel?: string;
+  fallbackProfileOverride?: ModelProfileOverride;
   retry?: ModelRetryOptions;
 }
