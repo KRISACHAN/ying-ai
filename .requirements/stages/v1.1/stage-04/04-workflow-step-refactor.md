@@ -59,9 +59,10 @@ ModelProfile / ModelCapabilities
 RequiredModelCapabilities
 ToolPlanningProvider
 ToolPlan = no_tool | tool_calls
+ToolPlanningDegradationReason
 ```
 
-阶段 4 必须使用以上既有契约，禁止重新定义 Persona、Stream Event、Model Profile 或 Tool Plan。
+阶段 4 必须使用以上既有契约，禁止重新定义 Persona、Stream Event、Model Profile、Tool Plan 或 Tool Planning 的 reason 枚举。
 
 当前 `SimpleChatWorkflow.execute()` 仍是单体长方法，顺序为：
 
@@ -73,7 +74,13 @@ Persona → Input Safety → Summary Load → Memory Recall
 → Output Safety → Summary Save → Memory Extract/Save
 ```
 
-阶段 4 将把 trace 顺序显式对齐为 **Tool:list → Prompt:build**（完整 systemPrompt 依赖 toolDefinitions），并替换 `generateWithTools` 为 **Tool:plan → Tool:execute → Final Generate**。
+阶段 4 将把 trace 顺序显式对齐为：
+
+```txt
+Tool:list → Prompt:build → Tool:plan → Tool:execute → Final Generate
+```
+
+完整 system prompt 依赖 `toolDefinitions`，因此 `Tool:list` 必须在完整 `Prompt:build` 之前执行。
 
 ---
 
@@ -89,9 +96,11 @@ Persona → Input Safety → Summary Load → Memory Recall
 - 工具规划只返回 `no_tool` 或 `tool_calls`，不生成用户可见自然语言；
 - 最终用户回答只由一次 final `ChatModel.generate()` 生成；
 - final generate 不再传入 `tools`，避免模型再次自行决定未规划工具；
-- `ChatWorkflowOutput` 保持 V1.0 字段兼容（可增量新增 debug 字段，不得删除或重命名既有字段）；
+- `ChatWorkflowOutput` 保持 V1.0 字段兼容，可增量新增 debug 字段，不得删除或重命名既有字段；
 - 允许最终 `text` 与 V1.0 不同，但输出结构、Safety / Writeback / Trace 语义必须一致；
-- `ToolPlanningDegradationReason` 沿用阶段 3 已冻结枚举（`no_tools` / `tool_calling_unavailable` / `planner_unavailable` / `invalid_plan`），禁止自造新 reason 字符串；
+- `ToolPlanningDegradationReason` 必须沿用阶段 3 已冻结枚举：`no_tools` / `tool_calling_unavailable` / `planner_unavailable` / `invalid_plan`；禁止自造新 reason 字符串；
+- `reason=planner_unavailable` 时，Debug Context 必须额外区分来源：`not_configured` 或 `execution_failed`；
+- `ToolPlanningProvider` 不得在 `SimpleChatWorkflow` 构造期绑定某个固定 `ChatModel`；每次规划必须使用当前执行请求的 `context.core.model`；
 - 阶段 3 Review 中 `createFinalModelError()` 的类型误判问题在本阶段接入 Tool Planning 前修复；
 - `ai-core` 仍不读环境变量、不依赖数据库、HTTP、Next.js、React、Demo 或 Ollama SDK；
 - `ai-core` typecheck、lint、build 通过；
@@ -151,7 +160,7 @@ packages/ai-core/src/
 ```txt
 SimpleChatWorkflow
 → 只负责初始化、顺序编排、异常收口。
-→ ToolPlanningProvider 由构造参数注入；默认 new DefaultToolPlanningProvider({ model })。
+→ 可选接收无状态的 ToolPlanningProvider 策略；不得在构造期保存或绑定某个 ChatModel。
 → 不进入 CompanionCoreContext / createCompanionCore() 必填 DI 槽（与阶段 3 §8.6 一致）。
 
 步骤函数
@@ -162,7 +171,56 @@ WorkflowExecutionState
 
 ToolPlanningProvider
 → 只输出 no_tool 或 tool_calls；不得输出用户可见回复。
+→ 每次 plan() 必须显式接收或从步骤参数获得当前 context.core.model。
 → 宿主如需替换规划策略，优先注入自定义 ChatWorkflow，而非扩展 Core 容器。
+```
+
+### 5.1 ToolPlanningProvider 的当前模型绑定规则
+
+禁止：
+
+```ts
+// 禁止：构造期绑定固定 model
+new SimpleChatWorkflow({
+  toolPlanningProvider: new DefaultToolPlanningProvider({ model }),
+});
+```
+
+原因：`ChatModel` 来自本次 `ChatWorkflowExecutionContext.core.model`。构造期绑定会使 planner 可能继续使用旧 model、错误的 fallback 配置或过时能力档案。
+
+推荐二选一，优先第一种：
+
+```ts
+// 推荐：planner 无状态；每次请求传入本次实际模型
+interface ToolPlanningInput {
+  model: ChatModel;
+  messages: ChatMessage[];
+  tools: ToolDefinition[];
+  requiredCapabilities?: RequiredModelCapabilities;
+}
+
+interface ToolPlanningProvider {
+  plan(input: ToolPlanningInput): Promise<ToolPlan>;
+}
+```
+
+```ts
+// 可接受：在执行期按当前 context 创建默认 planner
+function resolveToolPlanningProvider(
+  context: ChatWorkflowExecutionContext,
+  injected?: ToolPlanningProvider,
+): ToolPlanningProvider {
+  return injected ?? new DefaultToolPlanningProvider();
+}
+```
+
+约束：
+
+```txt
+- 无论使用何种形式，planner 调用必须使用当前 context.core.model；
+- 不得把 model 放入 WorkflowExecutionState；
+- 不得因 planner 使用不同 model 而改变 final generate 的 model / runtime；
+- final generate 的 runtime 仍只反映最终回答实际使用的模型。
 ```
 
 ---
@@ -238,6 +296,7 @@ interface WorkflowExecutionState {
     summaryContext?: string;
     memoryContext?: string;
     emotionContext?: string;
+    messages: ChatMessage[];
   };
 
   toolDefinitions: ToolDefinition[];
@@ -247,7 +306,6 @@ interface WorkflowExecutionState {
   outputSafety?: SafetyResult;
   updatedSummary?: ConversationSummary | null;
   extractedMemories?: ExtractedMemory[];
-  /** 本请求内各步骤降级摘要；可复用 WorkflowStepTrace.summary，不必单独定义 WorkflowDegradation 类型。 */
   degradedStepSummaries?: Array<{ step: WorkflowStepName; reason?: string }>;
 }
 ```
@@ -257,8 +315,8 @@ interface WorkflowExecutionState {
 ```txt
 - 每次 execute() 创建新 state；
 - state 不跨 session、用户或请求复用；
-- Persona / Safety / Model / Memory 等 Provider 实例从 ChatWorkflowExecutionContext.core 获取，不塞入 state；
-- ToolPlanningProvider 从 SimpleChatWorkflow 实例持有，不塞入 state，也不进入 context.core；
+- Persona / Safety / Model / Memory 等 Provider 从 ChatWorkflowExecutionContext.core 获取，不塞入 state；
+- ToolPlanningProvider 是策略对象，不保存 model，也不进入 state 或 context.core；
 - Output 与 Debug Context 必须从 state 构建，不允许最后重新查询 Provider 补数据；
 - 不允许 [key: string]: unknown 形式的无边界状态对象。
 ```
@@ -267,7 +325,7 @@ interface WorkflowExecutionState {
 
 ## 八、共享步骤规范
 
-建议步骤函数命名（可与 `workflow-steps.ts` 对齐）：
+建议步骤函数命名：
 
 ```txt
 runPersonaStep / runInputSafetyStep / runSummaryLoadStep / runMemoryRecallStep
@@ -301,7 +359,7 @@ runEmotionStep
 
 ### 8.2 Tool List 与 Prompt Build
 
-**顺序约束：** `runToolListStep` 必须在完整 `runPromptBuildStep` 之前执行，因为 `buildPersonaSystemPrompt()` 需要 `toolDefinitions` 才能写入 system prompt（与当前实现及阶段 2 `WorkflowStepName` 枚举顺序一致）。
+**顺序约束：** `runToolListStep` 必须在完整 `runPromptBuildStep` 之前执行，因为 `buildPersonaSystemPrompt()` 需要 `toolDefinitions` 才能写入 system prompt。
 
 ```txt
 runToolListStep
@@ -325,23 +383,25 @@ Demo 不得复制 Prompt 拼接；本步骤生成的 `personaPrompt` / `systemPr
 tool:plan
 ```
 
-规则（`reason` 必须使用阶段 3 `ToolPlanningDegradationReason` 枚举值）：
+规则：
 
 ```txt
 无工具定义
 → { type: "no_tool", reason: "no_tools" }
 → Trace skipped
 
-SimpleChatWorkflow 未持有 ToolPlanningProvider（仅自定义 Workflow 场景）
+planner 未配置
 → { type: "no_tool", reason: "planner_unavailable" }
+→ Debug: plannerUnavailableSource=not_configured
 → Trace degraded
 
-模型候选均不满足 toolCalling（ModelCapabilityUnavailableError 或等价能力检查）
+模型候选均不满足 toolCalling
 → { type: "no_tool", reason: "tool_calling_unavailable" }
 → Trace degraded；toolPlan.runtime 可含 capabilitySkips
 
 规划 Provider 调用失败（非能力类）
 → { type: "no_tool", reason: "planner_unavailable" }
+→ Debug: plannerUnavailableSource=execution_failed
 → Trace degraded
 
 规划结果非法或无法映射 toolCalls
@@ -353,7 +413,20 @@ SimpleChatWorkflow 未持有 ToolPlanningProvider（仅自定义 Workflow 场景
 → 不得把 planner 产出的 modelOutput.text 作为最终用户回复。
 ```
 
-`no_tool` 是合法结果，不等同于 failed。有 `reason` 时必须写入 Debug Context（如 `toolPlan` / `metadata.toolPlanningReason`），且不得与「确实无工具需求」混淆。规划的 runtime 进入 Debug Context，但 `output.model` / `modelOutput.runtime` 必须反映 **final generate** 的实际结果。
+`no_tool` 是合法结果，不等同于 failed。`reason` 必须使用阶段 3 枚举，禁止为 `not_configured` / `execution_failed` 新增新的 degradation reason。
+
+建议 Debug Context 增量字段：
+
+```ts
+interface ToolPlanningDebugContext {
+  toolPlan?: ToolPlan;
+  toolPlanningReason?: ToolPlanningDegradationReason;
+  plannerUnavailableSource?: "not_configured" | "execution_failed";
+  runtime?: ModelRuntimeInfo;
+}
+```
+
+规划调用必须使用本次 `context.core.model`。规划 runtime 进入 Debug Context，但 `output.model` / `modelOutput.runtime` 必须反映 **final generate** 的实际结果。
 
 ### 8.4 Tool Execute
 
@@ -363,12 +436,12 @@ ToolPlan=no_tool
 
 ToolPlan=tool_calls
 → 只执行规划返回的调用；
-→ 维持 V1.0 单轮工具限制（`DEFAULT_MAX_TOOL_ROUNDS = 1`）；
+→ 维持 V1.0 单轮工具限制（DEFAULT_MAX_TOOL_ROUNDS = 1）；
 → 复用现有 Tool Registry / Tool Adapter；
 → ToolResult 进入最终消息上下文、output.toolResults、Debug Context。
 ```
 
-`tool_calls` 路径下，final generate 前的 messages **不得**依赖 planner 阶段的 assistant 自然语言。推荐复用 `buildToolFollowUpMessages()`，但 `modelText` 传空字符串或仅含 toolCalls 的 assistant 消息，例如：
+`tool_calls` 路径下，final generate 前的 messages **不得**依赖 planner 阶段的 assistant 自然语言。推荐复用 `buildToolFollowUpMessages()`，但 `modelText` 传空字符串，或构造仅含 toolCalls 的 assistant 消息：
 
 ```txt
 system + recentHistory + user
@@ -406,8 +479,8 @@ ToolPlan=tool_calls
 - 工具规划生成的内容不得作为最终回复使用；
 - 不得先 generate 一段自然语言再丢弃、再 generate 第二次；
 - 最终 generate 不传 tools，避免未规划的二次工具决定；
-- 新执行路径只 emit 一次 `model:generate` Trace；`model:follow-up-generate` 枚举值保留（兼容历史 trace / Demo），但本阶段 runtime 不再产生该步骤；
-- output.model / `modelOutput.runtime` 必须反映 final generate 的实际 usedModel / fallback / capabilitySkips（与阶段 3 ModelRuntimeInfo 一致）。
+- 新执行路径只 emit 一次 model:generate Trace；model:follow-up-generate 枚举值保留，但本阶段 runtime 不再产生该步骤；
+- output.model / modelOutput.runtime 必须反映 final generate 的实际 usedModel / fallback / capabilitySkips。
 ```
 
 ### 8.6 Output Safety 与 Writeback
@@ -426,25 +499,26 @@ buildWorkflowOutput
 → 只从 state 收口，不得二次调用 Provider。
 ```
 
-`ChatWorkflowOutput` 不得删除或重命名 V1.0 字段。新增调试字段只能增量加入；既有字段语义更新如下：
+既有字段语义更新：
 
 ```txt
-metadata.debugContext（增量 / 更新）
-├── toolPlan                    # 新增：完整 ToolPlan
-├── toolPlanningReason          # 新增：ToolPlan.reason（若有）
+metadata.debugContext
+├── toolPlan
+├── toolPlanningReason
+├── plannerUnavailableSource
 ├── toolDefinitions
-├── toolCalls                   # 来源改为 toolPlan.calls，不再来自首次 generate
+├── toolCalls                   # 来源为 toolPlan.calls
 ├── toolResults
-├── toolFollowUpMessages        # 保留；tool_calls 时为 final generate 前 messages
-├── droppedToolCalls            # 保留；final generate 不传 tools 时通常为空
+├── toolFollowUpMessages        # tool_calls 时为 final generate 前 messages
+├── droppedToolCalls            # final generate 不传 tools 时通常为空
 ├── personaPrompt / systemPrompt / messages
 └── ...
 
-metadata（语义更新，字段名保留）
+metadata
 ├── toolRounds                  # 有 tool_calls 时为 1，否则 0
 ├── toolFollowUpGenerated       # 有 tool_calls 时为 true，否则 false
-├── toolCalls                   # 与 debugContext.toolCalls 一致
-└── droppedToolCalls / toolCallsDropped  # 保留字段，避免 Demo 面板缺项
+├── toolCalls
+└── droppedToolCalls / toolCallsDropped
 ```
 
 ---
@@ -518,7 +592,8 @@ workflow:end（CoreObserver）
 禁止掩盖：
 
 ```txt
-- planner 失败却显示“没有工具需求”（须通过 toolPlan.reason 区分 no_tools 与 planner_unavailable / invalid_plan）；
+- planner 失败却显示“没有工具需求”；
+- reason=planner_unavailable 却不记录 not_configured / execution_failed 来源；
 - fallback 后仍显示 primary 为实际模型；
 - Output Safety 拒绝后仍写 Summary / Memory；
 - writeback 降级却把整个 workflow 标记 failed；
@@ -536,7 +611,7 @@ workflow:end（CoreObserver）
 - 记录 V1.0 工具 loop 的输入输出；
 - 标记阶段 3 tool:plan 的接入点；
 - 明确本阶段不会调用 model.stream()；
-- 修复阶段 3 Review 中 createFinalModelError() 错误类型误判（接入 Tool Planning 前完成）。
+- 修复阶段 3 Review 中 createFinalModelError() 错误类型误判。
 ```
 
 ### 子任务 02：State 与前置步骤抽取
@@ -544,9 +619,9 @@ workflow:end（CoreObserver）
 ```txt
 - 建立 WorkflowExecutionState；
 - 抽出 Persona、Input Safety、Summary Load、Memory Recall、Emotion；
-- 抽出 Tool List → Prompt Build（顺序不可颠倒）；
-- SimpleChatWorkflow 构造参数支持可选 ToolPlanningProvider，默认 DefaultToolPlanningProvider；
-- 此时不改变 final generate 与工具行为（仍走 generateWithTools）。
+- 抽出 Tool List → Prompt Build，顺序不可颠倒；
+- planner 以无状态策略注入，或在执行期基于当前 context.core.model 使用默认 planner；
+- 此时不改变 final generate 与工具行为，仍走 generateWithTools。
 ```
 
 ### 子任务 03：接入 Tool Planning 与工具执行
@@ -556,7 +631,8 @@ workflow:end（CoreObserver）
 - 增加 tool:plan Trace / Debug Context；
 - no_tool 直达 final generate；
 - tool_calls 后执行工具并注入结果；
-- final generate 不再携带 tools。
+- final generate 不再携带 tools；
+- planner_unavailable 记录 unavailable source。
 ```
 
 ### 子任务 04：收口步骤抽取
@@ -666,11 +742,26 @@ workflow:end（CoreObserver）
 - toolCalling=false 时，不按 provider 名称分支；
 - 明确记录 reason=tool_calling_unavailable；
 - 降级为 no_tool，正常生成回答；
-- planner 缺失、失败或非法计划时也不打断聊天；
-- Debug Context 能通过 toolPlan.reason 区分 no_tools 与各类规划降级。
+- planner 缺失时记录 reason=planner_unavailable + source=not_configured；
+- planner 调用失败时记录 reason=planner_unavailable + source=execution_failed；
+- 非法计划记录 reason=invalid_plan；
+- Debug Context 能区分 no_tools 与各类规划降级。
 ```
 
-### 12.6 既有降级与 Safety 回归
+### 12.6 当前模型绑定验证
+
+前提：在不同请求或运行时配置中让 `context.core.model` 指向不同 profile。
+
+预期：
+
+```txt
+- planner 使用本次 context.core.model；
+- 不复用上一次请求的 model / profile；
+- final generate 与 planner 的 runtime 在 Debug Context 中分别可见；
+- output.model / modelOutput.runtime 仍只代表 final generate。
+```
+
+### 12.7 既有降级与 Safety 回归
 
 分别模拟：
 
@@ -691,7 +782,7 @@ Output Safety reject
 - Trace / Observer 顺序没有缺失或重复。
 ```
 
-### 12.7 阶段边界验证
+### 12.8 阶段边界验证
 
 ```txt
 - 本阶段新增代码不调用 ChatModel.stream()；
@@ -708,7 +799,9 @@ Output Safety reject
 ```txt
 [ ] execute() 是否只负责初始化、顺序编排与异常收口？
 [ ] Tool List 是否在 Prompt Build 之前执行？
-[ ] ToolPlanningProvider 是否由 SimpleChatWorkflow 构造注入（非 CompanionCoreContext）？
+[ ] ToolPlanningProvider 是否不在构造期绑定固定 ChatModel？
+[ ] planner 是否每次使用 context.core.model？
+[ ] planner 是否能区分 not_configured / execution_failed？
 [ ] 是否存在重复 Prompt 拼接或 Demo 依赖？
 [ ] 是否存在环境变量、数据库、HTTP、React、Ollama SDK 依赖？
 [ ] 是否存在 ChatModel.stream() 调用？若有则阶段越界。
@@ -744,7 +837,7 @@ SimpleChatWorkflow.execute()
 ├── Emotion
 ├── Tool List
 ├── Prompt Build
-├── Tool Plan
+├── Tool Plan（使用当前 context.core.model）
 ├── Tool Execute
 ├── Final Generate（完整文本）
 ├── Output Safety
