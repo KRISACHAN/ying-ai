@@ -79,7 +79,8 @@ OpenAI-compatible Adapter
 - 工具规划结果只能是 `no_tool` 或 `tool_calls`，不得向用户暴露自然语言规划文本；
 - 没有工具、没有工具规划 Provider、或有效模型不满足工具规划能力时，系统必须可明确降级为 `no_tool`；
 - `ai-core` 仍不读取环境变量、不依赖 Ollama SDK、不依赖 Demo、不依赖数据库；
-- 本阶段不改变 V1.0 `executeWorkflow()` 的对外行为；
+- 本阶段不改变 V1.0 `executeWorkflow()` 的对外行为；`SimpleChatWorkflow` 仍使用既有 `generateWithTools()`，工具规划 Provider 仅交付契约与默认实现，阶段 4 才接入 Workflow 主链路；
+- `WorkflowStepName` 在本阶段预留 `tool:plan` 枚举值，Observer / trace 接线留到阶段 4；
 - 相关 package 的 typecheck、lint、build 通过；
 - 至少完成本文定义的人工验收场景，并将结果写入 `.code-reviews/v1.1/` 对应 Review 文档。
 
@@ -99,15 +100,15 @@ packages/ai-core/
     implementations/
       tool-planning/
         default-tool-planning-provider.ts
-    factories/
-      default-core-factory.ts           # 注入默认 ToolPlanningProvider（如当前结构适合）
+    errors/
+      model-capability-unavailable-error.ts   # 与 ModelRuntimeError 同目录；能力不可用
     index.ts                            # 导出稳定公共类型
 
 apps/model-runtime-demo/
-  app/ 或 lib/
+  app/lib/
     model-config.ts                     # 宿主侧模型配置类型
-    model-factory.ts                    # 宿主侧 Provider strategy registry / createModel
-    companion-runtime.ts                # 装配 ChatModel、ToolPlanningProvider 与 Core
+    model-factory.ts                    # 宿主侧 Provider strategy registry
+    companion-runtime.ts                # 装配 ChatModel、ToolPlanningProvider（验收）与 Core
     debug-types.ts                      # 模型 profile / runtime 的展示类型（如需要）
 
 packages/model-ollama/
@@ -231,7 +232,9 @@ export interface GenerateInput {
 - 工具规划调用必须要求 `toolCalling: true`；
 - 不能因为调用方忘记检查能力，就把不支持能力的 fallback 静默投入调用；
 - `usage: true` 不是正常聊天的强制要求；usage 缺失应作为可观测能力差异，而不是聊天失败原因；
-- `model` 覆盖只选择指定模型，不得绕过 requiredCapabilities 校验。
+- `model` 覆盖只选择指定模型，不得绕过 requiredCapabilities 校验；
+- V1.1 约定：`GenerateInput.model` 覆盖**仅作用于 primary 候选**；fallback 仍使用 `fallbackProfile.model`，不因覆盖而切换 fallback 的模型名；
+- 发生覆盖时，`usedProfile` 仍必须是实际发请求的档案（primary 档案的 `model` 字段替换为覆盖值，其余 capabilities 不变）。
 ```
 
 ### 5.4 ChatModel 公开能力边界
@@ -335,6 +338,33 @@ C. 能力不可用
 
 不得把 C 伪装为 B。
 
+#### 6.2.1 能力不可用时的错误语义
+
+与 V1.0 `ModelRuntimeError` 并列，新增可识别错误类型（实现文件放在 `packages/ai-core/src/errors/`，与 `model-runtime-error.ts` 同目录）：
+
+```ts
+export class ModelCapabilityUnavailableError extends Error {
+  public constructor(
+    message: string,
+    public readonly requiredCapabilities: RequiredModelCapabilities,
+    public readonly capabilitySkips: ModelCapabilitySkipItem[],
+  ) {
+    super(message);
+    this.name = "ModelCapabilityUnavailableError";
+  }
+}
+```
+
+约束：
+
+```txt
+- generate()：全部候选因能力不足被跳过时，抛出 ModelCapabilityUnavailableError；
+- stream()：在首个 GenerateStreamChunk yield 之前遇到同类情况，AsyncIterable 以 throw 结束，不得 yield 伪成功 chunk；
+- 抛出前 Adapter 应尽量在错误对象或同次调用的 runtime.capabilitySkips 中写入完整 skip 记录；
+- ToolPlanningProvider：捕获后降级为 no_tool(reason=tool_calling_unavailable)，不得阻断后续聊天生成；
+- 最终回复流式阶段（阶段 5）：由 Workflow 捕获并转换为 workflow:error，不得伪造流式成功。
+```
+
 ### 6.3 V1.1 工作流规则
 
 后续阶段 Workflow 必须遵循：
@@ -409,17 +439,13 @@ export interface ModelProviderConfig {
   model: string;
 }
 
-export interface ModelAdapterStrategy<
-  TConfig extends ModelProviderConfig = ModelProviderConfig,
-> {
+export interface ModelAdapterStrategy<TConfig extends ModelProviderConfig = ModelProviderConfig> {
   readonly provider: TConfig["provider"];
   create(config: TConfig): ChatModel;
 }
 
 export interface ModelAdapterRegistry {
-  register<TConfig extends ModelProviderConfig>(
-    strategy: ModelAdapterStrategy<TConfig>,
-  ): void;
+  register<TConfig extends ModelProviderConfig>(strategy: ModelAdapterStrategy<TConfig>): void;
 
   create(config: ModelProviderConfig): ChatModel;
 }
@@ -447,10 +473,11 @@ export interface OpenAICompatibleModelConfig extends ModelProviderConfig {
 
 ```txt
 - provider 和 model 必须由配置本身推导，宿主不得覆盖成不一致值；
-- capabilities 必须显式给出，或由该 Adapter 的默认能力补齐；
-- Demo 必须将“默认推导值”和“用户覆盖值”可观测展示；
-- 未知能力默认保守处理：streaming=false、toolCalling=false、usage=false；
-- 不得因为 OpenAI-compatible 名称而默认 toolCalling=true。
+- capabilities 采用字段级合并：配置中 Partial<ModelProfile> 只覆盖显式传入的 capabilities 字段，其余由 Adapter 默认值补齐；
+- Demo 必须将“Adapter 默认值”“用户覆盖值”“最终 Effective Profile”可观测展示；
+- 未知或未实现的新 Adapter：capabilities 默认保守为 streaming=false、toolCalling=false、usage=false；
+- OpenAI-compatible Adapter（本阶段已知路径）：内置默认 capabilities 为 streaming=true、toolCalling=true、usage=true，宿主仍可通过 Partial 覆盖；
+- “不得因 OpenAI-compatible 名称默认 toolCalling=true”指的是 Workflow 层禁止写死分支，不是禁止 Adapter 声明自身已知能力。
 ```
 
 ### 7.3 Ollama 的预留方式
@@ -509,6 +536,18 @@ V1.1 约束：
 - ChatModel 创建完成后，ai-core 不再感知环境变量；
 - 不在 ai-core 内写模型 provider switch；
 - 新增模型 Adapter 的操作是“实现 strategy 并注册”，不是修改 Workflow。
+```
+
+### 7.5 与 ai-core `createModel()` 的兼容
+
+V1.0 的 `packages/ai-core/src/factories/model.factory.ts` 中的 `createModel()` **本阶段保留**，继续作为 OpenAI-compatible 快捷入口，避免破坏已有宿主 import。
+
+迁移约定：
+
+```txt
+- ai-core/createModel()：仅包装 OpenAI-compatible，不含 provider switch；
+- Demo/companion-runtime：内部优先通过 ModelAdapterRegistry 创建模型；
+- 阶段 6 接入 Ollama 时，只在 Demo Registry 注册新 strategy，不扩展 ai-core 内的 createModel() 判别联合。
 ```
 
 ---
@@ -624,6 +663,26 @@ export interface ToolPlanningProvider extends CoreProvider {
 
 禁止让 Planner 直接执行工具。执行工具仍由阶段 4 / 5 的 Workflow 与 Tool Registry 负责。
 
+### 8.6 ToolPlanningProvider 的装配边界
+
+本阶段与阶段 4 的分工：
+
+```txt
+本阶段（Stage 3）
+├── ToolPlanningProvider 作为 ai-core 公开抽象 + DefaultToolPlanningProvider 默认实现
+├── 不进入 CompanionCoreContext 必填 DI 槽
+├── 不写入 core:init / inspect().providers 列表（避免扩大 Core 装配面）
+├── Demo 可直接 new DefaultToolPlanningProvider({ model }) 做 §11 人工验收
+└── executeWorkflow() 仍走 V1.0 generateWithTools()，不在本阶段替换主链路
+
+阶段 4
+├── runToolPlanningStep 正式调用 ToolPlanningProvider
+├── WorkflowStepName.tool:plan 参与 trace / step 闭环
+└── 可选：自定义 ChatWorkflow 构造时注入 ToolPlanningProvider；默认 SimpleChatWorkflow 内部持有默认实例
+```
+
+V1.1 不在 `createCompanionCore()` 增加 `toolPlanning?` 必填项；若未来需要宿主级替换规划策略，优先通过注入自定义 `ChatWorkflow` 实现，而不是先扩展 Core 容器。
+
 ---
 
 ## 九、与后续阶段的协作契约
@@ -716,8 +775,9 @@ Core 的模型选择逻辑
 2. 增加 RequiredModelCapabilities；
 3. 扩展 GenerateInput.requiredCapabilities；
 4. 扩展 ModelRuntimeInfo.usedProfile / capabilitySkips；
-5. 定义可识别的 ModelCapabilityUnavailableError 或等价错误语义；
-6. 更新 ai-core index 导出。
+5. 在 errors/ 定义 ModelCapabilityUnavailableError（§6.2.1）；
+6. 在 WorkflowStepName 预留 tool:plan（本阶段只加枚举，不在 SimpleChatWorkflow 发 step 事件）；
+7. 更新 ai-core index 导出。
 ```
 
 完成标准：
@@ -726,6 +786,7 @@ Core 的模型选择逻辑
 - 旧 generate / stream 调用不传 requiredCapabilities 仍可通过类型检查；
 - 新调用可声明 streaming / toolCalling；
 - 没有任何 Workflow 根据 provider 名称做能力判断；
+- WorkflowStepName 已含 tool:plan，但 executeWorkflow() 行为未变；
 - 所有新增 public 类型均可从 ai-core 稳定入口导入。
 ```
 
@@ -785,7 +846,8 @@ Core 的模型选择逻辑
 2. 实现 registry.register / registry.create；
 3. 将既有 OpenAI-compatible 创建逻辑包装成 strategy；
 4. 将环境变量读取保留在 Demo / 宿主；
-5. 输出最终 Effective Model Config（脱敏）。
+5. 输出最终 Effective Model Config（脱敏）；
+6. ai-core 的 createModel() 保留为 OpenAI-compatible 快捷入口（§7.5）。
 ```
 
 完成标准：
@@ -794,6 +856,7 @@ Core 的模型选择逻辑
 - ai-core 不出现 process.env；
 - ai-core 不出现 OpenAI / Ollama provider switch；
 - Demo 通过 registry 创建模型；
+- ai-core createModel() 仍可用，行为与升级前兼容；
 - 未注册 provider 抛出清晰、可展示的配置错误；
 - API Key 不写入日志、trace、debug context 或浏览器响应。
 ```
@@ -819,7 +882,7 @@ Core 的模型选择逻辑
 3. 规划调用必须要求 toolCalling: true；
 4. 将 toolCalls 正规化并校验为 ModelToolCall[]；
 5. 将 no_tool / capability unavailable / invalid plan 变为可观测结果；
-6. 将默认 Provider 注入 Core composition，但暂不修改完整聊天执行顺序。
+6. 按 §8.6 交付默认实现，但不修改 SimpleChatWorkflow / executeWorkflow() 主链路。
 ```
 
 完成标准：
@@ -829,7 +892,8 @@ Core 的模型选择逻辑
 - 无工具调用时只返回 no_tool；
 - modelOutput.text 不被返回给调用方，也不进入用户消息；
 - 工具规划失败不阻断未来最终聊天回复；
-- 规划器本身不执行工具。
+- 规划器本身不执行工具；
+- executeWorkflow() 外部行为与阶段 3 开始前一致（仍走 generateWithTools）。
 ```
 
 可观测结果：
@@ -962,6 +1026,37 @@ Core 的模型选择逻辑
 - 日志与 UI 不泄露 apiKey。
 ```
 
+### 11.9 工具规划非法 plan
+
+```txt
+前提：toolCalling=true，模型返回无法映射到 ToolDefinition 的 toolCalls。
+操作：调用 ToolPlanningProvider.plan()。
+期望：
+- 返回 { type: "no_tool", reason: "invalid_plan" }；
+- 不产生用户可见文本；
+- runtime / trace 有安全摘要。
+```
+
+### 11.10 工具规划模型最终失败
+
+```txt
+前提：toolCalling=true，primary/fallback 均可规划，但模型调用在 retry/fallback 后仍失败。
+操作：调用 ToolPlanningProvider.plan()。
+期望：
+- 返回 { type: "no_tool", reason: "planner_unavailable" }；
+- 不阻断后续普通 generate() / 未来 stream() 最终回复。
+```
+
+### 11.11 严格能力兼容模式
+
+```txt
+前提：strictCapabilityCompatibility=true，primary 支持 streaming 但 fallback 不支持 streaming。
+操作：通过 Registry / factory 创建模型。
+期望：
+- 创建阶段即失败，错误信息明确说明主/降级能力不兼容；
+- 不创建半可用 ChatModel 实例。
+```
+
 ---
 
 ## 十二、非目标与禁止事项
@@ -979,7 +1074,8 @@ Core 的模型选择逻辑
 - 不实现真正流式多轮 Tool Loop；
 - 不将模型配置、API Key、host 写入 ai-core；
 - 不让 Planner 生成或缓存用户可见最终回答；
-- 不修改用户系统、鉴权、商业化与正式产品 UI。
+- 不修改用户系统、鉴权、商业化与正式产品 UI；
+- 不在本阶段把 ToolPlanningProvider 接入 executeWorkflow() 主链路（留阶段 4）。
 ```
 
 ---
@@ -991,7 +1087,7 @@ Core 的模型选择逻辑
 ```txt
 宿主配置
 ↓
-Provider Strategy Registry
+Provider Strategy Registry（Demo；ai-core createModel() 仍保留 OpenAI 快捷入口）
 ↓
 具体 ChatModel Adapter
 ├── primaryProfile
@@ -999,13 +1095,15 @@ Provider Strategy Registry
 ├── retry / fallback
 └── requiredCapabilities 筛选
 ↓
-ToolPlanningProvider
+ToolPlanningProvider（契约 + 默认实现；可单独验收）
 ├── no_tool
 ├── tool_calls
 └── 可观测降级
 ↓
+executeWorkflow()（本阶段仍用 V1.0 generateWithTools，行为不变）
+↓
 后续 SimpleChatWorkflow
-├── 阶段 4：步骤函数化
+├── 阶段 4：步骤函数化 + 接入 ToolPlanningProvider
 ├── 阶段 5：最终回复流式化
 └── 阶段 6：注册 Ollama Adapter
 ```
