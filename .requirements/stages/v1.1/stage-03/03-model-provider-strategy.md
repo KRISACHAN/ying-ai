@@ -96,12 +96,11 @@ packages/ai-core/
     abstractions/
       model.ts                         # ChatModel、ModelProfile、调用能力约束
       tool-planning.ts                 # ToolPlanningProvider、ToolPlan
-      errors.ts                         # 能力不满足等可识别错误
+    errors/
+      model-capability-unavailable-error.ts
     implementations/
       tool-planning/
         default-tool-planning-provider.ts
-    errors/
-      model-capability-unavailable-error.ts   # 与 ModelRuntimeError 同目录；能力不可用
     index.ts                            # 导出稳定公共类型
 
 apps/model-runtime-demo/
@@ -195,6 +194,15 @@ export interface ModelProfile {
   /** 当前具体模型的能力声明。 */
   capabilities: ModelCapabilities;
 }
+
+/**
+ * 宿主只能覆盖能力字段；provider 与 model 必须由实际 Adapter 配置推导。
+ * 使用独立类型，避免 Partial<ModelProfile> 允许覆盖错误的 provider / model，
+ * 也避免 capabilities 无法进行字段级 Partial 合并。
+ */
+export interface ModelProfileOverride {
+  capabilities?: Partial<ModelCapabilities>;
+}
 ```
 
 `provider` 与 `model` 共同标识一个具体候选档案。禁止只用 `model` 字符串推断能力。
@@ -213,7 +221,20 @@ export interface RequiredModelCapabilities {
 export interface GenerateInput {
   messages: ChatMessage[];
   tools?: Record<string, unknown>;
+
+  /**
+   * V1.0 兼容字段。
+   * V1.1 新代码不得依赖它动态切换模型；优先由宿主 factory 创建正确的 ChatModel。
+   */
   model?: string;
+
+  /**
+   * 仅在必须兼容 model 覆盖的旧调用时使用。
+   * 若 model 被覆盖，必须同步提供覆盖后具体模型的能力档案；
+   * 不允许沿用 primaryProfile 的 capabilities。
+   */
+  modelProfileOverride?: ModelProfileOverride;
+
   temperature?: number;
   maxTokens?: number;
 
@@ -232,9 +253,11 @@ export interface GenerateInput {
 - 工具规划调用必须要求 `toolCalling: true`；
 - 不能因为调用方忘记检查能力，就把不支持能力的 fallback 静默投入调用；
 - `usage: true` 不是正常聊天的强制要求；usage 缺失应作为可观测能力差异，而不是聊天失败原因；
-- `model` 覆盖只选择指定模型，不得绕过 requiredCapabilities 校验；
-- V1.1 约定：`GenerateInput.model` 覆盖**仅作用于 primary 候选**；fallback 仍使用 `fallbackProfile.model`，不因覆盖而切换 fallback 的模型名；
-- 发生覆盖时，`usedProfile` 仍必须是实际发请求的档案（primary 档案的 `model` 字段替换为覆盖值，其余 capabilities 不变）。
+- V1.1 新代码不得使用 GenerateInput.model 临时改模型；应通过宿主 Registry / Factory 创建具有正确档案的 ChatModel；
+- 仅为兼容旧调用保留 GenerateInput.model；发生覆盖时必须同时提供 modelProfileOverride.capabilities，缺失则拒绝调用；
+- 覆盖模型的 provider 与 model 必须由 Adapter 的实际请求目标推导，不能通过 override 伪造；
+- fallback 仍只使用 fallbackProfile.model；单次 primary model 覆盖不得隐式改写 fallback 模型；
+- 任意覆盖后的 `usedProfile` 必须反映实际请求模型与该模型对应能力，不得复用旧 primaryProfile 的 capabilities。
 ```
 
 ### 5.4 ChatModel 公开能力边界
@@ -338,7 +361,7 @@ C. 能力不可用
 
 不得把 C 伪装为 B。
 
-#### 6.2.1 能力不可用时的错误语义
+### 6.3 能力不可用时的错误语义
 
 与 V1.0 `ModelRuntimeError` 并列，新增可识别错误类型（实现文件放在 `packages/ai-core/src/errors/`，与 `model-runtime-error.ts` 同目录）：
 
@@ -365,7 +388,7 @@ export class ModelCapabilityUnavailableError extends Error {
 - 最终回复流式阶段（阶段 5）：由 Workflow 捕获并转换为 workflow:error，不得伪造流式成功。
 ```
 
-### 6.3 V1.1 工作流规则
+### 6.4 V1.1 工作流规则
 
 后续阶段 Workflow 必须遵循：
 
@@ -386,7 +409,7 @@ export class ModelCapabilityUnavailableError extends Error {
 → 是否需要模型，由各 Provider 自己决定。
 ```
 
-### 6.4 严格模式
+### 6.5 严格模式
 
 V1.1 默认采用：
 
@@ -401,15 +424,27 @@ V1.1 默认采用：
 ```ts
 interface ModelFactoryOptions {
   strictCapabilityCompatibility?: boolean;
+
+  /**
+   * 严格模式下，primary / fallback 都必须满足的能力集合。
+   * 未指定时，严格模式不得猜测未来 Workflow 需求。
+   */
+  requiredCapabilities?: RequiredModelCapabilities;
 }
 ```
 
 严格模式含义：
 
 ```txt
-- primary / fallback 对同一已声明必需能力不兼容时，factory 拒绝创建模型；
-- 适合希望“聊天一定可流式 + 工具一定可规划”的宿主；
-- 默认 false，避免 V1.1 因本地模型能力差异完全无法启动。
+- strictCapabilityCompatibility=false（默认）
+  → 允许 primary / fallback 能力不同；运行时按 requiredCapabilities 筛选、记录和降级。
+
+- strictCapabilityCompatibility=true 且 requiredCapabilities 已声明
+  → factory 创建时校验 primary / fallback 是否都满足该集合；不满足则拒绝创建。
+
+- strictCapabilityCompatibility=true 但 requiredCapabilities 未声明
+  → factory 不得擅自推测 streaming / toolCalling / usage 都是必需；
+  → 应给出配置警告，或按宿主实现选择拒绝创建。
 ```
 
 严格模式不是智能路由，不自动挑选最优模型。
@@ -439,13 +474,17 @@ export interface ModelProviderConfig {
   model: string;
 }
 
-export interface ModelAdapterStrategy<TConfig extends ModelProviderConfig = ModelProviderConfig> {
+export interface ModelAdapterStrategy<
+  TConfig extends ModelProviderConfig = ModelProviderConfig,
+> {
   readonly provider: TConfig["provider"];
   create(config: TConfig): ChatModel;
 }
 
 export interface ModelAdapterRegistry {
-  register<TConfig extends ModelProviderConfig>(strategy: ModelAdapterStrategy<TConfig>): void;
+  register<TConfig extends ModelProviderConfig>(
+    strategy: ModelAdapterStrategy<TConfig>,
+  ): void;
 
   create(config: ModelProviderConfig): ChatModel;
 }
@@ -462,23 +501,50 @@ export interface OpenAICompatibleModelConfig extends ModelProviderConfig {
   baseUrl?: string;
   model: string;
 
-  primaryProfile?: Partial<ModelProfile>;
+  primaryProfileOverride?: ModelProfileOverride;
   fallbackModel?: string;
-  fallbackProfile?: Partial<ModelProfile>;
+  fallbackProfileOverride?: ModelProfileOverride;
   retry?: ModelRetryConfig;
 }
 ```
 
-`primaryProfile` / `fallbackProfile` 的补全规则：
+Profile 构建规则：
+
+```ts
+const primaryProfile: ModelProfile = {
+  provider: config.provider,
+  model: config.model,
+  capabilities: {
+    ...adapterDefaultCapabilities,
+    ...config.primaryProfileOverride?.capabilities,
+  },
+};
+
+const fallbackProfile = config.fallbackModel
+  ? {
+      provider: config.provider,
+      model: config.fallbackModel,
+      capabilities: {
+        ...adapterDefaultCapabilities,
+        ...config.fallbackProfileOverride?.capabilities,
+      },
+    }
+  : undefined;
+```
+
+约束：
 
 ```txt
-- provider 和 model 必须由配置本身推导，宿主不得覆盖成不一致值；
-- capabilities 采用字段级合并：配置中 Partial<ModelProfile> 只覆盖显式传入的 capabilities 字段，其余由 Adapter 默认值补齐；
+- provider 与 model 必须由配置和实际 Adapter 请求目标推导；override 不得覆盖它们；
+- capabilities 采用字段级合并；只传 streaming 时，其余能力由 Adapter 默认值补齐；
 - Demo 必须将“Adapter 默认值”“用户覆盖值”“最终 Effective Profile”可观测展示；
 - 未知或未实现的新 Adapter：capabilities 默认保守为 streaming=false、toolCalling=false、usage=false；
-- OpenAI-compatible Adapter（本阶段已知路径）：内置默认 capabilities 为 streaming=true、toolCalling=true、usage=true，宿主仍可通过 Partial 覆盖；
-- “不得因 OpenAI-compatible 名称默认 toolCalling=true”指的是 Workflow 层禁止写死分支，不是禁止 Adapter 声明自身已知能力。
+- 当前 OpenAI-compatible Adapter 的最低基线默认值为 streaming=true、toolCalling=false、usage=false；
+- toolCalling 与 usage 只能在已验证具体模型 / 网关支持后，由宿主配置显式开启；
+- Workflow 禁止因 provider 名称而写死能力；Adapter 可以对自己已验证的具体模型提供默认能力，但该默认能力必须可被宿主覆盖。
 ```
+
+> “OpenAI-compatible”只说明接口协议形状，不等于所有模型、所有网关或所有 baseUrl 都支持 tools、usage 或完整流式语义。
 
 ### 7.3 Ollama 的预留方式
 
@@ -493,7 +559,7 @@ export interface OllamaModelConfig extends ModelProviderConfig {
   host?: string;
   model: string;
   keepAlive?: string;
-  primaryProfile?: Partial<ModelProfile>;
+  primaryProfileOverride?: ModelProfileOverride;
 }
 ```
 
@@ -519,7 +585,7 @@ const model = registry.create({
   apiKey: process.env.OPENAI_API_KEY!,
   baseUrl: process.env.OPENAI_BASE_URL,
   model: process.env.OPENAI_MODEL!,
-  primaryProfile: {
+  primaryProfileOverride: {
     capabilities: {
       streaming: true,
       toolCalling: true,
@@ -540,14 +606,15 @@ V1.1 约束：
 
 ### 7.5 与 ai-core `createModel()` 的兼容
 
-V1.0 的 `packages/ai-core/src/factories/model.factory.ts` 中的 `createModel()` **本阶段保留**，继续作为 OpenAI-compatible 快捷入口，避免破坏已有宿主 import。
+V1.0 的 `packages/ai-core/src/factories/model.factory.ts` 中的 `createModel()` 本阶段保留，继续作为 OpenAI-compatible 快捷入口，避免破坏已有宿主 import。
 
 迁移约定：
 
 ```txt
 - ai-core/createModel()：仅包装 OpenAI-compatible，不含 provider switch；
 - Demo/companion-runtime：内部优先通过 ModelAdapterRegistry 创建模型；
-- 阶段 6 接入 Ollama 时，只在 Demo Registry 注册新 strategy，不扩展 ai-core 内的 createModel() 判别联合。
+- 阶段 6 接入 Ollama 时，只在 Demo Registry 注册新 strategy，不扩展 ai-core 内的 createModel() 判别联合；
+- 新代码不得用 GenerateInput.model 代替宿主 Factory 的模型选择职责。
 ```
 
 ---
@@ -672,7 +739,7 @@ export interface ToolPlanningProvider extends CoreProvider {
 ├── ToolPlanningProvider 作为 ai-core 公开抽象 + DefaultToolPlanningProvider 默认实现
 ├── 不进入 CompanionCoreContext 必填 DI 槽
 ├── 不写入 core:init / inspect().providers 列表（避免扩大 Core 装配面）
-├── Demo 可直接 new DefaultToolPlanningProvider({ model }) 做 §11 人工验收
+├── Demo 可直接 new DefaultToolPlanningProvider({ model }) 做人工验收
 └── executeWorkflow() 仍走 V1.0 generateWithTools()，不在本阶段替换主链路
 
 阶段 4
@@ -771,11 +838,11 @@ Core 的模型选择逻辑
 任务：
 
 ```txt
-1. 在 model abstraction 增加 ModelCapabilities、ModelProfile；
+1. 在 model abstraction 增加 ModelCapabilities、ModelProfile、ModelProfileOverride；
 2. 增加 RequiredModelCapabilities；
-3. 扩展 GenerateInput.requiredCapabilities；
+3. 扩展 GenerateInput.requiredCapabilities 与兼容用 modelProfileOverride；
 4. 扩展 ModelRuntimeInfo.usedProfile / capabilitySkips；
-5. 在 errors/ 定义 ModelCapabilityUnavailableError（§6.2.1）；
+5. 在 errors/ 定义 ModelCapabilityUnavailableError；
 6. 在 WorkflowStepName 预留 tool:plan（本阶段只加枚举，不在 SimpleChatWorkflow 发 step 事件）；
 7. 更新 ai-core index 导出。
 ```
@@ -785,6 +852,8 @@ Core 的模型选择逻辑
 ```txt
 - 旧 generate / stream 调用不传 requiredCapabilities 仍可通过类型检查；
 - 新调用可声明 streaming / toolCalling；
+- 新代码不依赖 GenerateInput.model 做动态模型切换；
+- 若兼容调用使用 model 覆盖却未提供 modelProfileOverride.capabilities，则 Adapter 拒绝调用；
 - 没有任何 Workflow 根据 provider 名称做能力判断；
 - WorkflowStepName 已含 tool:plan，但 executeWorkflow() 行为未变；
 - 所有新增 public 类型均可从 ai-core 稳定入口导入。
@@ -797,7 +866,7 @@ Core 的模型选择逻辑
 {
   provider: "openai-compatible",
   model: "...",
-  capabilities: { streaming: true, toolCalling: true, usage: true }
+  capabilities: { streaming: true, toolCalling: false, usage: false }
 }
 ```
 
@@ -813,7 +882,8 @@ Core 的模型选择逻辑
 3. 对跳过候选写 capabilitySkips；
 4. 候选满足能力时才执行既有 retry；
 5. fallback 接管时将 usedProfile 正确写入 runtime；
-6. 不满足能力时抛出可识别能力错误，供上层选择降级或失败。
+6. 不满足能力时抛出可识别能力错误，供上层选择降级或失败；
+7. 对 GenerateInput.model 的兼容覆盖执行 profile 校验，不允许沿用旧档案能力。
 ```
 
 完成标准：
@@ -822,7 +892,8 @@ Core 的模型选择逻辑
 - primary 支持 streaming、fallback 不支持 streaming：stream 调用不会向 fallback 发请求；
 - primary 调用失败后，runtime 可显示 fallback 因能力不足被跳过；
 - primary / fallback 都满足 requiredCapabilities 时，保留 V1.0 fallback 行为；
-- 未声明 requiredCapabilities 的 V1.0 旧调用行为不改变。
+- 未声明 requiredCapabilities 的 V1.0 旧调用行为不改变；
+- OpenAI-compatible 默认不因 provider 名称自动宣称 toolCalling / usage=true。
 ```
 
 可观测结果：
@@ -847,7 +918,8 @@ Core 的模型选择逻辑
 3. 将既有 OpenAI-compatible 创建逻辑包装成 strategy；
 4. 将环境变量读取保留在 Demo / 宿主；
 5. 输出最终 Effective Model Config（脱敏）；
-6. ai-core 的 createModel() 保留为 OpenAI-compatible 快捷入口（§7.5）。
+6. ai-core 的 createModel() 保留为 OpenAI-compatible 快捷入口；
+7. 支持 strictCapabilityCompatibility + requiredCapabilities 的配置校验。
 ```
 
 完成标准：
@@ -858,7 +930,8 @@ Core 的模型选择逻辑
 - Demo 通过 registry 创建模型；
 - ai-core createModel() 仍可用，行为与升级前兼容；
 - 未注册 provider 抛出清晰、可展示的配置错误；
-- API Key 不写入日志、trace、debug context 或浏览器响应。
+- API Key 不写入日志、trace、debug context 或浏览器响应；
+- strict 模式只有在 requiredCapabilities 明确时才执行可预测的兼容性拒绝。
 ```
 
 可观测结果：
@@ -868,6 +941,7 @@ Core 的模型选择逻辑
 [Model Factory] strategy=OpenAICompatibleModelStrategy
 [Model Factory] primaryProfile=...
 [Model Factory] fallbackProfile=...
+[Model Factory] strictCapabilities=...
 ```
 
 ### 10.4 03-04：实现 ToolPlanningProvider 与默认规划器
@@ -1026,35 +1100,45 @@ Core 的模型选择逻辑
 - 日志与 UI 不泄露 apiKey。
 ```
 
-### 11.9 工具规划非法 plan
+### 11.9 能力覆盖类型与实际 Profile
 
 ```txt
-前提：toolCalling=true，模型返回无法映射到 ToolDefinition 的 toolCalls。
-操作：调用 ToolPlanningProvider.plan()。
+前提：
+- Adapter 默认能力为 { streaming: true, toolCalling: false, usage: false }。
+- 宿主仅设置 primaryProfileOverride.capabilities.toolCalling=true。
+
+操作：创建模型并查看 Effective Profile。
 期望：
-- 返回 { type: "no_tool", reason: "invalid_plan" }；
-- 不产生用户可见文本；
-- runtime / trace 有安全摘要。
+- provider / model 仍由实际配置决定，不能被 override 覆盖；
+- 最终 capabilities 为 { streaming: true, toolCalling: true, usage: false }；
+- TypeScript 允许只传一个能力字段。
 ```
 
-### 11.10 工具规划模型最终失败
+### 11.10 旧 model 覆盖兼容边界
 
 ```txt
-前提：toolCalling=true，primary/fallback 均可规划，但模型调用在 retry/fallback 后仍失败。
-操作：调用 ToolPlanningProvider.plan()。
-期望：
-- 返回 { type: "no_tool", reason: "planner_unavailable" }；
-- 不阻断后续普通 generate() / 未来 stream() 最终回复。
+前提：存在仍传 GenerateInput.model 的历史调用。
+
+操作 A：只传 model，不传 modelProfileOverride。
+期望 A：Adapter 拒绝调用并返回清晰配置错误。
+
+操作 B：传 model 和完整有效的 modelProfileOverride.capabilities。
+期望 B：实际 usedProfile 与请求模型一致，不复用 primaryProfile 的能力声明。
 ```
 
-### 11.11 严格能力兼容模式
+### 11.11 严格模式
 
 ```txt
-前提：strictCapabilityCompatibility=true，primary 支持 streaming 但 fallback 不支持 streaming。
-操作：通过 Registry / factory 创建模型。
-期望：
-- 创建阶段即失败，错误信息明确说明主/降级能力不兼容；
-- 不创建半可用 ChatModel 实例。
+前提：
+- strictCapabilityCompatibility=true；
+- requiredCapabilities={ streaming: true }；
+- fallbackProfile.streaming=false。
+
+操作：创建模型。
+期望：factory 拒绝创建，并说明 fallback 不满足 streaming。
+
+补充：若 strictCapabilityCompatibility=true 但 requiredCapabilities 未给出，
+实现必须给出配置警告或拒绝创建；不得擅自假设 tools / usage 一定是必需能力。
 ```
 
 ---
@@ -1074,8 +1158,8 @@ Core 的模型选择逻辑
 - 不实现真正流式多轮 Tool Loop；
 - 不将模型配置、API Key、host 写入 ai-core；
 - 不让 Planner 生成或缓存用户可见最终回答；
-- 不修改用户系统、鉴权、商业化与正式产品 UI；
-- 不在本阶段把 ToolPlanningProvider 接入 executeWorkflow() 主链路（留阶段 4）。
+- 不以 GenerateInput.model 作为 V1.1 新功能的模型选择机制；
+- 不修改用户系统、鉴权、商业化与正式产品 UI。
 ```
 
 ---
@@ -1087,7 +1171,7 @@ Core 的模型选择逻辑
 ```txt
 宿主配置
 ↓
-Provider Strategy Registry（Demo；ai-core createModel() 仍保留 OpenAI 快捷入口）
+Provider Strategy Registry
 ↓
 具体 ChatModel Adapter
 ├── primaryProfile
@@ -1095,15 +1179,13 @@ Provider Strategy Registry（Demo；ai-core createModel() 仍保留 OpenAI 快�
 ├── retry / fallback
 └── requiredCapabilities 筛选
 ↓
-ToolPlanningProvider（契约 + 默认实现；可单独验收）
+ToolPlanningProvider
 ├── no_tool
 ├── tool_calls
 └── 可观测降级
 ↓
-executeWorkflow()（本阶段仍用 V1.0 generateWithTools，行为不变）
-↓
 后续 SimpleChatWorkflow
-├── 阶段 4：步骤函数化 + 接入 ToolPlanningProvider
+├── 阶段 4：步骤函数化
 ├── 阶段 5：最终回复流式化
 └── 阶段 6：注册 Ollama Adapter
 ```
