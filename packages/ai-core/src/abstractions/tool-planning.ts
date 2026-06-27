@@ -1,7 +1,8 @@
-import type { ChatMessage, ModelRuntimeInfo, ModelToolCall } from "./model";
+import type { ChatMessage, ChatModel, ModelRuntimeInfo, ModelToolCall } from "./model";
 import type { CoreProvider } from "./provider";
 
 export interface ToolPlanningInput {
+  model: ChatModel;
   messages: ChatMessage[];
   tools: Record<string, unknown>;
 }

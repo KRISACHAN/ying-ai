@@ -2,7 +2,7 @@
  * 工具调用抽象（阶段 6）。
  *
  * ToolRegistry 扩展 ToolProvider，支持 register 注册工具与 handler。
- * Workflow 通过 ToolRegistry 执行模型返回的 toolCalls，再把 ToolResult 拼回二次生成。
+ * Workflow 通过 ToolRegistry 执行规划返回的 toolCalls，再把 ToolResult 拼回最终生成。
  */
 import type { CoreProvider } from "./provider";
 

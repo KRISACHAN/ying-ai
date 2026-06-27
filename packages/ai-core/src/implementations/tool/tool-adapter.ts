@@ -33,7 +33,7 @@ export function toCoreToolCall(modelToolCall: ModelToolCall): ToolCall {
   };
 }
 
-/** 拼装工具执行后的二次生成消息。 */
+/** 拼装工具执行后的 final generate 消息。 */
 export function buildToolFollowUpMessages(
   messages: ChatMessage[],
   modelText: string,

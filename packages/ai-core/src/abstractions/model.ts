@@ -8,7 +8,7 @@ import type { CoreProvider } from "./provider";
 
 export type ChatMessageRole = "system" | "user" | "assistant" | "tool";
 
-/** 单条对话消息；tool 角色消息由 Workflow 在工具二次生成时构造。 */
+/** 单条对话消息；tool 角色消息由 Workflow 在工具执行后构造。 */
 export interface ChatMessage {
   role: ChatMessageRole;
   content: string;

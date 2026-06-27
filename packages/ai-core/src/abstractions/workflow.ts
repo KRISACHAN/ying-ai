@@ -19,6 +19,7 @@ import type { CoreProvider } from "./provider";
 import type { SafetyCheckResult } from "./safety";
 import type { ConversationSummary, SummaryOptions, SummaryScope } from "./summary";
 import type { ToolDefinition, ToolResult } from "./tool";
+import type { ToolPlan, ToolPlanningDegradationReason } from "./tool-planning";
 import type { ChatWorkflowStreamEvent } from "./workflow-stream";
 import type { WorkflowTrace } from "./workflow-trace";
 
@@ -80,19 +81,27 @@ export interface ChatWorkflowDebugContext {
   summarizedMessages?: ChatMessage[];
   /** 本轮注册给模型的工具定义快照。 */
   toolDefinitions?: ToolDefinition[];
+  /** 工具规划结果；只用于调试观察，不是最终回复文本。 */
+  toolPlan?: ToolPlan;
+  /** 工具规划降级原因，使用阶段 3 固定枚举。 */
+  toolPlanningReason?: ToolPlanningDegradationReason;
+  /** reason=planner_unavailable 时区分未配置还是执行失败。 */
+  plannerUnavailableSource?: "not_configured" | "execution_failed";
+  /** 工具规划模型调用 runtime；最终回复 runtime 仍在 modelOutput.runtime。 */
+  toolPlanningRuntime?: GenerateOutput["runtime"];
   /** 模型请求的工具调用快照。 */
   toolCalls?: ModelToolCall[];
   /** 工具执行结果快照。 */
   toolResults?: ToolResult[];
   /** 达到单轮工具轮数限制后被保留但不再执行的模型 toolCalls。 */
   droppedToolCalls?: ModelToolCall[];
-  /** 工具执行后传入二次生成的消息。 */
+  /** 工具执行后传入 final generate 的消息。 */
   toolFollowUpMessages?: ChatMessage[];
   /** buildPersonaPrompt 结果，仅包含 normalize 后的 Persona 段落；自定义 Workflow 应同步填充。 */
   personaPrompt: string;
   /** buildPersonaSystemPrompt 完整结果。 */
   systemPrompt: string;
-  /** 首次传入 model.generate 的 messages；二次生成输入见 toolFollowUpMessages。 */
+  /** 传入 final model.generate 的基础 messages；工具结果输入见 toolFollowUpMessages。 */
   messages: ChatMessage[];
   /** 本轮 recall 或 save 中最后一次 embedding 的 vector.length。 */
   embeddingVectorLength?: number;

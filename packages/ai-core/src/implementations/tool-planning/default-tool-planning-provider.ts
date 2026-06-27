@@ -15,6 +15,9 @@ const PLANNER_SYSTEM_PROMPT = [
 ].join("\n");
 
 export interface DefaultToolPlanningProviderOptions {
+  /**
+   * @deprecated Stage 4 planning passes the current request model via plan(input.model).
+   */
   model: ChatModel;
 }
 
@@ -25,10 +28,10 @@ export class DefaultToolPlanningProvider implements ToolPlanningProvider {
     name: "Default Tool Planning Provider",
   } as const;
 
-  private readonly model: ChatModel;
+  private readonly model: ChatModel | undefined;
 
-  public constructor(options: DefaultToolPlanningProviderOptions) {
-    this.model = options.model;
+  public constructor(options?: DefaultToolPlanningProviderOptions) {
+    this.model = options?.model;
   }
 
   public async plan(input: ToolPlanningInput): Promise<ToolPlan> {
@@ -37,7 +40,7 @@ export class DefaultToolPlanningProvider implements ToolPlanningProvider {
     }
 
     try {
-      const output = await this.model.generate({
+      const output = await (this.model ?? input.model).generate({
         messages: [{ role: "system", content: PLANNER_SYSTEM_PROMPT }, ...input.messages],
         tools: input.tools,
         requiredCapabilities: { toolCalling: true },
