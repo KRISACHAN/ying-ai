@@ -127,7 +127,8 @@ interface WorkflowExecutionState {
 
 /**
  * 阶段 4 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
- * → Emotion(analyze/transition) → ToolRegistry.list → ToolPlanning → Safety(output)
+ * → Emotion(analyze/transition) → ToolRegistry.list → Prompt.build
+ * → ToolPlanning → ToolRegistry.execute → final generate → Safety(output)
  * → Summary(update/save) → Memory(extract/save)。
  *
  * 约束：
@@ -542,7 +543,7 @@ async function runToolPlanningStep(
           };
         }
 
-        return toToolPlanningState(normalized, "execution_failed");
+        return toToolPlanningState(normalized);
       } catch {
         return {
           plan: { type: "no_tool", reason: "planner_unavailable" },

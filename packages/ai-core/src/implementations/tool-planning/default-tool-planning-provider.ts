@@ -28,10 +28,8 @@ export class DefaultToolPlanningProvider implements ToolPlanningProvider {
     name: "Default Tool Planning Provider",
   } as const;
 
-  private readonly model: ChatModel | undefined;
-
   public constructor(options?: DefaultToolPlanningProviderOptions) {
-    this.model = options?.model;
+    void options;
   }
 
   public async plan(input: ToolPlanningInput): Promise<ToolPlan> {
@@ -40,7 +38,7 @@ export class DefaultToolPlanningProvider implements ToolPlanningProvider {
     }
 
     try {
-      const output = await (this.model ?? input.model).generate({
+      const output = await input.model.generate({
         messages: [{ role: "system", content: PLANNER_SYSTEM_PROMPT }, ...input.messages],
         tools: input.tools,
         requiredCapabilities: { toolCalling: true },
