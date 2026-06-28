@@ -79,6 +79,35 @@ Stage 4
 - 不让宿主重新拼 Persona Prompt 或重新实现工作流编排。
 ```
 
+### 2.3 实施前置（建议在本阶段开始时完成）
+
+Stage 4 已将步骤函数化，但当前实现仍集中在 `simple-chat-workflow.ts`（约 1800 行）。Stage 5 会新增 `stream()` 双路径，**建议在写 `stream()` 前先拆出至少以下模块**，避免 execute / stream 同文件漂移：
+
+```txt
+workflow-execution-state.ts   ← WorkflowExecutionState 与 state 工厂
+workflow-stream-emitter.ts    ← Stream 事件发射、终止守卫（09-02）
+workflow-steps.ts             ← 共享步骤（可选，但推荐）
+```
+
+`CompanionCore.streamWorkflow()` 与 `ChatWorkflowStreamEvent` 类型已在 Stage 2 落地；本阶段重点是 `SimpleChatWorkflow.stream()` 与步骤 → Stream 事件桥接，不是重做 Core 门面。
+
+### 2.4 ToolPlan 术语约定
+
+```txt
+ToolPlan.type
+→ no_tool | tool_calls（计划类型）
+
+ToolPlanningDegradationReason
+→ no_tools | tool_calling_unavailable | planner_unavailable | invalid_plan（降级原因）
+
+示例：
+- 未注册工具：type = no_tool, reason = no_tools
+- 规划成功但无需调用：type = no_tool（可无 reason）
+- 需要调用工具：type = tool_calls
+```
+
+验收与文档中不得把 `no_tools`（reason）误写成 `ToolPlan.type`。
+
 ---
 
 ## 三、阶段完成标准
@@ -102,6 +131,9 @@ Stage 4
 - 完整文本后 Output Safety 拒绝时，必须发送 `workflow:error`；
 - Summary / Memory 可恢复写回失败仍按既有语义降级并允许 `workflow:finish`；
 - 每一个 `step:start` 都有对应 `step:end`，并与最终 trace status 一致；
+- `stream()` 期间仍必须 emit CoreObserver 旁路事件（与 Stage 2 一致）；Observer 与 Stream 不得共用同一 UI handler；
+- `tool:call` / `tool:result` 仅在 `tool:execute` 步骤内、且全部 `text:delta` 之前出现；
+- 流前失败、Output Safety 拒绝、模型流失败须使用 Stage 2 冻结的 `SafeWorkflowError.code`（见 §8.5）；
 - `workflow:finish` 或 `workflow:error` 二选一，终止后不得继续发事件；
 - `packages/ai-core` typecheck、lint、build 通过；
 - 完成本文件人工验收，并写入 `.code-reviews/v1.1/`。
@@ -113,15 +145,16 @@ Stage 4
 ### 本阶段必须做
 
 ```txt
-1. 实现 SimpleChatWorkflow.stream()
-2. 实现 CompanionCore.streamWorkflow() 委托与兼容错误收口
-3. 复用 Stage 4 共享步骤
-4. 调用 ChatModel.stream() 生成最终回复
-5. 生成 Stage 2 定义的 ChatWorkflowStreamEvent
-6. 保持 Trace / Observer / DebugContext / 降级语义
-7. 正确处理流前失败、部分输出失败、输出安全拒绝、写回降级
-8. 提供 Core 级人工验证入口
-9. 完成 Stage 5 Review
+1. （建议）拆分 workflow 模块，降低 execute / stream 双路径漂移风险
+2. 实现 SimpleChatWorkflow.stream()
+3. 回归验证 CompanionCore.streamWorkflow()（Stage 2 已有，本阶段不重复实现）
+4. 复用 Stage 4 共享步骤，并补齐步骤 → Stream 事件桥接
+5. 调用 ChatModel.stream() 生成最终回复，并回填 generation.finalOutput
+6. 生成 Stage 2 定义的 ChatWorkflowStreamEvent（含 tool:call / tool:result）
+7. 保持 Trace / Observer / DebugContext / 降级语义
+8. 正确处理流前失败、部分输出失败、输出安全拒绝、写回降级
+9. 提供 Core 级人工验证入口
+10. 完成 Stage 5 Review
 ```
 
 ### 本阶段明确不做
@@ -143,42 +176,52 @@ Stage 4
 
 ## 五、目录与职责
 
+### 5.1 当前基线（Stage 4 结束）
+
 ```txt
 packages/ai-core/src/
-├── abstractions/
-│   ├── workflow.ts
-│   ├── workflow-stream.ts
-│   ├── workflow-trace.ts
-│   └── model.ts
+├── abstractions/          # workflow.ts, workflow-stream.ts, workflow-trace.ts, model.ts …
 ├── core/
-│   └── companion-core.ts
+│   └── companion-core.ts  # streamWorkflow() 已在 Stage 2 实现
 └── implementations/workflow/
-    ├── simple-chat-workflow.ts
-    ├── workflow-execution-state.ts
-    ├── workflow-steps.ts
+    ├── simple-chat-workflow.ts   # execute() + 全部共享步骤 + WorkflowExecutionState
     └── workflow-trace-recorder.ts
+```
+
+### 5.2 本阶段目标结构
+
+```txt
+packages/ai-core/src/implementations/workflow/
+├── simple-chat-workflow.ts       # execute() / stream() 编排与异常收口
+├── workflow-execution-state.ts   # 从 simple-chat-workflow 拆出
+├── workflow-stream-emitter.ts    # Stream 事件发射、终止守卫（09-02）
+├── workflow-steps.ts             # 共享步骤（推荐从 simple-chat-workflow 拆出）
+└── workflow-trace-recorder.ts
 
 .code-reviews/v1.1/
 └── 5-{7-char-sha}/
 ```
 
-职责边界：
+`workflow-steps.ts` 在 Stage 4 标为可选；Stage 5 因双路径维护，**推荐拆出**。若暂不拆，必须在 PR / Review 中说明理由。
+
+### 5.3 职责边界
 
 ```txt
 CompanionCore
-→ 选择并调用 Workflow。
+→ 选择并调用 Workflow（streamWorkflow 已在 Stage 2 落地，本阶段回归验证）。
 → 不拼 Prompt、不消费模型流、不输出 HTTP 字节流。
 
 SimpleChatWorkflow
-→ 负责步骤编排与异常收口。
-→ 只复用 Stage 4 共享步骤。
+→ execute() 与 stream() 分别编排；只在 final generate / final stream 处分叉。
+→ 只复用 Stage 4 共享步骤，不复制业务逻辑。
 
-共享步骤
-→ 更新 WorkflowExecutionState、Trace、Observer、DebugContext。
+共享步骤（runWorkflowStep 及步骤函数）
+→ 更新 WorkflowExecutionState、Trace、CoreObserver。
+→ stream() 路径额外通过 WorkflowStreamEmitter 产出 ChatWorkflowStreamEvent。
 → 不直接写 HTTP / NDJSON。
 
 ChatModel
-→ 返回文本流与 runtime。
+→ 返回文本流与 runtime（finish chunk 可能 text 为空但携带 runtime / usage）。
 → Adapter 自行处理 retry、fallback、能力筛选。
 ```
 
@@ -214,6 +257,8 @@ export interface ChatWorkflow extends CoreProvider {
 ```
 
 ### 6.2 CompanionCore.streamWorkflow()
+
+> **Stage 2 已实现。** 本阶段任务 09-04 为**回归验证**，不是从零重写。仅在 `SimpleChatWorkflow.stream()` 落地后，确认委托、终止守卫与 `workflow_stream_not_supported` 路径仍符合 Stage 2 契约。
 
 语义：
 
@@ -301,12 +346,14 @@ step:end(status = success | skipped | degraded | failed)
 
 ### 7.2 工具规划与最终回复分离
 
-无工具或无需工具：
+无工具或无需调用（完整路径仍含 `Prompt:build`）：
 
 ```txt
 Tool:list
 ↓
-Tool:plan = no_tools / no_tool
+Prompt:build
+↓
+Tool:plan → type = no_tool（reason 可能为 no_tools 等）
 ↓
 Final Response: model.stream()
 ```
@@ -314,15 +361,23 @@ Final Response: model.stream()
 存在工具并需要调用：
 
 ```txt
-Tool:plan = tool_calls
+Tool:list
+↓
+Prompt:build
+↓
+Tool:plan → type = tool_calls
+↓
+step:start(tool:execute)
 ↓
 tool:call × N
 ↓
-Tool:execute
+（逐个执行）
 ↓
 tool:result × N
 ↓
-将工具结果写入最终回答上下文
+step:end(tool:execute)
+↓
+将工具结果写入 finalMessages（followUpMessages）
 ↓
 Final Response: model.stream()
 ```
@@ -357,40 +412,65 @@ const stream = context.core.model.stream({
 - 不允许自动回退 generate() 再伪造 text:delta。
 ```
 
-### 7.4 delta 累积与最终输出
+### 7.4 delta 累积、finalOutput 回填与空回复校验
+
+Stage 4 的 `buildWorkflowOutput()` 依赖 `state.generation.finalOutput`。`stream()` 必须在流结束后构造与之等价的 `GenerateOutput`，再复用同一 `buildWorkflowOutput()`，避免 stream / execute 输出结构漂移。
 
 推荐概念实现：
 
 ```ts
 let completeText = '';
-let hasEmittedText = false;
+let lastModel: string | undefined;
+let finalRuntime: ModelRuntimeInfo | undefined;
+let finalUsage: GenerateUsage | undefined;
 
 for await (const chunk of context.core.model.stream(streamInput)) {
-  const text = chunk.text;
+  if (chunk.runtime !== undefined) {
+    finalRuntime = chunk.runtime;
+  }
+  if (chunk.usage !== undefined) {
+    finalUsage = chunk.usage;
+  }
+  if (chunk.model !== undefined) {
+    lastModel = chunk.model;
+  }
 
-  if (text.length === 0) continue;
+  const text = chunk.text;
+  if (text.length === 0) {
+    continue; // 跳过空字符串 chunk（含 Adapter finish chunk）
+  }
 
   completeText += text;
-  hasEmittedText = true;
-
-  yield {
-    type: 'text:delta',
-    workflowId,
-    text,
-    model: chunk.model,
-  };
+  yield { type: 'text:delta', workflowId, text, model: chunk.model };
 }
 
-state.finalText = completeText;
+// 与 OpenAI Adapter validateGenerateOutput 对齐：无 text 且无 toolCalls → 失败
+if (!completeText.trim()) {
+  throw toSafeWorkflowError({ code: 'model_stream_failed', step: 'model:stream', ... });
+}
+
+state.generation = {
+  ...state.generation,
+  finalOutput: {
+    text: completeText,
+    model: lastModel ?? finalRuntime?.usedModel ?? '',
+    raw: { provider: 'stream' },
+    ...(finalRuntime !== undefined ? { runtime: finalRuntime } : {}),
+    ...(finalUsage !== undefined ? { usage: finalUsage } : {}),
+  },
+};
 ```
 
 约束：
 
 ```txt
-- 不 trim delta。
-- 不按字符、词或时间重切块。
+- 不 trim delta；空白 chunk 仍可作为 text:delta 发出。
+- 空字符串 chunk（text.length === 0）不得作为 text:delta 发出。
+- finish chunk 的 runtime / usage 须写入 finalOutput，不得丢失 fallback 信息。
+- output.model / modelOutput.runtime 仍只代表 final stream（与 Stage 4 planner runtime 分区一致）。
 - workflow:finish.output.text 直接使用 completeText。
-- 完整输出为空时按既有模型输出失败语义处理，不得 finish 空成功回复。
+- 完整输出为空（trim 后）时按 model_stream_failed 失败，不得 finish 空成功回复。
+- planner runtime 写入 debugContext.toolPlanningRuntime；不得覆盖 final runtime。
 ```
 
 ### 7.5 Trace 中的流式模型步骤
@@ -410,6 +490,68 @@ step:end(step = model:stream, status = success)
 若 `WorkflowStepName` 尚未包含 `model:stream`，本阶段必须增量新增，并同步更新类型、trace recorder、Stage 2 引用与 Review。
 
 不得用 `model:generate` 标记真实流式生成。
+
+### 7.6 共享步骤 → Stream 事件双通道桥接
+
+Stage 4 的 `runWorkflowStep()` 已负责 **WorkflowTrace + CoreObserver**，但**不会**自动产出 `ChatWorkflowStreamEvent`。`stream()` 必须补齐第二通道，且两通道逐步对齐：
+
+```txt
+runWorkflowStep 内部（已有）
+→ recorder.start / end
+→ emitWorkflowStep → CoreObserver workflow:step
+
+stream() 路径（本阶段新增）
+→ WorkflowStreamEmitter.emitStepStart / emitStepEnd
+→ yield ChatWorkflowStreamEvent step:start / step:end
+```
+
+**推荐实现：** 为 `runWorkflowStep` 增加可选 `streamEmitter?: WorkflowStreamEmitter` 参数：
+
+```ts
+async function runWorkflowStep(options) {
+  options.streamEmitter?.emitStepStart(options.workflowStep);
+  // … 既有 trace + observer 逻辑 …
+  options.streamEmitter?.emitStepEnd(options.workflowStep, status, summary);
+}
+```
+
+规则：
+
+```txt
+- execute() 不传 streamEmitter，行为与 Stage 4 完全一致。
+- stream() 传入同一 emitter 实例，保证 workflowId 一致。
+- 每个 step:start 必须恰好对应一个 step:end；status 与 trace 最终 status 一致。
+- CoreObserver 与 Stream 是双通道：Observer 继续供日志 / 持久化；Stream 供宿主 Timeline。
+- 不得让 Demo / 宿主用 Observer workflow:step 冒充 Stream step 事件。
+- emotion:analyze trace 步骤仍覆盖 analyze + transition（与 Stage 4 一致）。
+```
+
+### 7.7 tool:call / tool:result 发射规则
+
+当前代码仅有 Observer 的 `tool:execute:start/end`，**尚无** Stream 的 `tool:call` / `tool:result`。本阶段在 `stream()` 的工具执行循环中补齐：
+
+```txt
+step:start(tool:execute)
+↓
+对每个 planned call:
+  emit tool:call
+  execute via ToolRegistry
+  emit tool:result
+↓
+step:end(tool:execute)
+↓
+（之后才允许 model:stream / text:delta）
+```
+
+规则：
+
+```txt
+- tool:call / tool:result 只出现在 stream() 路径；execute() 不强制 emit（保持 Stage 4 行为）。
+- 事件顺序：同一 call 必须先 call 后 result；多个 call 按执行顺序排列。
+- tool:result.result 使用 Core ToolResult（Wire 映射留给 Stage 7）。
+- plan.type !== tool_calls 时：仍 emit tool:execute step（status = skipped），不 emit tool:call/result。
+- 工具执行不可恢复失败 → step:end(failed) → workflow:error(code = tool_execution_failed)。
+```
 
 ---
 
@@ -438,7 +580,14 @@ workflow:error
 结束
 ```
 
-不得发送 `text:delta` 或 `workflow:finish`。
+不得发送 `text:delta` 或 `workflow:finish`。`workflow:error` 时推荐错误码：
+
+```txt
+Input Safety 拒绝       → input_safety_rejected, step = safety:input
+Tool 规划失败（mandatory）→ tool_planning_failed, step = tool:plan
+Tool 执行不可恢复失败   → tool_execution_failed, step = tool:execute
+无 streaming 能力       → model_stream_failed, step = model:stream
+```
 
 ### 8.2 已输出文本后的部分失败
 
@@ -451,7 +600,7 @@ workflow:error
 ↓
 model:stream step:end(status = failed)
 ↓
-workflow:error
+workflow:error(code = model_stream_failed, step = model:stream)
 ↓
 结束
 ```
@@ -462,7 +611,7 @@ workflow:error
 - 不发送 workflow:finish。
 - 不切换模型继续拼接文本。
 - 不把已输出文本包装成正常完成。
-- 错误必须表达 partial failure 语义。
+- 错误必须表达 partial failure 语义；details 可标记 partialOutput = true。
 ```
 
 ### 8.3 Output Safety 拒绝
@@ -514,6 +663,22 @@ workflow:finish
 
 `workflow:finish.output.text` 仍必须严格等于 delta 拼接结果。
 
+### 8.5 SafeWorkflowError.code 映射（Stage 5 必用）
+
+沿用 Stage 2 冻结枚举，本阶段至少覆盖：
+
+| 场景                                                    | code                            | step（建议）    |
+| ------------------------------------------------------- | ------------------------------- | --------------- |
+| Workflow 未实现 stream                                  | `workflow_stream_not_supported` | —               |
+| Input Safety 拒绝                                       | `input_safety_rejected`         | `safety:input`  |
+| Output Safety 拒绝                                      | `output_safety_rejected`        | `safety:output` |
+| 模型流失败（含空回复、首个 delta 前失败、已输出后中断） | `model_stream_failed`           | `model:stream`  |
+| Tool 规划不可恢复失败                                   | `tool_planning_failed`          | `tool:plan`     |
+| Tool 执行不可恢复失败                                   | `tool_execution_failed`         | `tool:execute`  |
+| 其他未分类工作流失败                                    | `workflow_failed`               | 当前步骤        |
+
+`post_process_failed` 保留给未来 mandatory 后置 Provider；V1.1 的 Summary / Memory / Emotion 默认可降级，不得滥用此 code 终止 finish。
+
 ---
 
 ## 九、实施任务
@@ -539,17 +704,19 @@ workflow:finish
 - execute 与 stream 的模型步骤在 Trace 中可区分。
 ```
 
-### 09-02：实现流事件发射辅助
+### 09-02：实现 WorkflowStreamEmitter 与步骤桥接
 
-目标：避免手写事件造成 workflowId、timestamp、终止语义漂移。
+目标：避免手写事件造成 workflowId、timestamp、终止语义漂移；并让共享步骤同时产出 Stream 事件。
 
 任务：
 
 ```txt
-1. 创建内部 stream event emitter / helper。
-2. 统一 workflowId、timestamp、SafeWorkflowError。
-3. 保证终止事件最多一次。
-4. 与 Stage 4 trace recorder 协作，不复制 trace 状态。
+1. 创建 workflow-stream-emitter.ts（或等价 helper）。
+2. 提供 emitWorkflowStart / emitStepStart / emitStepEnd / emitTextDelta /
+   emitToolCall / emitToolResult / emitFinish / emitError。
+3. 统一 workflowId、timestamp、SafeWorkflowError；终止后禁止再 emit。
+4. 为 runWorkflowStep 增加可选 streamEmitter 参数（见 §7.6）。
+5. 与 Stage 4 trace recorder 协作：step:end.status 与 recorder.end 保持一致，不复制 trace 状态。
 ```
 
 完成标准：
@@ -557,6 +724,7 @@ workflow:finish
 ```txt
 - 所有事件 workflowId 一致。
 - 终止后不可再 emit。
+- execute() 不传 emitter 时零行为变化。
 - helper 不依赖 HTTP、NDJSON、React 或 Demo。
 ```
 
@@ -567,15 +735,16 @@ workflow:finish
 任务：
 
 ```txt
-1. 初始化 WorkflowExecutionState。
+1. 初始化 WorkflowExecutionState 与 WorkflowStreamEmitter。
 2. 发出 workflow:start。
-3. 执行共享步骤：Persona、Safety、Summary、Memory、Emotion、Tool List、Prompt、Tool Plan、Tool Execute。
-4. 调用 final model.stream()。
-5. 累积 completeText 并逐 chunk 发 text:delta。
-6. 流后执行 Output Safety。
-7. 执行 Summary / Memory 写回。
-8. 构建完整 ChatWorkflowOutput。
-9. 成功时发 workflow:finish，失败时发 workflow:error。
+3. 带 streamEmitter 执行共享步骤：Persona、Safety、Summary、Memory、Emotion、
+   Tool List、Prompt、Tool Plan。
+4. 执行 Tool Execute：在 stream 路径 emit tool:call / tool:result（§7.7）。
+5. 实现 runFinalStreamStep（workflowStep = model:stream）：
+   调用 final model.stream()，累积 completeText，emit text:delta，回填 finalOutput（§7.4）。
+6. 带 streamEmitter 执行 Output Safety、Summary / Memory 写回。
+7. 调用 buildWorkflowOutput(state) 构建 ChatWorkflowOutput。
+8. 成功时 emit workflow:finish；失败时 emit workflow:error（§8.5）。
 ```
 
 关键约束：
@@ -584,20 +753,22 @@ workflow:finish
 - 不调用 execute()。
 - 不复制 Stage 4 步骤业务逻辑。
 - final stream 不传 tools。
-- planner runtime 与 final runtime 分区记录。
+- planner runtime 与 final runtime 分区记录（debugContext / modelOutput）。
+- CoreObserver 旁路事件仍由共享步骤 emit，不得省略。
 ```
 
-### 09-04：实现 CompanionCore.streamWorkflow() 收口
+### 09-04：回归 CompanionCore.streamWorkflow()
 
-目标：为宿主提供稳定门面。
+目标：确认 Stage 2 门面在 SimpleChatWorkflow.stream() 落地后仍正确。
 
 任务：
 
 ```txt
-1. 检查 workflow.stream 是否存在。
-2. 存在则委托。
-3. 不存在则按 Stage 2 返回 workflow_stream_not_supported 事件流。
-4. 不影响 executeWorkflow()。
+1. 确认 workflow.stream 存在时委托其 AsyncIterable。
+2. 确认未实现 stream 的 Workflow 仍返回 workflow_stream_not_supported。
+3. 确认 stream 未发送终止事件时 CompanionCore 补发 workflow_failed。
+4. 确认 executeWorkflow() 行为未回归。
+5. 仅在有行为偏差时修改 companion-core.ts；无偏差则 Review 记录“已验证”即可。
 ```
 
 ### 09-05：Core 级人工验证入口
@@ -616,19 +787,21 @@ workflow:finish
 
 ```txt
 workflow:start
-step:start / step:end
+step:start / step:end（与 trace 对齐）
+tool:call / tool:result（如有工具）
 text:delta
 workflow:finish / workflow:error
-final output.text
+final output.text 与 delta 拼接一致
 trace status
-runtime / effective profile
+planner runtime 与 final runtime 分区可见
+CoreObserver 旁路事件仍可收到（与 Stream 独立）
 ```
 
 ---
 
 ## 十、人工验收场景
 
-不要求新增单元测试或 e2e 测试，但必须完成以下人工验证，并在 `.code-reviews/v1.1/5-{sha}/` 记录命令、关键输出、结论与已知限制。
+不要求新增单元测试或 e2e 测试，但必须完成以下 **12 个**人工验证场景，并在 `.code-reviews/v1.1/5-{sha}/` 记录命令、关键输出、结论与已知限制。
 
 ### 场景 1：无工具正常流
 
@@ -637,7 +810,7 @@ runtime / effective profile
 预期：
 - workflow:start。
 - 前置步骤顺序正确。
-- Tool Plan = no_tool 或 no_tools。
+- Tool Plan：type = no_tool（未注册工具时 reason = no_tools）。
 - 至少收到两个非空 text:delta。
 - 收到 workflow:finish。
 - output.text 与 delta 拼接严格一致。
@@ -648,7 +821,7 @@ runtime / effective profile
 ```txt
 输入：注册可验证工具，发送明确需要工具的问题。
 预期：
-- Tool Plan = tool_calls。
+- Tool Plan：type = tool_calls。
 - tool:call 在对应 tool:result 前。
 - 所有工具完成前无 text:delta。
 - final stream 基于工具结果生成回复。
@@ -659,7 +832,7 @@ runtime / effective profile
 
 ```txt
 预期：
-- Tool Plan = no_tool。
+- Tool Plan：type = no_tool。
 - 无 tool:call / tool:result。
 - 直接进入 model.stream()。
 ```
@@ -671,7 +844,7 @@ runtime / effective profile
 预期：
 - 无 text:delta。
 - 不回退 generate()。
-- workflow:error。
+- workflow:error(code = model_stream_failed)。
 - 无 workflow:finish。
 ```
 
@@ -690,8 +863,8 @@ runtime / effective profile
 输入：测试模型先吐出至少一个 chunk 再抛错。
 预期：
 - 已收到 text:delta。
-- model:stream failed。
-- workflow:error。
+- model:stream step:end(failed)。
+- workflow:error(code = model_stream_failed, step = model:stream)。
 - 无 workflow:finish。
 - 不尝试换模型续写。
 ```
@@ -703,7 +876,7 @@ runtime / effective profile
 预期：
 - 正常收到 text:delta。
 - safety:output failed。
-- workflow:error。
+- workflow:error(code = output_safety_rejected)。
 - 无 workflow:finish。
 - 无替代安全回复。
 ```
@@ -733,6 +906,37 @@ workflow:error(code = workflow_stream_not_supported)
 并验证 executeWorkflow() 仍正常。
 ```
 
+### 场景 10：Input Safety 拒绝
+
+```txt
+输入：SafetyProvider 拒绝用户输入。
+预期：
+- workflow:start 后执行至 safety:input failed。
+- 无 text:delta。
+- workflow:error(code = input_safety_rejected, step = safety:input)。
+- 无 Tool Plan / model:stream / 写回步骤。
+```
+
+### 场景 11：Tool Planning 降级仍正常流式
+
+```txt
+输入：注册工具但模型 toolCalling = false，或 planner 返回 type = no_tool + reason = tool_calling_unavailable。
+预期：
+- 无 tool:call / tool:result。
+- 仍进入 model.stream() 并 workflow:finish。
+- debugContext 记录规划降级 reason；final runtime 独立于 planner runtime。
+```
+
+### 场景 12：Planner 与 Final Runtime 分区
+
+```txt
+输入：工具规划与最终回答使用同一 ChatModel，且 final stream 触发 fallback。
+预期：
+- debugContext / trace 可区分 planner runtime 与 final stream runtime。
+- output.model / modelOutput.runtime 只反映 final stream。
+- workflow:finish.output.text 与 delta 拼接一致。
+```
+
 ---
 
 ## 十一、检查清单
@@ -748,35 +952,44 @@ workflow:error(code = workflow_stream_not_supported)
 
 ### 工作流复用
 
-- [ ] stream() 使用 Stage 4 共享步骤。
+- [ ] stream() 使用 Stage 4 共享步骤，并通过 streamEmitter 桥接 step 事件（§7.6）。
 - [ ] 不复制 Persona / Memory / Emotion / Tool / Writeback 逻辑。
 - [ ] 不通过 stream() 反向实现 execute()。
 - [ ] 不通过 execute() 伪造 stream()。
+- [ ] execute() 不传 streamEmitter 时行为与 Stage 4 完全一致。
 
 ### 模型与工具
 
-- [ ] 最终回答只使用 `ChatModel.stream()`。
+- [ ] 最终回答只使用 `ChatModel.stream()`（runFinalStreamStep / model:stream）。
 - [ ] stream 调用要求 `streaming: true`。
 - [ ] final stream 不传 tools。
 - [ ] Tool Plan 与 final response 分离。
 - [ ] 工具完成前无 text:delta。
-- [ ] final runtime 显示实际生效模型档案。
+- [ ] stream 路径正确 emit tool:call / tool:result（§7.7）。
+- [ ] finalOutput 从 stream 回填，buildWorkflowOutput 与 execute 结构一致。
+- [ ] planner runtime 与 final runtime 分区记录。
+
+### 可观测性
+
+- [ ] CoreObserver 旁路事件在 stream() 期间仍 emit。
+- [ ] Observer 与 Stream 未共用同一 UI handler。
 
 ### 错误与降级
 
 - [ ] delta 拼接等于 `workflow:finish.output.text`。
 - [ ] 空字符串 delta 不发，空白 delta 不 trim。
 - [ ] 流前失败无 delta、无 finish。
-- [ ] 已输出后失败为 partial failure、无 finish。
-- [ ] Output Safety 拒绝为 workflow:error。
+- [ ] 已输出后失败为 partial failure（model_stream_failed）、无 finish。
+- [ ] Output Safety 拒绝为 output_safety_rejected。
 - [ ] Summary / Memory 写回失败可降级 finish。
+- [ ] SafeWorkflowError.code 符合 §8.5 映射。
 
 ### 质量与 Review
 
 - [ ] ai-core typecheck 通过。
 - [ ] ai-core lint 通过。
 - [ ] ai-core build 通过。
-- [ ] 已完成 9 个关键人工验收场景。
+- [ ] 已完成 12 个关键人工验收场景。
 - [ ] 已新增 Stage 5 Review 记录。
 
 ---
