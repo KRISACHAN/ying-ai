@@ -46,7 +46,7 @@ export class OllamaChatModel implements ChatModel {
   private readonly options: NormalizedOllamaChatModelOptions;
   private readonly client: OllamaClient;
 
-  public constructor(options: OllamaChatModelOptions) {
+  public constructor(options: OllamaChatModelOptions, client?: OllamaClient) {
     this.options = normalizeOllamaOptions(options);
     this.primaryProfile = createModelProfile(
       this.options.model,
@@ -60,7 +60,7 @@ export class OllamaChatModel implements ChatModel {
       );
     }
 
-    this.client = new Ollama({ host: this.options.host });
+    this.client = client ?? new Ollama({ host: this.options.host });
   }
 
   public async generate(input: GenerateInput): Promise<GenerateOutput> {

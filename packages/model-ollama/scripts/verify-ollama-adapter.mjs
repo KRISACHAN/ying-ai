@@ -2,15 +2,13 @@
 
 import {
   ModelCapabilityUnavailableError,
+  ModelRuntimeError,
   createCompanionCore,
   EmptyToolRegistry,
 } from "@ying-companion/ai-core";
-import {
-  createOllamaChatModel,
-  toModelToolCalls,
-  toOllamaMessages,
-  toOllamaTools,
-} from "../dist/index.js";
+import { createOllamaChatModel, OllamaChatModel } from "../dist/index.js";
+import { toOllamaMessages } from "../dist/ollama-message-mapper.js";
+import { toModelToolCalls, toOllamaTools } from "../dist/ollama-tool-mapper.js";
 
 const safeSummary = {};
 
@@ -118,6 +116,80 @@ try {
   record("streamCapabilitySkipCount", error.capabilitySkips.length);
 }
 
+const fallbackCalls = [];
+const fallbackModel = new OllamaChatModel(
+  {
+    model: "missing-primary",
+    fallback: { model: "working-fallback" },
+  },
+  {
+    async chat(request) {
+      fallbackCalls.push(request.model);
+
+      if (request.model === "missing-primary") {
+        throw new Error("model not found");
+      }
+
+      return createChatResponse(request.model, "fallback-ok");
+    },
+  },
+);
+const fallbackOutput = await fallbackModel.generate({
+  messages: [{ role: "user", content: "hello" }],
+});
+assert(fallbackOutput.model === "working-fallback", "fallback model mismatch");
+assert(fallbackOutput.runtime?.fallbackUsed === true, "fallback runtime mismatch");
+assert(fallbackOutput.runtime?.primaryAttempts === 1, "primary attempt count mismatch");
+assert(fallbackOutput.runtime?.fallbackAttempts === 1, "fallback attempt count mismatch");
+assert(fallbackOutput.runtime?.errors.length === 1, "fallback should keep primary error");
+record("fallbackGenerate", {
+  calls: fallbackCalls,
+  usedModel: fallbackOutput.model,
+  fallbackUsed: fallbackOutput.runtime?.fallbackUsed,
+});
+
+const midStreamCalls = [];
+const midStreamModel = new OllamaChatModel(
+  {
+    model: "stream-primary",
+    fallback: { model: "stream-fallback" },
+  },
+  {
+    async chat(request) {
+      midStreamCalls.push(request.model);
+
+      if (request.stream === true) {
+        return createFailingStream(request.model);
+      }
+
+      return createChatResponse(request.model, "not-used");
+    },
+  },
+);
+let partialText = "";
+
+try {
+  for await (const chunk of midStreamModel.stream({
+    messages: [{ role: "user", content: "hello" }],
+  })) {
+    partialText += chunk.text;
+  }
+
+  throw new Error("Expected mid-stream failure.");
+} catch (error) {
+  assert(error instanceof ModelRuntimeError, "mid-stream failure should use ModelRuntimeError");
+  assert(partialText === "partial", "mid-stream should expose partial text once");
+  assert(
+    midStreamCalls.length === 1 && midStreamCalls[0] === "stream-primary",
+    "mid-stream failure must not call fallback",
+  );
+  record("midStreamFailure", {
+    calls: midStreamCalls,
+    partialTextLength: partialText.length,
+    errorCount: error.errors.length,
+  });
+}
+
 const verifyModel = process.env.OLLAMA_VERIFY_MODEL;
 
 if (verifyModel !== undefined && verifyModel.trim() !== "") {
@@ -161,3 +233,27 @@ if (verifyModel !== undefined && verifyModel.trim() !== "") {
 }
 
 console.log(JSON.stringify(safeSummary, null, 2));
+
+function createChatResponse(model, content) {
+  return {
+    model,
+    created_at: new Date(),
+    message: {
+      role: "assistant",
+      content,
+    },
+    done: true,
+    done_reason: "stop",
+    total_duration: 0,
+    load_duration: 0,
+    prompt_eval_count: 1,
+    prompt_eval_duration: 0,
+    eval_count: 1,
+    eval_duration: 0,
+  };
+}
+
+async function* createFailingStream(model) {
+  yield createChatResponse(model, "partial");
+  throw new Error("stream interrupted");
+}

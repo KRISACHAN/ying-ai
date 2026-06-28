@@ -14,7 +14,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "verify:adapter": "node scripts/verify-ollama-adapter.mjs",
+    "verify:adapter": "pnpm build && node scripts/verify-ollama-adapter.mjs",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
