@@ -189,7 +189,9 @@ http://127.0.0.1:11434
 - 工具调用返回值能够映射为 `ModelToolCall[]`，但模型声明不支持 tool calling 时不得传入 `tools`；
 - `raw` 只在 Core 内部保留为调试字段，不得假定可 JSON 序列化；
 - 运行时信息必须统一返回 `ModelRuntimeInfo`，包括最终使用模型、retry、fallback、错误与能力跳过；
-- Stage 6 不实现 Demo UI、HTTP Route、NDJSON 消费、环境变量表单与 Provider 下拉框；这些属于 Stage 7；
+- Stage 6 不实现 Demo UI、HTTP Route、NDJSON 消费、环境变量表单与 Provider 下拉框；这些属于 Stage 7（总计划中的「Demo 可切换 Provider」在 Stage 7 验收，Stage 6 仅用最小脚本证明 Core 可注入）；
+- `OllamaChatModel` 实现 `CoreProvider.meta`，稳定 `id` 为 `model.ollama`；
+- `stream()` 入口自动 merge `requiredCapabilities.streaming = true`，与 OpenAI-compatible Adapter 行为一致；
 - Stage 6 不实现 Ollama Embedding Provider；现有 RAG EmbeddingProvider 保持独立；
 - `packages/model-ollama`、`packages/ai-core` 与 Demo 受影响引用的 typecheck、lint、build 通过；
 - 至少完成本文件定义的人工验收，并将结果归档到 `.code-reviews/v1.1/`。
@@ -377,6 +379,12 @@ export interface OllamaFallbackModelOptions {
 }
 
 export class OllamaChatModel implements ChatModel {
+  readonly meta = {
+    id: "model.ollama",
+    kind: "model",
+    name: "Ollama Chat Model",
+  } as const;
+
   readonly primaryProfile: ModelProfile;
   readonly fallbackProfile?: ModelProfile;
 
@@ -384,9 +392,8 @@ export class OllamaChatModel implements ChatModel {
   stream(input: GenerateInput): AsyncIterable<GenerateStreamChunk>;
 }
 
-export function createOllamaChatModel(
-  options: OllamaChatModelOptions,
-): ChatModel;
+/** 推荐宿主使用的唯一工厂入口；避免直接 new 实现类。 */
+export function createOllamaChatModel(options: OllamaChatModelOptions): ChatModel;
 ```
 
 说明：
@@ -398,6 +405,9 @@ export function createOllamaChatModel(
 - host 只是 Adapter 配置，不进入 ai-core，也不应在 Core runtime 中被展示为业务字段。
 - provider 与 model 由实际 Adapter options 推导，不能由 profile override 伪造。
 - profile override 只能覆盖 capabilities 字段，沿用 Stage 3 的 ModelProfileOverride 约束。
+- maxRetries 默认 0（与 OpenAI-compatible Adapter 的 primaryMaxRetries / fallbackMaxRetries 默认一致）；primary 与 fallback 共用同一 maxRetries 配置，是有意简化，不要求与 OpenAI 的 retry 结构字段对齐。
+- retryDelayMs 默认由实现固定并写入 package README（建议 300ms 量级，与 OpenAI Adapter 退避同一数量级即可）。
+- 公开 API 以 createOllamaChatModel() 为主；OllamaChatModel 类可导出供类型标注，但不鼓励宿主绕过工厂直接构造。
 ```
 
 ### 6.4 默认模型档案
@@ -419,7 +429,7 @@ const primaryProfile: ModelProfile = {
 然后再合并：
 
 ```ts
-primaryProfileOverride?.capabilities
+primaryProfileOverride?.capabilities;
 ```
 
 默认策略必须明确：
@@ -602,22 +612,49 @@ input.tools 非空
 
 ### 8.3 Core 工具定义映射
 
-Core 的 `tools` 当前是 Adapter 适配前的抽象对象：
+Core 的 `tools` 在 Workflow 侧经 `toModelTools()` 适配后，传入 Adapter 的实际形状是 **AI SDK dynamic ToolSet**，不是裸 `ToolDefinition[]`：
 
 ```ts
-tools?: Record<string, unknown>;
+// packages/ai-core/src/implementations/tool/tool-adapter.ts
+tools?: Record<string, {
+  type: "dynamic";
+  description?: string;
+  inputSchema: { jsonSchema: Record<string, unknown> }; // jsonSchema() 包装
+  metadata?: Record<string, string | number | boolean | null>;
+}>;
 ```
 
-本阶段不得在 Ollama Adapter 内重新定义全局 Tool Schema。
+OpenAI-compatible Adapter 直接 `as ToolSet` 透传；Ollama Adapter **不得**假设这是 Ollama 原生 Tool[]，必须在 `ollama-tool-mapper.ts` 中显式转换。
+
+推荐映射规则（以锁定版本的 Ollama SDK 类型为最终依据）：
+
+```txt
+Record key（工具名）
+→ Ollama tool.function.name
+
+entry.description
+→ Ollama tool.function.description（缺失时可省略，不得伪造）
+
+entry.inputSchema.jsonSchema
+→ Ollama tool.function.parameters（保留 JSON Schema 对象语义）
+
+entry.metadata / entry.type
+→ 不传给 Ollama；仅供 Core 调试
+```
+
+推荐单点函数：
+
+```ts
+function toOllamaTools(tools: Record<string, unknown> | undefined): OllamaTool[] | undefined;
+```
 
 实施要求：
 
 ```txt
-- 先识别 Stage 3 DefaultToolPlanningProvider / 现有 OpenAI-compatible Adapter 的工具输入具体形状；
-- 将同一抽象工具定义映射为 SDK 当前版本接受的 Ollama Tool[]；
-- 参数 schema 必须保留 JSON Schema 语义；
-- 禁止将 tool 参数 schema stringify 成 prompt 文本作为替代；
-- 无法映射的工具定义必须在规划调用前明确失败或降级，不能静默让模型忽略。
+- 06-03 动手前，先用最小脚本打印一次真实 input.tools 结构，对照锁定 ollama 版本的 Tool 类型；
+- 参数 schema 必须保留 JSON Schema 语义；禁止 stringify 成 prompt 文本替代；
+- 无法识别 shape（缺 name / 缺 parameters）必须在规划调用前明确失败，不能静默忽略；
+- 不在 Ollama Adapter 内重新定义全局 ToolDefinition schema。
 ```
 
 ### 8.4 ModelToolCall 映射
@@ -678,7 +715,7 @@ Ollama Adapter 的候选集合固定为：
 每次调用必须根据：
 
 ```ts
-input.requiredCapabilities
+input.requiredCapabilities;
 ```
 
 先筛选候选，再发起网络请求。
@@ -724,6 +761,16 @@ requiredCapabilities.usage = true
 
 ### 9.3 generate() 重试与 fallback
 
+默认值（与 OpenAI-compatible Adapter 对齐）：
+
+```txt
+maxRetries
+→ 未传时 = 0（即每个候选最多 1 次初始调用，无额外重试）
+
+retryDelayMs
+→ 未传时由实现固定（建议 300ms）；仅在同候选重试之间 sleep，切换 fallback 前不必额外退避
+```
+
 `generate()` 应遵循：
 
 ```txt
@@ -760,6 +807,17 @@ capabilitySkips
 ```
 
 ### 9.4 stream() 的 retry / fallback 边界
+
+`stream()` 入口必须与 OpenAI-compatible Adapter 一样，自动 merge 能力约束：
+
+```ts
+const requiredCapabilities = {
+  ...input.requiredCapabilities,
+  streaming: true,
+};
+```
+
+这样调用方即使未显式传 `requiredCapabilities.streaming`，也不会因 profile 筛选遗漏而误走 capability unavailable；同时仍禁止 `streaming=false` 的候选参与 stream 调用。
 
 `stream()` 必须严格区分“首个可见文本前”和“首个可见文本后”。
 
@@ -850,10 +908,7 @@ const response = await client.chat({
 ### 10.2 输出映射
 
 ```ts
-function toGenerateOutput(
-  response: OllamaChatResponse,
-  runtime: ModelRuntimeInfo,
-): GenerateOutput {
+function toGenerateOutput(response: OllamaChatResponse, runtime: ModelRuntimeInfo): GenerateOutput {
   return {
     text: response.message.content ?? "",
     model: runtime.usedModel,
@@ -881,12 +936,14 @@ function toGenerateOutput(
 
 ### 11.1 调用形式
 
+`stream()` 实现应先构造 merge 后的 `streamInput`（见 §9.4），再按能力筛选候选。
+
 ```ts
 const response = await client.chat({
   model: candidate.profile.model,
-  messages: toOllamaMessages(input.messages),
+  messages: toOllamaMessages(streamInput.messages),
   stream: true,
-  ...mapOllamaRequestOptions(input, candidate),
+  ...mapOllamaRequestOptions(streamInput, candidate),
 });
 
 for await (const part of response) {
@@ -1143,11 +1200,13 @@ pnpm --filter @ying-companion/model-ollama build
 ```txt
 1. 定义 OllamaChatModelOptions。
 2. 定义 fallback options。
-3. 构建 provider = "ollama" 的 primaryProfile / fallbackProfile。
-4. 默认 capability：streaming=true、toolCalling=false、usage=false。
-5. 合并 profile override 的 capabilities。
-6. 实现候选选择与 capabilitySkips 归集。
-7. 复用 ai-core 的 modelProfileSatisfiesCapabilities()，不复制判断逻辑。
+3. 实现 meta = { id: "model.ollama", kind: "model", ... }。
+4. 构建 provider = "ollama" 的 primaryProfile / fallbackProfile。
+5. 默认 capability：streaming=true、toolCalling=false、usage=false。
+6. 合并 profile override 的 capabilities。
+7. 固定 maxRetries 默认 0、retryDelayMs 默认值。
+8. 实现候选选择与 capabilitySkips 归集。
+9. 复用 ai-core 的 modelProfileSatisfiesCapabilities()，不复制判断逻辑。
 ```
 
 #### 完成标准
@@ -1196,10 +1255,11 @@ pnpm --filter @ying-companion/model-ollama build
 ```txt
 1. 实现 ChatMessage → Ollama message mapper。
 2. 实现 GenerateInput → Ollama chat options mapper。
-3. 实现 Core tool definition → Ollama tools mapper。
+3. 实现 toOllamaTools()：AI SDK dynamic ToolSet → Ollama Tool[]。
 4. 实现 Ollama tool_calls → ModelToolCall[] mapper。
 5. 实现 Ollama usage → GenerateUsage mapper。
 6. 为 unsupported message / tool shape 提供明确错误。
+7. 用最小脚本打印并归档一次真实 input.tools 样例（Review 记录，不含敏感内容）。
 ```
 
 #### 完成标准
@@ -1287,13 +1347,14 @@ pnpm --filter @ying-companion/model-ollama build
 #### 要做什么
 
 ```txt
-1. 按 required streaming 筛选候选。
-2. 调用 Ollama chat(stream=true)。
-3. 逐 part 映射为 GenerateStreamChunk。
-4. 首个可见文本前允许 retry / fallback。
-5. 首个可见文本后异常直接上抛。
-6. 在 finish chunk 尽力附加 runtime / usage。
-7. 不传 tools 的 final stream 不实现工具循环。
+1. 入口 merge requiredCapabilities.streaming = true。
+2. 按 required streaming 筛选候选。
+3. 调用 Ollama chat(stream=true)。
+4. 逐 part 映射为 GenerateStreamChunk。
+5. 首个可见文本前允许 retry / fallback。
+6. 首个可见文本后异常直接上抛。
+7. 在 finish chunk 尽力附加 runtime / usage。
+8. 不传 tools 的 final stream 不实现工具循环。
 ```
 
 #### 完成标准
@@ -1465,6 +1526,7 @@ Existing EmbeddingProvider
 ### 17.2 Profile 与能力
 
 ```txt
+[ ] OllamaChatModel.meta.id === "model.ollama"。
 [ ] primaryProfile.provider === "ollama"。
 [ ] primaryProfile.model 是实际配置模型名。
 [ ] fallbackProfile（如有）是实际 fallback 模型名。
@@ -1472,6 +1534,8 @@ Existing EmbeddingProvider
 [ ] 宿主 override 可为具体模型开启 toolCalling。
 [ ] requiredCapabilities 不满足时有 capabilitySkips。
 [ ] 不能满足时不发起请求。
+[ ] maxRetries 未传时默认为 0。
+[ ] stream() 未传 requiredCapabilities 时仍可正常流式（自动 merge streaming: true）。
 ```
 
 ### 17.3 generate
@@ -1501,9 +1565,11 @@ Existing EmbeddingProvider
 ```txt
 [ ] toolCalling=false 时，不向 Ollama 发送 tools。
 [ ] toolCalling=true 时，工具规划调用可映射 tools。
+[ ] AI SDK dynamic ToolSet → Ollama Tool[] 映射在 ollama-tool-mapper.ts 单点维护。
 [ ] tool calls 保持 name / arguments 结构。
 [ ] final stream 不传 tools。
 [ ] Adapter 不执行工具。
+[ ] 工具调用验收使用 primaryProfileOverride.toolCalling=true + 本地确实支持 tools 的模型；默认 profile 不强制通过工具验收。
 ```
 
 ### 17.6 Core 集成
