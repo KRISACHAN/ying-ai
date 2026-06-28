@@ -883,12 +883,15 @@ async function runFinalStreamStep(
           emittedDelta = true;
           streamEmitter.emitTextDelta(chunk);
         }
-      } catch {
+      } catch (error) {
         throw createSafeWorkflowError({
           code: "model_stream_failed",
           step: "model:stream",
           message: "Model stream failed.",
-          details: emittedDelta ? { partialOutput: true } : undefined,
+          details: {
+            reason: toSafeMessage(error),
+            ...(emittedDelta ? { partialOutput: true } : {}),
+          },
         });
       }
 
@@ -897,6 +900,7 @@ async function runFinalStreamStep(
           code: "model_stream_failed",
           step: "model:stream",
           message: "Model stream produced no usable text.",
+          details: emittedDelta ? { partialOutput: true } : undefined,
         });
       }
 
@@ -1353,7 +1357,16 @@ async function runWorkflowStep<TResult>(
 
     return result;
   } catch (error) {
-    const safeError = toTraceError(error);
+    const workflowError =
+      options.workflowStep === "tool:execute" && normalizeSafeWorkflowError(error) === null
+        ? createSafeWorkflowError({
+            code: "tool_execution_failed",
+            step: "tool:execute",
+            message: "Tool execution failed.",
+            details: { reason: toSafeMessage(error) },
+          })
+        : error;
+    const safeError = toTraceError(workflowError);
     const traceStep = options.recorder.end(active, "failed", { error: safeError });
     options.streamEmitter?.emitStepEnd(options.workflowStep, "failed", {
       error: safeError,
@@ -1369,7 +1382,7 @@ async function runWorkflowStep<TResult>(
       error: safeError,
     });
 
-    throw error;
+    throw workflowError;
   }
 }
 
@@ -1458,13 +1471,43 @@ async function executeToolCalls(options: ExecuteToolCallsOptions): Promise<ToolR
           },
         });
 
-        const result = hasInvalidJsonArguments(modelToolCall, coreCall)
-          ? createInvalidArgumentsResult(modelToolCall)
-          : await options.tools.execute({
+        let result: ToolResult;
+
+        if (hasInvalidJsonArguments(modelToolCall, coreCall)) {
+          result = createInvalidArgumentsResult(modelToolCall);
+        } else {
+          try {
+            result = await options.tools.execute({
               call: coreCall,
               ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
               ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
             });
+          } catch (error) {
+            result = createToolExecutionFailedResult(modelToolCall, error);
+
+            await safeEmit(options.observer, {
+              type: "tool:execute:end",
+              timestamp: new Date(),
+              payload: {
+                sessionId: options.sessionId,
+                toolCallId: result.toolCallId,
+                name: result.name,
+                ok: false,
+                result: result.result,
+                error: result.error,
+              },
+            });
+
+            options.streamEmitter?.emitToolResult(result);
+
+            throw createSafeWorkflowError({
+              code: "tool_execution_failed",
+              step: "tool:execute",
+              message: "Tool execution failed.",
+              details: { reason: toSafeMessage(error) },
+            });
+          }
+        }
 
         await safeEmit(options.observer, {
           type: "tool:execute:end",
@@ -1518,6 +1561,19 @@ function createInvalidArgumentsResult(modelToolCall: ModelToolCall): ToolResult 
     },
     metadata: {
       rawArguments: modelToolCall.arguments,
+    },
+  };
+}
+
+function createToolExecutionFailedResult(modelToolCall: ModelToolCall, error: unknown): ToolResult {
+  return {
+    name: modelToolCall.name,
+    ...(modelToolCall.id !== undefined ? { toolCallId: modelToolCall.id } : {}),
+    ok: false,
+    result: null,
+    error: {
+      code: "TOOL_EXECUTION_FAILED",
+      message: toSafeMessage(error),
     },
   };
 }
