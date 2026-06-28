@@ -9,6 +9,7 @@ export type WorkflowStepName =
   | "tool:plan"
   | "prompt:build"
   | "model:generate"
+  | "model:stream"
   | "model:follow-up-generate"
   | "tool:execute"
   | "safety:output"

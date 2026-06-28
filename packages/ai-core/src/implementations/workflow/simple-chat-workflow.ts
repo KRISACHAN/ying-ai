@@ -10,6 +10,7 @@ import type { EmotionState } from "../../abstractions/emotion";
 import type {
   ChatMessage,
   GenerateOutput,
+  GenerateStreamChunk,
   ModelRuntimeInfo,
   ModelToolCall,
 } from "../../abstractions/model";
@@ -41,6 +42,11 @@ import type {
   ChatWorkflowOutput,
 } from "../../abstractions/workflow";
 import type {
+  ChatWorkflowStreamEvent,
+  SafeWorkflowError,
+  SafeWorkflowErrorCode,
+} from "../../abstractions/workflow-stream";
+import type {
   WorkflowErrorEventPayload,
   WorkflowStepEventPayload,
   WorkflowStepName,
@@ -55,6 +61,7 @@ import { splitForSummary, trimRecentHistory } from "../summary/history-utils";
 import { formatSummaryForPrompt } from "../summary/prompt-formatter";
 import { DefaultToolPlanningProvider } from "../tool-planning/default-tool-planning-provider";
 import { buildToolFollowUpMessages, toCoreToolCall, toModelTools } from "../tool/tool-adapter";
+import { WorkflowStreamEmitter } from "./workflow-stream-emitter";
 import { WorkflowTraceRecorder } from "./workflow-trace-recorder";
 
 /** 未传 summaryOptions.recentMessageLimit 时的默认值。 */
@@ -222,6 +229,99 @@ export class SimpleChatWorkflow implements ChatWorkflow {
     }
   }
 
+  /** 输出工作流级真实流式事件；业务步骤复用 execute() 的共享步骤。 */
+  public async *stream(
+    input: ChatWorkflowInput,
+    context: ChatWorkflowExecutionContext,
+  ): AsyncIterable<ChatWorkflowStreamEvent> {
+    const state = createWorkflowExecutionState(input);
+    const emitter = new WorkflowStreamEmitter(state.recorder.workflowId);
+    const producer = this.runStreamProducer(input, context, state, emitter).catch((error) => {
+      emitter.fail(error);
+    });
+
+    for await (const event of emitter.events()) {
+      yield event;
+    }
+
+    await producer;
+  }
+
+  private async runStreamProducer(
+    input: ChatWorkflowInput,
+    context: ChatWorkflowExecutionContext,
+    state: WorkflowExecutionState,
+    streamEmitter: WorkflowStreamEmitter,
+  ): Promise<void> {
+    const { observer } = context.core;
+    const sessionId = input.sessionId;
+
+    streamEmitter.emitWorkflowStart();
+    await safeEmit(observer, {
+      type: "workflow:start",
+      timestamp: new Date(),
+      payload: { sessionId, workflowId: state.recorder.workflowId },
+    });
+
+    try {
+      if (typeof input.message !== "string" || input.message.trim() === "") {
+        throw createSafeWorkflowError({
+          code: "workflow_failed",
+          message: "ChatWorkflowInput.message is required",
+        });
+      }
+
+      await runPersonaStep(state, context, streamEmitter);
+      await runInputSafetyStep(state, context, streamEmitter);
+      await runSummaryLoadStep(state, context, streamEmitter);
+      await runMemoryRecallStep(state, context, streamEmitter);
+      await runEmotionStep(state, context, streamEmitter);
+      await runToolListStep(state, context, streamEmitter);
+      await runPromptBuildStep(state, context, streamEmitter);
+      await runToolPlanningStep(state, context, this.resolveToolPlanningProvider(), streamEmitter);
+      await runToolExecuteStep(state, context, streamEmitter);
+      await runFinalStreamStep(state, context, streamEmitter);
+      await runOutputSafetyStep(state, context, streamEmitter);
+      await runSummarySaveStep(state, context, streamEmitter);
+      await runMemoryExtractSaveStep(state, context, streamEmitter);
+
+      const output = buildWorkflowOutput(state);
+      const trace = state.recorder.snapshot();
+      const modelOutput = requireStateValue(state.generation, "generation").finalOutput;
+
+      await safeEmit(observer, {
+        type: "workflow:end",
+        timestamp: new Date(),
+        payload: {
+          sessionId,
+          workflowId: state.recorder.workflowId,
+          model: modelOutput.model,
+          textLength: output.text.length,
+          durationMs: trace.durationMs,
+          budgetExceeded: trace.budgetExceeded,
+          status: trace.status,
+        },
+      });
+
+      streamEmitter.emitFinish(output);
+    } catch (error) {
+      const safeError = toSafeWorkflowError(error);
+
+      await safeEmit(observer, {
+        type: "workflow:error",
+        timestamp: new Date(),
+        payload: {
+          workflowId: state.recorder.workflowId,
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          message: safeError.message,
+          trace: state.recorder.snapshot("failed"),
+        } satisfies WorkflowErrorEventPayload,
+      });
+
+      streamEmitter.emitError(safeError);
+    }
+  }
+
   private resolveToolPlanningProvider(): ToolPlanningProvider | null {
     if (this.toolPlanningProvider !== undefined) {
       return this.toolPlanningProvider;
@@ -266,6 +366,7 @@ function createWorkflowExecutionState(input: ChatWorkflowInput): WorkflowExecuti
 async function runPersonaStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, persona } = context.core;
   const { sessionId } = state;
@@ -273,6 +374,7 @@ async function runPersonaStep(
   state.persona = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "persona:load",
     legacyStep: "persona:load",
     ...(sessionId !== undefined ? { sessionId } : {}),
@@ -298,6 +400,7 @@ async function runPersonaStep(
 async function runInputSafetyStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, safety } = context.core;
   const { sessionId } = state;
@@ -305,6 +408,7 @@ async function runInputSafetyStep(
   state.inputSafety = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "safety:input",
     legacyStep: "safety:input",
     ...(sessionId !== undefined ? { sessionId } : {}),
@@ -331,19 +435,25 @@ async function runInputSafetyStep(
   });
 
   if (!state.inputSafety.allowed) {
-    throw new Error("Input rejected by SafetyProvider");
+    throw createSafeWorkflowError({
+      code: "input_safety_rejected",
+      step: "safety:input",
+      message: "Input rejected by SafetyProvider",
+    });
   }
 }
 
 async function runSummaryLoadStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, summary } = context.core;
 
   const summaryLoad = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "summary:load",
     legacyStep: "summary:load",
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -370,12 +480,14 @@ async function runSummaryLoadStep(
 async function runMemoryRecallStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, memory } = context.core;
 
   state.recall = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "memory:recall",
     legacyStep: "memory:recall",
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -403,12 +515,14 @@ async function runMemoryRecallStep(
 async function runEmotionStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, emotion } = context.core;
 
   state.emotion = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "emotion:analyze",
     legacyStep: "emotion:analyze",
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -436,10 +550,12 @@ async function runEmotionStep(
 async function runToolListStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   state.toolDefinitions = await listTools({
     observer: context.core.observer,
     recorder: state.recorder,
+    streamEmitter,
     tools: context.core.tools,
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
   });
@@ -448,6 +564,7 @@ async function runToolListStep(
 async function runPromptBuildStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const summary = state.summary ?? null;
   const recall = requireStateValue(state.recall, "recall");
@@ -456,6 +573,7 @@ async function runPromptBuildStep(
   state.prompt = await runWorkflowStep({
     observer: context.core.observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "prompt:build",
     legacyStep: "prompt:build",
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -498,6 +616,7 @@ async function runToolPlanningStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
   planner: ToolPlanningProvider | null,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, model } = context.core;
   const modelTools = toModelTools(state.toolDefinitions);
@@ -505,6 +624,7 @@ async function runToolPlanningStep(
   state.toolPlanning = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "tool:plan",
     legacyStep: "tool:plan",
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -574,6 +694,7 @@ async function runToolPlanningStep(
 async function runToolExecuteStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const plan = requireStateValue(state.toolPlanning, "toolPlanning").plan;
 
@@ -581,6 +702,7 @@ async function runToolExecuteStep(
     await runWorkflowStep({
       observer: context.core.observer,
       recorder: state.recorder,
+      streamEmitter,
       workflowStep: "tool:execute",
       legacyStep: "tool:execute",
       ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -604,6 +726,7 @@ async function runToolExecuteStep(
     await runWorkflowStep({
       observer: context.core.observer,
       recorder: state.recorder,
+      streamEmitter,
       workflowStep: "tool:execute",
       legacyStep: "tool:execute",
       ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -632,6 +755,7 @@ async function runToolExecuteStep(
   const toolResults = await executeToolCalls({
     observer: context.core.observer,
     recorder: state.recorder,
+    streamEmitter,
     tools: context.core.tools,
     toolCalls: plan.calls,
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -705,9 +829,120 @@ async function runFinalGenerateStep(
   };
 }
 
+async function runFinalStreamStep(
+  state: WorkflowExecutionState,
+  context: ChatWorkflowExecutionContext,
+  streamEmitter: WorkflowStreamEmitter,
+): Promise<void> {
+  const prompt = requireStateValue(state.prompt, "prompt");
+  const existingGeneration = state.generation;
+  const finalMessages = existingGeneration?.followUpMessages ?? prompt.messages;
+
+  const finalOutput = await runWorkflowStep({
+    observer: context.core.observer,
+    recorder: state.recorder,
+    streamEmitter,
+    workflowStep: "model:stream",
+    legacyStep: "model:stream",
+    ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
+    startSummary: {
+      messageCount: finalMessages.length,
+      toolResultCount: existingGeneration?.toolResults.length ?? 0,
+      toolsEnabled: false,
+      requiredStreaming: true,
+    },
+    run: async () => {
+      let completeText = "";
+      let lastModel: string | undefined;
+      let finalRuntime: ModelRuntimeInfo | undefined;
+      let finalUsage: GenerateStreamChunk["usage"] | undefined;
+      let emittedDelta = false;
+
+      try {
+        for await (const chunk of context.core.model.stream({
+          messages: finalMessages,
+          requiredCapabilities: { streaming: true },
+        })) {
+          if (chunk.runtime !== undefined) {
+            finalRuntime = chunk.runtime;
+          }
+
+          if (chunk.usage !== undefined) {
+            finalUsage = chunk.usage;
+          }
+
+          if (chunk.model !== undefined) {
+            lastModel = chunk.model;
+          }
+
+          if (chunk.text.length === 0) {
+            continue;
+          }
+
+          completeText += chunk.text;
+          emittedDelta = true;
+          streamEmitter.emitTextDelta(chunk);
+        }
+      } catch {
+        throw createSafeWorkflowError({
+          code: "model_stream_failed",
+          step: "model:stream",
+          message: "Model stream failed.",
+          details: emittedDelta ? { partialOutput: true } : undefined,
+        });
+      }
+
+      if (!completeText.trim()) {
+        throw createSafeWorkflowError({
+          code: "model_stream_failed",
+          step: "model:stream",
+          message: "Model stream produced no usable text.",
+        });
+      }
+
+      const output: GenerateOutput = {
+        text: completeText,
+        model: lastModel ?? finalRuntime?.usedModel ?? "",
+        raw: undefined,
+      };
+
+      if (finalUsage !== undefined) {
+        output.usage = finalUsage;
+      }
+
+      if (finalRuntime !== undefined) {
+        output.runtime = finalRuntime;
+      }
+
+      return output;
+    },
+    summarize: (result) => ({
+      messageCount: finalMessages.length,
+      toolResultCount: existingGeneration?.toolResults.length ?? 0,
+      model: result.model,
+      textLength: result.text.length,
+      runtime: result.runtime,
+    }),
+  });
+
+  state.generation = {
+    finalOutput,
+    toolCalls: existingGeneration?.toolCalls ?? [],
+    toolResults: existingGeneration?.toolResults ?? [],
+    droppedToolCalls: [],
+    toolCallsDropped: false,
+    rounds: existingGeneration?.rounds ?? 0,
+    followUpGenerated: existingGeneration?.followUpGenerated ?? false,
+    ...(existingGeneration?.followUpMessages !== undefined
+      ? { followUpMessages: existingGeneration.followUpMessages }
+      : {}),
+  };
+}
+
 async function runOutputSafetyStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, safety } = context.core;
   const modelOutput = requireStateValue(state.generation, "generation").finalOutput;
@@ -715,6 +950,7 @@ async function runOutputSafetyStep(
   state.outputSafety = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "safety:output",
     legacyStep: "safety:output",
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -741,13 +977,18 @@ async function runOutputSafetyStep(
   });
 
   if (!state.outputSafety.allowed) {
-    throw new Error("Output rejected by SafetyProvider");
+    throw createSafeWorkflowError({
+      code: "output_safety_rejected",
+      step: "safety:output",
+      message: "Output rejected by SafetyProvider",
+    });
   }
 }
 
 async function runSummarySaveStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const { observer, summary, summaryUpdater } = context.core;
   const modelOutput = requireStateValue(state.generation, "generation").finalOutput;
@@ -755,6 +996,7 @@ async function runSummarySaveStep(
   state.summaryResult = await runWorkflowStep({
     observer,
     recorder: state.recorder,
+    streamEmitter,
     workflowStep: "summary:save",
     legacyStep: "summary:save",
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
@@ -787,12 +1029,14 @@ async function runSummarySaveStep(
 async function runMemoryExtractSaveStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
+  streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const modelOutput = requireStateValue(state.generation, "generation").finalOutput;
 
   state.memoryResult = await extractAndSaveMemories({
     observer: context.core.observer,
     recorder: state.recorder,
+    streamEmitter,
     memory: context.core.memory,
     memoryExtractor: context.core.memoryExtractor,
     scope: state.memoryScope,
@@ -967,6 +1211,86 @@ function requireStateValue<T>(value: T | undefined, name: string): T {
   return value;
 }
 
+interface CreateSafeWorkflowErrorOptions {
+  code: SafeWorkflowErrorCode;
+  message: string;
+  retryable?: boolean;
+  step?: WorkflowStepName;
+  details?: Record<string, string | number | boolean | null> | undefined;
+}
+
+function createSafeWorkflowError(options: CreateSafeWorkflowErrorOptions): SafeWorkflowError {
+  return new SafeWorkflowException(options);
+}
+
+class SafeWorkflowException extends Error implements SafeWorkflowError {
+  public readonly code: SafeWorkflowErrorCode;
+  public readonly retryable: boolean;
+  public readonly step?: WorkflowStepName;
+  public readonly details?: Record<string, string | number | boolean | null>;
+
+  public constructor(options: CreateSafeWorkflowErrorOptions) {
+    super(redactSensitiveMessage(options.message));
+    this.name = "SafeWorkflowError";
+    this.code = options.code;
+    this.retryable = options.retryable ?? false;
+
+    if (options.step !== undefined) {
+      this.step = options.step;
+    }
+
+    if (options.details !== undefined) {
+      this.details = options.details;
+    }
+  }
+}
+
+function toSafeWorkflowError(error: unknown): SafeWorkflowError {
+  const normalized = normalizeSafeWorkflowError(error);
+
+  if (normalized !== null) {
+    return normalized;
+  }
+
+  return createSafeWorkflowError({
+    code: "workflow_failed",
+    message: toSafeMessage(error),
+  });
+}
+
+function normalizeSafeWorkflowError(error: unknown): SafeWorkflowError | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+
+  const candidate = error as Partial<SafeWorkflowError>;
+
+  if (!isSafeWorkflowErrorCode(candidate.code) || typeof candidate.message !== "string") {
+    return null;
+  }
+
+  return {
+    code: candidate.code,
+    message: redactSensitiveMessage(candidate.message),
+    retryable: candidate.retryable ?? false,
+    ...(candidate.step !== undefined ? { step: candidate.step } : {}),
+    ...(candidate.details !== undefined ? { details: candidate.details } : {}),
+  };
+}
+
+function isSafeWorkflowErrorCode(code: unknown): code is SafeWorkflowErrorCode {
+  return (
+    code === "workflow_stream_not_supported" ||
+    code === "input_safety_rejected" ||
+    code === "output_safety_rejected" ||
+    code === "model_stream_failed" ||
+    code === "tool_planning_failed" ||
+    code === "tool_execution_failed" ||
+    code === "post_process_failed" ||
+    code === "workflow_failed"
+  );
+}
+
 /**
  * Observer 不得打断主链路：同步异常与异步 rejection 都吞掉。
  */
@@ -981,6 +1305,7 @@ async function safeEmit(observer: CoreObserver, event: CoreEvent): Promise<void>
 interface RunWorkflowStepOptions<TResult> {
   observer: CoreObserver;
   recorder: WorkflowTraceRecorder;
+  streamEmitter?: WorkflowStreamEmitter | undefined;
   workflowStep: WorkflowStepName;
   legacyStep: string;
   sessionId?: string;
@@ -994,6 +1319,7 @@ async function runWorkflowStep<TResult>(
   options: RunWorkflowStepOptions<TResult>,
 ): Promise<TResult> {
   const active = options.recorder.start(options.workflowStep);
+  options.streamEmitter?.emitStepStart(options.workflowStep);
 
   await emitWorkflowStep(options.observer, {
     workflowId: options.recorder.workflowId,
@@ -1012,6 +1338,7 @@ async function runWorkflowStep<TResult>(
     const traceStep = options.recorder.end(active, status, {
       ...(summary !== undefined ? { summary } : {}),
     });
+    options.streamEmitter?.emitStepEnd(options.workflowStep, status, summary);
 
     await emitWorkflowStep(options.observer, {
       workflowId: options.recorder.workflowId,
@@ -1028,6 +1355,9 @@ async function runWorkflowStep<TResult>(
   } catch (error) {
     const safeError = toTraceError(error);
     const traceStep = options.recorder.end(active, "failed", { error: safeError });
+    options.streamEmitter?.emitStepEnd(options.workflowStep, "failed", {
+      error: safeError,
+    });
 
     await emitWorkflowStep(options.observer, {
       workflowId: options.recorder.workflowId,
@@ -1057,6 +1387,7 @@ async function emitWorkflowStep(
 interface ListToolsOptions {
   observer: CoreObserver;
   recorder: WorkflowTraceRecorder;
+  streamEmitter?: WorkflowStreamEmitter | undefined;
   tools: ChatWorkflowExecutionContext["core"]["tools"];
   sessionId?: string;
 }
@@ -1065,6 +1396,7 @@ async function listTools(options: ListToolsOptions): Promise<ToolDefinition[]> {
   return runWorkflowStep({
     observer: options.observer,
     recorder: options.recorder,
+    streamEmitter: options.streamEmitter,
     workflowStep: "tool:list",
     legacyStep: "tool:list",
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
@@ -1093,6 +1425,7 @@ async function listTools(options: ListToolsOptions): Promise<ToolDefinition[]> {
 interface ExecuteToolCallsOptions {
   observer: CoreObserver;
   recorder: WorkflowTraceRecorder;
+  streamEmitter?: WorkflowStreamEmitter | undefined;
   tools: ChatWorkflowExecutionContext["core"]["tools"];
   toolCalls: ModelToolCall[];
   sessionId?: string;
@@ -1103,6 +1436,7 @@ async function executeToolCalls(options: ExecuteToolCallsOptions): Promise<ToolR
   return runWorkflowStep({
     observer: options.observer,
     recorder: options.recorder,
+    streamEmitter: options.streamEmitter,
     workflowStep: "tool:execute",
     legacyStep: "tool:execute",
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
@@ -1111,6 +1445,7 @@ async function executeToolCalls(options: ExecuteToolCallsOptions): Promise<ToolR
 
       for (const modelToolCall of options.toolCalls) {
         const coreCall = toCoreToolCall(modelToolCall);
+        options.streamEmitter?.emitToolCall(modelToolCall);
 
         await safeEmit(options.observer, {
           type: "tool:execute:start",
@@ -1145,6 +1480,7 @@ async function executeToolCalls(options: ExecuteToolCallsOptions): Promise<ToolR
           },
         });
 
+        options.streamEmitter?.emitToolResult(result);
         results.push(result);
       }
 
@@ -1633,6 +1969,7 @@ async function recallMemories(options: RecallMemoriesOptions): Promise<RecallMem
 interface ExtractAndSaveOptions {
   observer: CoreObserver;
   recorder: WorkflowTraceRecorder;
+  streamEmitter?: WorkflowStreamEmitter | undefined;
   memory: ChatWorkflowExecutionContext["core"]["memory"];
   memoryExtractor: ChatWorkflowExecutionContext["core"]["memoryExtractor"];
   scope: MemoryScope;
@@ -1660,6 +1997,7 @@ async function extractAndSaveMemories(
   const extractResult = await runWorkflowStep({
     observer: options.observer,
     recorder: options.recorder,
+    streamEmitter: options.streamEmitter,
     workflowStep: "memory:extract",
     legacyStep: "memory:extract",
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
@@ -1715,6 +2053,7 @@ async function extractAndSaveMemories(
   return runWorkflowStep<ExtractAndSaveResult>({
     observer: options.observer,
     recorder: options.recorder,
+    streamEmitter: options.streamEmitter,
     workflowStep: "memory:save",
     legacyStep: "memory:save",
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
