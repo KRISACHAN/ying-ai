@@ -1,0 +1,24 @@
+{
+  "name": "@ying-companion/model-ollama",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "verify:adapter": "node scripts/verify-ollama-adapter.mjs",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@ying-companion/ai-core": "workspace:*",
+    "ollama": "^0.6.3"
+  }
+}

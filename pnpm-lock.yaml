@@ -138,6 +138,15 @@ importers:
         specifier: ^8.11.0
         version: 8.20.0
 
+  packages/model-ollama:
+    dependencies:
+      '@ying-companion/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
+      ollama:
+        specifier: ^0.6.3
+        version: 0.6.3
+
 packages:
 
   '@ai-sdk/gateway@3.0.125':
@@ -1163,6 +1172,9 @@ packages:
       sass:
         optional: true
 
+  ollama@0.6.3:
+    resolution: {integrity: sha512-KEWEhIqE5wtfzEIZbDCLH51VFZ6Z3ZSa6sIOg/E/tBV8S51flyqBOXi+bRxlOYKDf8i327zG9eSTb8IJxvm3Zg==}
+
   onetime@7.0.0:
     resolution: {integrity: sha512-VXJjc87FScF88uafS3JllDgvAm+c/Slfz06lorj2uAY34rlUu0Nt+v8wreiImcrgAjjIHp1rXpTDlLOGw29WwQ==}
     engines: {node: '>=18'}
@@ -1451,6 +1463,9 @@ packages:
 
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
+
+  whatwg-fetch@3.6.20:
+    resolution: {integrity: sha512-EqhiFU6daOA8kpjOWTL0olhVOF3i7OrFzSYiGsEMB8GcXS+RrzauAERX65xMeNWVqxA6HXH2m69Z9LaKKdisfg==}
 
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
@@ -2461,6 +2476,10 @@ snapshots:
       - '@babel/core'
       - babel-plugin-macros
 
+  ollama@0.6.3:
+    dependencies:
+      whatwg-fetch: 3.6.20
+
   onetime@7.0.0:
     dependencies:
       mimic-function: 5.0.1
@@ -2736,6 +2755,8 @@ snapshots:
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
+
+  whatwg-fetch@3.6.20: {}
 
   which@2.0.2:
     dependencies:
