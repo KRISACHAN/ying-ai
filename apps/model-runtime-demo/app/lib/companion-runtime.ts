@@ -18,7 +18,11 @@ import { LOCAL_DEBUG_OWNER } from "./debug-owner";
 import { DebugRepository, PostgresDebugSummaryProvider } from "./debug-repository";
 import type { DebugCompanion, SerializedCoreEvent } from "./debug-types";
 import { createConfiguredModel } from "./model-factory";
-import { loadModelConfig } from "./model-config";
+import {
+  resolveDebugModelConfig,
+  type DebugModelConfig,
+  type DebugModelRequestSecrets,
+} from "./model-config";
 import { resolveChatMemoryRuntime, type MemoryRuntime } from "./memory-config";
 
 export const DEFAULT_SUMMARY_OPTIONS: Required<SummaryOptions> = {
@@ -48,6 +52,7 @@ export interface ConversationRuntime {
   observer: CollectingObserver;
   memoryRuntime: MemoryRuntime;
   scope: MemoryScope;
+  modelConfig: DebugModelConfig;
 }
 
 export async function createConversationRuntime(input: {
@@ -55,10 +60,16 @@ export async function createConversationRuntime(input: {
   conversationId: string;
   emotion: EmotionState | null;
   repository?: DebugRepository;
+  modelConfig?: DebugModelConfig;
+  apiKeyOverride?: DebugModelRequestSecrets["apiKeyOverride"];
 }): Promise<ConversationRuntime> {
   const observer = new CollectingObserver();
-  const config = loadModelConfig(process.env);
-  const model = createConfiguredModel(config);
+  const resolvedModel = resolveDebugModelConfig(
+    input.modelConfig,
+    process.env,
+    input.apiKeyOverride !== undefined ? { apiKeyOverride: input.apiKeyOverride } : {},
+  );
+  const model = createConfiguredModel(resolvedModel.providerConfig);
   const memoryRuntime = await resolveChatMemoryRuntime(process.env);
   const repository = input.repository ?? new DebugRepository();
   const scope: MemoryScope = {
@@ -100,6 +111,7 @@ export async function createConversationRuntime(input: {
     observer,
     memoryRuntime,
     scope,
+    modelConfig: resolvedModel.debugConfig,
   };
 }
 
@@ -127,6 +139,7 @@ export function attachProviderMetadata(
       summaryUpdater: inspection.providers.summaryUpdater,
       emotionProvider: inspection.providers.emotion,
       toolProvider: inspection.providers.tools,
+      debugModelConfig: runtime.modelConfig,
       memoryStatus: runtime.memoryRuntime.status,
       ...(runtime.memoryRuntime.reason !== undefined
         ? { memoryReason: runtime.memoryRuntime.reason }

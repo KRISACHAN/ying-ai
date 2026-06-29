@@ -14,6 +14,7 @@
   "dependencies": {
     "@ying-companion/ai-core": "workspace:*",
     "@ying-companion/memory-postgres": "workspace:*",
+    "@ying-companion/model-ollama": "workspace:*",
     "next": "^15.0.0",
     "pg": "^8.13.0",
     "react": "^19.0.0",

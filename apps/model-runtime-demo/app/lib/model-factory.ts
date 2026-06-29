@@ -7,6 +7,7 @@ import {
   type ModelProfileOverride,
   type RequiredModelCapabilities,
 } from "@ying-companion/ai-core";
+import { createOllamaChatModel, type OllamaChatModelOptions } from "@ying-companion/model-ollama";
 
 export interface ModelProviderConfig {
   provider: string;
@@ -18,6 +19,13 @@ export interface OpenAICompatibleModelConfig extends ModelProviderConfig, Create
   primaryProfileOverride?: ModelProfileOverride;
   fallbackProfileOverride?: ModelProfileOverride;
 }
+
+export interface OllamaModelConfig extends ModelProviderConfig, OllamaChatModelOptions {
+  provider: "ollama";
+  primaryProfileOverride?: ModelProfileOverride;
+}
+
+export type DemoModelProviderConfig = OpenAICompatibleModelConfig | OllamaModelConfig;
 
 export interface ModelFactoryOptions {
   strictCapabilityCompatibility?: boolean;
@@ -52,13 +60,14 @@ export class ModelAdapterRegistry {
 export function createDefaultModelAdapterRegistry(): ModelAdapterRegistry {
   const registry = new ModelAdapterRegistry();
   registry.register(createOpenAICompatibleModelStrategy());
+  registry.register(createOllamaModelStrategy());
   return registry;
 }
 
 const defaultModelAdapterRegistry = createDefaultModelAdapterRegistry();
 
 export function createConfiguredModel(
-  config: ModelProviderConfig,
+  config: DemoModelProviderConfig,
   options?: ModelFactoryOptions,
 ): ChatModel {
   return defaultModelAdapterRegistry.create(config, options);
@@ -69,6 +78,17 @@ export function createOpenAICompatibleModelStrategy(): ModelAdapterStrategy<Open
     provider: "openai-compatible",
     create(config, options = {}) {
       const model = createModel(config);
+      assertStrictCapabilityCompatibility(model, options);
+      return model;
+    },
+  };
+}
+
+export function createOllamaModelStrategy(): ModelAdapterStrategy<OllamaModelConfig> {
+  return {
+    provider: "ollama",
+    create(config, options = {}) {
+      const model = createOllamaChatModel(config);
       assertStrictCapabilityCompatibility(model, options);
       return model;
     },

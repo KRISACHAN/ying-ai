@@ -2,6 +2,7 @@
 
 import type { ConversationSummary, EmotionState, WorkflowTrace } from "@ying-companion/ai-core";
 
+import type { ChatWorkflowStreamWireEvent } from "./lib/chat-stream-wire";
 import type { MemoryHealthView, WorkflowRunDetail, WorkflowRunListItem } from "./lib/debug-types";
 
 interface RunDebugPanelProps {
@@ -12,6 +13,9 @@ interface RunDebugPanelProps {
   health: MemoryHealthView | null;
   summary: ConversationSummary | null;
   memoriesHref: string;
+  streamEvents: ChatWorkflowStreamWireEvent[];
+  turnStatus: string;
+  workflowId: string | null;
 }
 
 export function RunDebugPanel({
@@ -22,6 +26,9 @@ export function RunDebugPanel({
   health,
   summary,
   memoriesHref,
+  streamEvents,
+  turnStatus,
+  workflowId,
 }: RunDebugPanelProps) {
   const debugContext = run?.debugContext ?? null;
 
@@ -31,6 +38,7 @@ export function RunDebugPanel({
         <h2>调试工作台</h2>
         <RunSelector runs={runs} selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
         <p className="hint">选择或发送一条 AI 回复后，这里会展示对应 workflow run。</p>
+        <StreamTimeline events={streamEvents} turnStatus={turnStatus} workflowId={workflowId} />
         <MemoryHealthBlock health={health} />
       </aside>
     );
@@ -49,6 +57,8 @@ export function RunDebugPanel({
       </div>
       <RunSelector runs={runs} selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
 
+      <StreamTimeline events={streamEvents} turnStatus={turnStatus} workflowId={workflowId} />
+
       <section className="debug-section">
         <h3>运行总览</h3>
         <Rows
@@ -66,7 +76,7 @@ export function RunDebugPanel({
       <MemoryHealthBlock health={health} />
 
       <section className="debug-section">
-        <h3>工作流时间线</h3>
+        <h3>持久化 Trace 时间线</h3>
         <TraceBlock trace={run.trace} />
       </section>
 
@@ -114,10 +124,74 @@ export function RunDebugPanel({
 
       <section className="debug-section">
         <h3>Observer</h3>
+        <p className="hint">CoreObserver 是旁路观测，不驱动流式聊天状态。</p>
         <DebugPre title="Observer Events" value={run.observerEvents} />
       </section>
     </aside>
   );
+}
+
+function StreamTimeline({
+  events,
+  turnStatus,
+  workflowId,
+}: {
+  events: ChatWorkflowStreamWireEvent[];
+  turnStatus: string;
+  workflowId: string | null;
+}) {
+  const deltaCount = events.filter((event) => event.type === "text:delta").length;
+  const deltaText = events
+    .filter((event): event is Extract<ChatWorkflowStreamWireEvent, { type: "text:delta" }> => {
+      return event.type === "text:delta";
+    })
+    .map((event) => event.text)
+    .join("");
+
+  return (
+    <section className="debug-section">
+      <h3>Workflow Stream Timeline</h3>
+      <Rows
+        rows={[
+          ["Turn status", turnStatus],
+          ["Workflow ID", workflowId ?? "-"],
+          ["Wire events", String(events.length)],
+          ["Text delta count", String(deltaCount)],
+        ]}
+      />
+      <pre className="output">
+        {events.length === 0
+          ? "（本轮还没有 Wire Event）"
+          : events.map((event, index) => `${index + 1}. ${formatWireEvent(event)}`).join("\n")}
+      </pre>
+      {deltaText !== "" ? <DebugPre title="Aggregated text:delta" value={deltaText} /> : null}
+    </section>
+  );
+}
+
+function formatWireEvent(event: ChatWorkflowStreamWireEvent): string {
+  switch (event.type) {
+    case "workflow:start":
+      return `${event.type} ${event.timestamp}`;
+    case "step:start":
+      return `${event.type} ${event.step} ${event.timestamp}`;
+    case "step:end":
+      return `${event.type} ${event.step} / ${event.status} ${formatSummary(event.summary)}`;
+    case "text:delta":
+      return `${event.type} ${JSON.stringify(event.text)}`;
+    case "tool:call":
+      return `${event.type} ${event.call.name}`;
+    case "tool:result":
+      return `${event.type} ${event.result.name} ok=${String(event.result.ok ?? true)}`;
+    case "workflow:finish":
+      return `${event.type} textLength=${event.output.text.length}`;
+    case "workflow:error":
+      return `${event.type} ${event.error.code} ${event.error.message}`;
+  }
+}
+
+function formatSummary(summary: Record<string, unknown> | undefined): string {
+  return summary === undefined ? "" : JSON.stringify(summary);
 }
 
 function RunSelector({

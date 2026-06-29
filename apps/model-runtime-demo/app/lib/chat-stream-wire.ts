@@ -10,6 +10,15 @@ import type {
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type SafeErrorDetails = Record<string, JsonValue>;
+
+export interface SerializableSafeWorkflowError {
+  code: SafeWorkflowError["code"];
+  message: string;
+  retryable?: boolean;
+  step?: SafeWorkflowError["step"];
+  details?: SafeErrorDetails;
+}
 
 export interface SerializableModelToolCall {
   id?: string;
@@ -58,7 +67,7 @@ export type ChatWorkflowStreamWireEvent =
       workflowId: string;
       output: SerializableChatWorkflowOutput;
     }
-  | { type: "workflow:error"; workflowId: string; error: SafeWorkflowError };
+  | { type: "workflow:error"; workflowId: string; error: SerializableSafeWorkflowError };
 
 export function toChatWorkflowStreamWireEvent(
   event: ChatWorkflowStreamEvent,
@@ -168,7 +177,28 @@ export function toSerializableToolResult(result: ToolResult): SerializableToolRe
   };
 }
 
-function sanitizeSafeWorkflowError(error: SafeWorkflowError): SafeWorkflowError {
+export function createWorkflowErrorWireEvent(input: {
+  workflowId: string;
+  code: SafeWorkflowError["code"];
+  message: string;
+  retryable?: boolean;
+  step?: SafeWorkflowError["step"];
+  details?: SafeErrorDetails;
+}): ChatWorkflowStreamWireEvent {
+  return {
+    type: "workflow:error",
+    workflowId: input.workflowId,
+    error: {
+      code: input.code,
+      message: input.message,
+      ...(input.retryable !== undefined ? { retryable: input.retryable } : {}),
+      ...(input.step !== undefined ? { step: input.step } : {}),
+      ...(input.details !== undefined ? { details: input.details } : {}),
+    },
+  };
+}
+
+function sanitizeSafeWorkflowError(error: SafeWorkflowError): SerializableSafeWorkflowError {
   return {
     code: error.code,
     message: error.message,
@@ -178,19 +208,8 @@ function sanitizeSafeWorkflowError(error: SafeWorkflowError): SafeWorkflowError 
   };
 }
 
-function sanitizeErrorDetails(
-  details: Record<string, string | number | boolean | null>,
-): Record<string, string | number | boolean | null> {
-  return Object.fromEntries(
-    Object.entries(details).filter(([, value]) => {
-      return (
-        value === null ||
-        typeof value === "string" ||
-        typeof value === "number" ||
-        typeof value === "boolean"
-      );
-    }),
-  );
+function sanitizeErrorDetails(details: Record<string, unknown>): SafeErrorDetails {
+  return toJsonRecord(details);
 }
 
 function toJsonRecord(value: Record<string, unknown>): Record<string, JsonValue> {

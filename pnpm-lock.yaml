@@ -88,6 +88,9 @@ importers:
       '@ying-companion/memory-postgres':
         specifier: workspace:*
         version: link:../../packages/memory-postgres
+      '@ying-companion/model-ollama':
+        specifier: workspace:*
+        version: link:../../packages/model-ollama
       next:
         specifier: ^15.0.0
         version: 15.5.19(@opentelemetry/api@1.9.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)

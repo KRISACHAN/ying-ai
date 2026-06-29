@@ -20,6 +20,11 @@ import {
   toChatWorkflowStreamWireEvent,
   type ChatWorkflowStreamWireEvent,
 } from "./chat-stream-wire";
+import {
+  ChatStreamProtocolError,
+  encodeNdjson,
+  parseNdjsonWireEvents,
+} from "./chat-stream-transport";
 
 export interface ContractVerificationReport {
   scenario: string;
@@ -39,6 +44,7 @@ export async function buildV11StreamContractVerificationReport(): Promise<
     verifyOutputSafetyRejected(),
     verifyRecoverableMemorySaveDegraded(),
     verifyWireSerializationBoundary(),
+    await verifyNdjsonParserScenarios(),
   ];
 
   return reports;
@@ -281,6 +287,39 @@ function verifyWireSerializationBoundary(): ContractVerificationReport {
   };
 }
 
+async function verifyNdjsonParserScenarios(): Promise<ContractVerificationReport> {
+  const workflowId = "wf_contract_ndjson";
+  const events = [
+    toChatWorkflowStreamWireEvent(start(workflowId)),
+    toChatWorkflowStreamWireEvent(delta(workflowId, "hel")),
+    toChatWorkflowStreamWireEvent(delta(workflowId, "lo")),
+    toChatWorkflowStreamWireEvent(finish(workflowId, { text: "hello" })),
+  ];
+  const payload = events.map((event) => new TextDecoder().decode(encodeNdjson(event))).join("");
+  const chunks = [
+    payload.slice(0, 8),
+    payload.slice(8, 28),
+    payload.slice(28, payload.length - 3),
+    payload.slice(payload.length - 3),
+  ];
+  const parsed = await collectWireEventsFromChunks(chunks);
+  const extraAfterFinish = await catchesProtocolError([
+    payload,
+    new TextDecoder().decode(encodeNdjson(toChatWorkflowStreamWireEvent(delta(workflowId, "!")))),
+  ]);
+
+  return {
+    scenario: "ndjson parser chunking",
+    eventSequence: parsed.map((event) => event.type),
+    ok:
+      parsed.length === events.length &&
+      parsed[1]?.type === "text:delta" &&
+      parsed[2]?.type === "text:delta" &&
+      extraAfterFinish,
+    details: `parsed=${parsed.length} extraAfterFinish=${extraAfterFinish}`,
+  };
+}
+
 function start(workflowId: string): ChatWorkflowStreamEvent {
   return {
     type: "workflow:start",
@@ -407,6 +446,38 @@ async function collectStreamEvents(
   }
 
   return collected;
+}
+
+async function collectWireEventsFromChunks(
+  chunks: string[],
+): Promise<ChatWorkflowStreamWireEvent[]> {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+
+      controller.close();
+    },
+  });
+  const events: ChatWorkflowStreamWireEvent[] = [];
+
+  for await (const event of parseNdjsonWireEvents(stream)) {
+    events.push(event);
+  }
+
+  return events;
+}
+
+async function catchesProtocolError(chunks: string[]): Promise<boolean> {
+  try {
+    await collectWireEventsFromChunks(chunks);
+    return false;
+  } catch (error) {
+    return error instanceof ChatStreamProtocolError;
+  }
 }
 
 class ExecuteOnlyContractWorkflow implements ChatWorkflow {

@@ -88,22 +88,24 @@ CI 仍建议显式执行上面的 migration，确保 schema 版本可审计。
 - `/companions/[id]/memories`：长期记忆 CRUD。新增/修改 content 会重新 embedding；列表不展示 score，score 只在对话页本轮 recalled memories 中出现。
 - `/debug/model-runtime`：阶段 1 Model Runtime 独立验证入口，查看 Provider inspection、流式输出、最终使用模型、是否降级、尝试次数与错误摘要。
 
-对话发送经 `POST /api/conversations/[id]/messages`，客户端只提交 `message`。
-服务端根据 conversation / companion 构造 `scope`、history、emotion、summaryScope 与
-Provider，调用 `core.executeWorkflow()` 后短事务写回 assistant message、workflow run、
-conversation emotion 与 preview。旧的 `POST /api/chat` 保留为兼容调试入口，但 Stage 8
-工作台不再依赖浏览器 state 作为关键状态真相；该 legacy 入口仍接受客户端 scope /
-history / emotion，仅用于阶段 1～7 的手动验证，后续会移除或隔离。
+对话发送经 `POST /api/conversations/[id]/messages`，响应为
+`application/x-ndjson; charset=utf-8`。客户端提交 `message`、可选非敏感 `modelConfig`，
+以及仅本次请求使用的 `apiKeyOverride`。服务端根据 conversation / companion 构造
+`scope`、history、emotion、summaryScope 与 Provider，调用 `core.streamWorkflow()`，将 Core
+Event 通过 `app/lib/chat-stream-wire.ts` 的唯一映射转换为 Wire Event。除
+`workflow:finish` 外，事件实时写入 NDJSON；`workflow:finish` 只有在
+`DebugRepository.completeRun()` 成功写回 assistant message、workflow run、conversation
+emotion 与 preview 后才发送。旧的 `POST /api/chat` 保留为 legacy 非流式调试入口，不承载
+V1.1 工作台主链路。
 
-V1.1 stage-02 已在 Core 中冻结 `streamWorkflow()` 与 `ChatWorkflowStreamEvent` 契约，并在
-demo 宿主层新增 `app/lib/chat-stream-wire.ts` 作为 Core Event 到 JSON-safe Wire Event 的单一
-映射边界。当前阶段不改造聊天 Route，也不写真实 NDJSON；后续阶段会基于该映射接入
-`POST + fetch + ReadableStream + NDJSON`。
+V1.1 stage-07 已将持久化会话 Route 接入 `POST + fetch + ReadableStream + NDJSON`。
+`app/lib/chat-stream-transport.ts` 提供 NDJSON 编码、浏览器增量解析与 Wire Event runtime
+guard，覆盖半行、多行、非法 JSON、终止事件后额外事件等协议边界。
 
-V1.1 stage-03 已将模型创建切到宿主侧 strategy registry：当前只注册 `openai-compatible`，未来
-Ollama 通过新 strategy 注册加入，不修改 `ai-core` Workflow。`/debug/model-runtime` 会展示
-primary / fallback 的 Effective Model Profile、runtime.usedProfile 与 capability skips；API Key
-只做脱敏展示，不进入 trace 或浏览器响应明文。
+V1.1 stage-07 的工作台可在会话页选择 `openai-compatible` 或 `ollama`。非敏感模型配置存入
+浏览器 `sessionStorage` 并随每次 POST body 发送；OpenAI-compatible 的 `apiKeyOverride`
+只保存在当前页面 React state 与单次 POST body 中，不写入数据库、Wire Event、trace 或 Debug
+Panel。模型创建仍在宿主侧 strategy registry 中完成，不修改 `ai-core` Workflow。
 
 本地契约样例位于 `app/lib/chat-stream-contract-verifier.ts`，覆盖正常完成、空白 delta、
 stream 不支持、步骤失败、output safety 拒绝、memory 写回降级与 Wire 序列化边界。

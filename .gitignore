@@ -154,3 +154,9 @@ vite.config.ts.timestamp-*
 .codex/skills/.system/**
 !.codex/prompts/
 !.codex/prompts/**
+
+# playwright
+.playwright-cli/
+.playwright-cli/*
+.playwright-cli/**
+!.playwright-cli/page-*.yml

@@ -1,4 +1,4 @@
-/* global console, process */
+/* global console, process, ReadableStream, TextDecoder, TextEncoder */
 
 import aiCore from "@ying-companion/ai-core";
 
@@ -219,6 +219,38 @@ function verifyWireSerializationBoundary() {
       !json.includes("provider") &&
       parsed.type === "workflow:finish",
     details: `rawStripped=${!json.includes("should")} serialized=${serialized.ok}`,
+  };
+}
+
+async function verifyNdjsonParserScenarios() {
+  const workflowId = "wf_contract_ndjson";
+  const events = [
+    toWireEvent(start(workflowId)),
+    toWireEvent(delta(workflowId, "hel")),
+    toWireEvent(delta(workflowId, "lo")),
+    toWireEvent(finish(workflowId, { text: "hello" })),
+  ];
+  const payload = events.map(encodeNdjson).join("");
+  const parsed = await collectWireEventsFromChunks([
+    payload.slice(0, 8),
+    payload.slice(8, 28),
+    payload.slice(28, payload.length - 3),
+    payload.slice(payload.length - 3),
+  ]);
+  const extraAfterFinish = await catchesProtocolError([
+    payload,
+    encodeNdjson(toWireEvent(delta(workflowId, "!"))),
+  ]);
+
+  return {
+    scenario: "ndjson parser chunking",
+    eventSequence: parsed.map((event) => event.type),
+    ok:
+      parsed.length === events.length &&
+      parsed[1]?.type === "text:delta" &&
+      parsed[2]?.type === "text:delta" &&
+      extraAfterFinish,
+    details: `parsed=${parsed.length} extraAfterFinish=${extraAfterFinish}`,
   };
 }
 
@@ -482,6 +514,104 @@ async function collectStreamEvents(events) {
   return collected;
 }
 
+function encodeNdjson(event) {
+  return `${JSON.stringify(event)}\n`;
+}
+
+async function collectWireEventsFromChunks(chunks) {
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+
+      controller.close();
+    },
+  });
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const events = [];
+  let pendingBuffer = "";
+  let terminalReceived = false;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        pendingBuffer += decoder.decode();
+        break;
+      }
+
+      pendingBuffer += decoder.decode(value, { stream: true });
+      const lines = pendingBuffer.split("\n");
+      pendingBuffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (line.trim() === "") {
+          continue;
+        }
+        if (terminalReceived) {
+          throw new Error("protocol_error: event after terminal");
+        }
+
+        const event = JSON.parse(line);
+        validateWireEvent(event);
+        events.push(event);
+
+        if (event.type === "workflow:finish" || event.type === "workflow:error") {
+          terminalReceived = true;
+        }
+      }
+    }
+
+    if (pendingBuffer.trim() !== "") {
+      throw new Error("protocol_error: incomplete JSON line");
+    }
+
+    return events;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function catchesProtocolError(chunks) {
+  try {
+    await collectWireEventsFromChunks(chunks);
+    return false;
+  } catch (error) {
+    return error instanceof Error && error.message.startsWith("protocol_error:");
+  }
+}
+
+function validateWireEvent(event) {
+  if (typeof event !== "object" || event === null || typeof event.type !== "string") {
+    throw new Error("protocol_error: invalid event");
+  }
+  if (typeof event.workflowId !== "string" || event.workflowId.length === 0) {
+    throw new Error("protocol_error: missing workflowId");
+  }
+  if (event.type === "text:delta" && typeof event.text !== "string") {
+    throw new Error("protocol_error: invalid delta");
+  }
+  if (event.type === "workflow:finish" && typeof event.output?.text !== "string") {
+    throw new Error("protocol_error: invalid finish");
+  }
+  if (event.type === "workflow:error") {
+    if (typeof event.error?.code !== "string" || typeof event.error?.message !== "string") {
+      throw new Error("protocol_error: invalid error");
+    }
+    if (
+      event.error.details !== undefined &&
+      (typeof event.error.details !== "object" || event.error.details === null)
+    ) {
+      throw new Error("protocol_error: invalid error details");
+    }
+  }
+}
+
 class ExecuteOnlyContractWorkflow {
   meta = {
     id: "workflow.contract-execute-only",
@@ -542,6 +672,7 @@ const reports = [
   verifyOutputSafetyRejected(),
   verifyRecoverableMemorySaveDegraded(),
   verifyWireSerializationBoundary(),
+  await verifyNdjsonParserScenarios(),
 ];
 
 console.table(

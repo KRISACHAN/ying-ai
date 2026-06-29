@@ -5,6 +5,7 @@ import { ConversationWorkspace } from "../../conversation-workspace";
 import { DebugRepository } from "../../lib/debug-repository";
 import { inspectMemoryHealth } from "../../lib/memory-config";
 import type { MemoryHealthView } from "../../lib/debug-types";
+import { loadDefaultDebugModelConfig } from "../../lib/model-config";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
   const runs = await repository.listRuns(id);
   const latestRun = runs[0] !== undefined ? await repository.getRun(id, runs[0].id) : null;
   const health = await loadMemoryHealth();
+  const defaultModelConfig = loadDefaultDebugModelConfig(process.env);
 
   return (
     <main className="conversation-shell">
@@ -39,6 +41,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
         initialRuns={runs}
         initialRun={latestRun}
         memoryHealth={health}
+        defaultModelConfig={defaultModelConfig}
       />
     </main>
   );
