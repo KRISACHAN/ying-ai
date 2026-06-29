@@ -124,7 +124,7 @@ DebugRepository
 完成本阶段后，必须满足：
 
 - Demo 可选择 `openai-compatible` 或 `ollama` Provider；
-- Demo 可配置模型名、非敏感模型参数与 Persona；
+- Demo 可配置模型名、非敏感模型参数与 Persona；非敏感 modelConfig 存 sessionStorage，apiKey 仅页面内存 + POST；
 - API Key 不写入 `debug_*` 数据表、不进入 Wire Event、不出现在 Debug Panel 或日志中；
 - 正式流式聊天入口为 `POST /api/conversations/[id]/messages`；
 - 路由响应为 `application/x-ndjson; charset=utf-8`；
@@ -133,7 +133,8 @@ DebugRepository
 - `text:delta` 实时更新当前 assistant 临时消息；
 - 正常完成时，所有 delta 拼接文本必须等于最终 `workflow:finish.output.text`；
 - `workflow:finish` 只在 Core 完成且 Demo 成功写入本轮持久化数据后才发送给浏览器；
-- Output Safety 拒绝、首个 delta 前失败、已输出文本后的模型失败、Wire 映射失败、持久化失败均不得伪造 `workflow:finish`；
+- Output Safety 拒绝、首个 delta 前失败、已输出文本后的模型失败、Wire 映射失败均不得伪造 `workflow:finish`；
+- 持久化失败通过 `workflow:error(code=workflow_failed, details.reason=persistence_failed)` 表达，不得伪造 `workflow:finish`；
 - 已输出文本后失败时，UI 保留 partial text，但明确标记“本轮未成功完成”；
 - Summary / Memory / Emotion 的可恢复失败若被 Core 标记为 degraded，UI 仍显示完成，但 Timeline 与 Debug Context 必须显示降级信息；
 - 工作流 Timeline、最终 Prompt、Effective Persona、模型 Runtime、fallback、工具、记忆、情绪、摘要及写回结果均可在页面查看；
@@ -171,7 +172,8 @@ DebugRepository
 - WebSocket
 - 流中实时内容安全拦截
 - 流式多轮工具调用
-- 将 API Key 长期保存到数据库或浏览器 localStorage
+- 将 API Key 长期保存到数据库、debug_* 表或浏览器 localStorage
+- 将非敏感 modelConfig 写入 debug_* 数据表（Stage 7 只用 sessionStorage + POST）
 - 模型自动智能路由
 - 新增 LangChain、LangGraph、多 Agent
 - 项目总文档与最终 review 收口（阶段 8）
@@ -191,19 +193,20 @@ apps/model-runtime-demo/
         [id]/
           messages/
             route.ts                       # 持久化会话 NDJSON 流式入口
-    components/ 或现有 app 组件目录/
-      conversation-chat-panel.tsx         # 聊天、临时 assistant 消息、状态展示
-      workflow-stream-timeline.tsx        # 主 Stream Event Timeline
-      workflow-debug-panel.tsx            # 最终 output / prompt / memory / tool 等
+    conversation-workspace.tsx            # 优先升级现有会话工作台（聊天 + 流式状态）
+    run-debug-panel.tsx                   # 可扩展为最终 Debug Panel / Timeline 容器
+    companion-form.tsx                    # Persona 配置（沿用阶段 1）
+    （可选拆分）
       model-config-form.tsx               # Provider / 模型配置
-      companion-form.tsx                  # Persona 配置（沿用阶段 1）
+      workflow-stream-timeline.tsx        # 主 Stream Event Timeline
   app/lib/
-    chat-stream-wire.ts                   # Wire DTO、单一 Core → Wire 映射
-    chat-stream-transport.ts              # NDJSON encode / decode / runtime guard
-    model-config.ts                       # 环境默认配置 + 非敏感配置规则
-    model-factory.ts                      # createConfiguredModel()
-    companion-runtime.ts                  # 创建 conversation runtime
-    debug-repository.ts                   # pending / complete / fail run
+    chat-stream-wire.ts                   # 已有：Wire DTO、单一 Core → Wire 映射
+    chat-stream-transport.ts              # 新增：NDJSON encode / decode / runtime guard
+    chat-stream-contract-verifier.ts      # 已有：mock 场景；Stage 7 与 transport 共用 guard
+    model-config.ts                       # 环境默认配置 + 非敏感配置 merge 规则
+    model-factory.ts                      # createConfiguredModel() + Ollama strategy 注册
+    companion-runtime.ts                  # createConversationRuntime() 扩展 modelConfig 入参
+    debug-repository.ts                   # pending / complete / fail / persistence failure
     http.ts                               # 非流式错误响应辅助
 ```
 
@@ -240,6 +243,7 @@ Repository
 Demo 使用宿主侧 `ModelConfig`，Core 仍只接收已经创建完成的 `ChatModel`。
 
 ```ts
+/** 可持久化、可随 POST 传递的非敏感模型配置；不含 apiKey。 */
 export type DebugModelConfig =
   | {
       provider: "openai-compatible";
@@ -254,8 +258,6 @@ export type DebugModelConfig =
         capabilities?: Partial<ModelCapabilities>;
       };
       capabilities?: Partial<ModelCapabilities>;
-      /** 仅当前浏览器页面会话内使用，绝不持久化或回传。 */
-      apiKeyOverride?: string;
     }
   | {
       provider: "ollama";
@@ -264,21 +266,80 @@ export type DebugModelConfig =
       keepAlive?: string;
       capabilities?: Partial<ModelCapabilities>;
     };
+
+/** 仅单次 POST 请求体携带，绝不进入 DebugModelConfig 持久化结构。 */
+export type DebugModelRequestSecrets = {
+  apiKeyOverride?: string;
+};
 ```
 
 约束：
 
 ```txt
-- provider、model、baseUrl、host、keepAlive、retry、capability override 可作为 Debug 配置保存或由环境变量提供默认值；
-- apiKeyOverride 只能存在于当前浏览器内存和当前请求体中；
+- provider、model、baseUrl、host、keepAlive、retry、capability override 属于非敏感 Debug 配置；
+- apiKeyOverride 只能存在于当前浏览器 React state 与单次 POST body，不得进入 DebugModelConfig；
 - apiKeyOverride 不得写入 debug_companions、conversations、workflow_runs、messages 或任何 audit / trace 字段；
 - API Route 不得在成功或失败响应中回显 api key；
-- 未填写 apiKeyOverride 时，OpenAI-compatible 使用服务端环境变量；
-- Ollama 默认 host 由服务器侧配置或 `http://127.0.0.1:11434` 决定；
-- 前端不根据 provider 名称猜测 tool / stream 能力，必须读取服务端返回的 effective model profile / runtime 信息。
+- 未填写 apiKeyOverride 时，OpenAI-compatible 使用服务端环境变量 OPENAI_API_KEY；
+- Ollama 默认 host 由请求 config、宿主 env 或 `http://127.0.0.1:11434` 决定；
+- 前端不根据 provider 名称猜测 tool / stream 能力，必须读取 Wire finish output / runtime 中的 effective model profile；
+- Stage 6 已在 packages/model-ollama 导出 createOllamaChatModel()；Stage 7 在 model-factory.ts 增加 createOllamaModelStrategy() 并 register，不得让 model-ollama 依赖 Demo。
 ```
 
-### 6.2 Persona 配置
+### 6.2 配置来源、持久化与 merge 规则
+
+非敏感模型配置与敏感凭据的来源必须写死，避免 UI 与 Route 各自理解：
+
+```txt
+持久化位置（仅非敏感字段）
+→ 浏览器 sessionStorage，键名例如 demo:model-config:v1
+→ 只存 DebugModelConfig，不存 apiKeyOverride
+→ 禁止写入 localStorage、debug_* 数据表、Wire Event、workflow run
+
+页面内存
+→ React state 持有当前 DebugModelConfig 与 apiKeyOverride
+→ 刷新页面后 modelConfig 从 sessionStorage 恢复；apiKeyOverride 清空
+
+环境变量默认值
+→ 服务端 loadModelConfig(process.env) 作为最终兜底
+→ 当 sessionStorage / POST body 未提供某字段时使用
+
+单次 POST merge 优先级（高 → 低）
+1. body.modelConfig（若提供）
+2. 页面 sessionStorage 中的 DebugModelConfig
+3. 服务端 env 默认值
+
+apiKey merge 优先级（高 → 低）
+1. body.apiKeyOverride（若提供）
+2. 页面 React state 中的 apiKeyOverride
+3. 服务端 env OPENAI_API_KEY
+
+Ollama 不使用 apiKeyOverride；OpenAI-compatible 才读取该字段。
+```
+
+`createConversationRuntime()` 必须扩展为接收 merge 后的配置，而不是只读 env：
+
+```ts
+export async function createConversationRuntime(input: {
+  companion: DebugCompanion;
+  conversationId: string;
+  emotion: EmotionState | null;
+  repository?: DebugRepository;
+  modelConfig?: DebugModelConfig;
+  apiKeyOverride?: string;
+}): Promise<ConversationRuntime>;
+```
+
+内部职责：
+
+```txt
+1. resolveDebugModelConfig(input.modelConfig, process.env) → 宿主 ModelProviderConfig
+2. resolveApiKey(input.apiKeyOverride, process.env) → OpenAI-compatible 专用
+3. createConfiguredModel(resolvedConfig) → ChatModel
+4. 其余 persona / memory / emotion / tools 逻辑保持不变
+```
+
+### 6.3 Persona 配置
 
 阶段 1 已完成的 `CompanionPersona` 是唯一 Persona 事实来源：
 
@@ -314,17 +375,52 @@ Content-Type: application/json
 Accept: application/x-ndjson
 ```
 
-请求体最低包含：
+请求体 schema：
 
-```json
-{
-  "message": "你好"
+```ts
+interface ConversationMessageRequestBody {
+  /** 必填。用户本轮输入。 */
+  message: string;
+  /** 可选。覆盖页面 sessionStorage 的非敏感模型配置。 */
+  modelConfig?: DebugModelConfig;
+  /** 可选。仅 OpenAI-compatible；仅当前请求有效，绝不持久化。 */
+  apiKeyOverride?: string;
 }
 ```
 
-会话、历史、伴侣 Persona、memory scope、summary scope 与当前 emotion 必须由服务端按 `conversationId` 从 `DebugRepository` 读取和构建。
+示例：
 
-禁止客户端继续提交完整 `history` 作为真相来源。
+```json
+{
+  "message": "你好",
+  "modelConfig": {
+    "provider": "ollama",
+    "model": "qwen2.5:3b",
+    "host": "http://127.0.0.1:11434"
+  }
+}
+```
+
+```json
+{
+  "message": "你好",
+  "modelConfig": {
+    "provider": "openai-compatible",
+    "model": "gpt-4o-mini"
+  },
+  "apiKeyOverride": "sk-..."
+}
+```
+
+约束：
+
+```txt
+- message 必填；trim 后为空返回 HTTP 400 JSON；
+- modelConfig / apiKeyOverride 均可省略；省略时按 §6.2 merge 规则解析；
+- 会话 history、伴侣 Persona、memory scope、summary scope、当前 emotion 必须由服务端按 conversationId 从 DebugRepository 读取和构建；
+- 禁止客户端提交完整 history、emotion、scope 作为真相来源；
+- Accept: application/x-ndjson 为客户端约定；服务端可不因 Accept 不匹配而拒绝，但响应体必须是 NDJSON。
+```
 
 `/api/chat` 可继续保留为 legacy 非流式调试入口，但必须：
 
@@ -340,10 +436,10 @@ Accept: application/x-ndjson
 路由处理顺序必须如下：
 
 ```txt
-1. 校验 conversationId 与 message。
+1. 校验 conversationId、message、可选 modelConfig / apiKeyOverride。
 2. 从 DebugRepository 读取 conversation detail。
-3. createPendingRun()：持久化 user message + workflow run(pending)。
-4. createConversationRuntime()：装配 model / persona / memory / emotion / tools / observer。
+3. createPendingRun()：持久化 user message + workflow run(running)。
+4. createConversationRuntime({ companion, conversationId, emotion, modelConfig, apiKeyOverride })：装配 model / persona / memory / emotion / tools / observer。
 5. 调用 runtime.core.streamWorkflow(input)。
 6. 对每个 Core Event 调用唯一的 toChatWorkflowStreamWireEvent()。
 7. 除 workflow:finish 外，按顺序实时写入 NDJSON。
@@ -379,15 +475,23 @@ repository.completeRun() 失败
 
 ```txt
 - 不发送 workflow:finish；
-- 尽可能调用 markRunPersistenceFailure() 或 failRun()；
+- 调用 markRunPersistenceFailure()，写入 failed run、observerEvents、output/debug 快照（若可得）；
 - 发送 workflow:error；
-- error.code 使用 persistence_failed（或阶段 2 已定义的等价安全码）；
+- 使用 Stage 2 已冻结的 SafeWorkflowError.code = "workflow_failed"；
+- 在 error.details 中写入 reason = "persistence_failed"（字符串）；
+- message 面向用户，例如“模型回复已生成，但会话持久化失败；刷新后可能丢失”；
 - UI 保留已流出的 partial text；
-- UI 标记“模型回复已生成，但本轮未成功持久化；刷新后可能丢失”；
 - 结束 NDJSON Response。
 ```
 
-这不是 Core 的 `workflow:error` 语义变更，而是 Demo / HTTP 宿主在 Core 成功后的持久化失败终止语义。
+前端映射：
+
+```txt
+workflow:error 且 error.code === "workflow_failed" 且 error.details?.reason === "persistence_failed"
+→ ChatTurnStatus = "persistence-failed"
+```
+
+说明：Stage 7 **不扩展** ai-core 的 SafeWorkflowErrorCode 枚举；持久化失败是 Demo / HTTP 宿主在 Core 成功后的终止语义，通过 `workflow_failed + details.reason` 表达即可。
 
 ### 7.4 Core workflow:error
 
@@ -396,11 +500,17 @@ repository.completeRun() 失败
 ```txt
 - Route 必须按 Wire Mapper 映射后立即发送；
 - 不得再发送 workflow:finish；
-- pending run 必须写为 failed / partial failed 的既有持久化状态；
-- 已有 delta 时保留文本，并标记当前 assistant 临时消息为 partial-failed；
-- 无 delta 时不创建成功 assistant message；
+- 必须调用 failRun()，将 workflow run 写为 failed；
+- 若本轮已收到 text:delta，failRun 应尽可能写入：
+  - observerEvents
+  - trace / workflowId（若可从 stream 事件或 observer 恢复）
+  - partial_output_text（聚合后的 assistant 文本快照，写入 run 的 debug 字段，便于刷新后在 Debug Panel 回看）
+- 不得创建 status=completed 的 assistant message；
+- UI 保留已展示 delta，并标记 partial-failed / safety-rejected / failed；
 - 关闭 Response。
 ```
+
+Wire 映射失败、Route 内部异常等“已开始 NDJSON 后的宿主错误”，同样发送 workflow:error(code=workflow_failed)，并在 details.reason 中区分 wire_mapping_failed / route_internal_failed 等只读字符串；不得伪造 workflow:finish。
 
 ### 7.5 HTTP 响应约定
 
@@ -505,6 +615,58 @@ dispatchWireEvent
 - 收到 workflow:finish 或 workflow:error 后忽略后续业务事件并记录协议异常。
 ```
 
+### 8.4 Wire Event Runtime Guard
+
+`validateChatWorkflowStreamWireEvent(value: unknown)` 必须与 `chat-stream-transport.ts`、
+`chat-stream-contract-verifier.ts` 共用同一套校验逻辑，避免页面与开发脚本行为漂移。
+
+推荐签名：
+
+```ts
+export function validateChatWorkflowStreamWireEvent(value: unknown): ChatWorkflowStreamWireEvent;
+```
+
+校验规则：
+
+```txt
+通用
+- value 必须是 plain object，且 typeof type === "string"
+- type 必须是 ChatWorkflowStreamWireEvent 联合中的已知值
+- 未知 type → throw / 返回 protocol_error
+
+workflow:start
+- workflowId: string（非空）
+- timestamp: string（非空）
+
+step:start
+- workflowId / step / timestamp 均必填
+
+step:end
+- workflowId / step / timestamp / status 均必填
+- status 必须是 WorkflowStepStatus
+
+text:delta
+- workflowId: string
+- text: string，且 text.length > 0
+
+tool:call
+- call.name: string
+
+tool:result
+- result.name: string
+
+workflow:finish
+- output: object
+- output.text: string
+
+workflow:error
+- error.code / error.message 必填
+- error.code 必须是 Stage 2 SafeWorkflowErrorCode
+- error.details 若存在，只允许 JSON 基础值
+```
+
+`protocol_error` 是**客户端本地状态**，不是 Wire Event type；parser 捕获校验失败后停止当前轮并提示用户。
+
 ---
 
 ## 九、前端聊天状态机
@@ -542,22 +704,34 @@ completed
 → 收到 workflow:finish，且后续刷新持久化 detail 成功。
 
 degraded
-→ 收到 workflow:finish，但 trace / debugContext 中存在可恢复后置步骤 degraded。
+→ 收到 workflow:finish，且满足以下任一条件：
+  - finish.output.metadata.trace.steps 中存在 status === "degraded"
+  - finish.output.trace.steps 中存在 status === "degraded"（若 trace 被提升到 output 顶层）
 
 partial-failed
-→ 已收到 text:delta，随后 workflow:error（模型流失败、协议错误等）。
+→ 已收到 text:delta，随后 workflow:error，且 error.code !== "output_safety_rejected"，且不是 persistence-failed。
 
 safety-rejected
-→ 已有或未有文本，但终止 error 为 output_safety_rejected。
+→ workflow:error 且 error.code === "output_safety_rejected"。
 
 persistence-failed
-→ Core 成功完成，但 Demo 持久化失败，Route 发送 persistence_failed。
+→ workflow:error 且 error.code === "workflow_failed" 且 error.details?.reason === "persistence_failed"。
 
 failed
-→ 首个 delta 前失败、请求错误、conversation 不存在或无法创建 pending run。
+→ 首个 delta 前失败、请求错误、conversation 不存在、无法 createPendingRun，或 workflow:error 且不符合以上更具体分类。
 ```
 
-### 9.2 消息显示规则
+### 9.2 workflow:error → UI 映射表
+
+| 条件                                                                      | ChatTurnStatus                                             |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `code === "output_safety_rejected"`                                       | `safety-rejected`                                          |
+| `code === "workflow_failed"` 且 `details.reason === "persistence_failed"` | `persistence-failed`                                       |
+| 已收到 `text:delta` 后的其他 `workflow:error`                             | `partial-failed`                                           |
+| 首个 delta 前的 `workflow:error`                                          | `failed`                                                   |
+| 客户端 parser / 校验失败                                                  | 本地 `protocol_error`（映射展示为 failed，并提示协议错误） |
+
+### 9.3 消息显示规则
 
 开始请求时：
 
@@ -598,7 +772,7 @@ failed
 - 允许用户发起下一轮，但不得自动重试本轮。
 ```
 
-### 9.3 文本一致性校验
+### 9.4 文本一致性校验
 
 客户端收到 `workflow:finish` 后必须：
 
@@ -730,13 +904,15 @@ CoreObserver
 **怎么做**
 
 ```txt
-1. 扩展或收敛现有 model-config.ts / model-factory.ts；
-2. Provider 切换后按 provider 显示对应字段；
-3. OpenAI-compatible 显示 model、baseUrl、fallback、retry、capabilities override；
-4. Ollama 显示 model、host、keepAlive、capabilities override；
-5. API key 可选 override 仅存在于当前前端内存与单次请求；
-6. API Route 将 config 传入 createConversationRuntime() 或等价宿主工厂；
-7. Debug Panel 只展示已脱敏的配置和 effective model profile。
+1. 扩展 model-config.ts：resolveDebugModelConfig() / resolveApiKey()；
+2. 扩展 model-factory.ts：createOllamaModelStrategy()，register 到 ModelAdapterRegistry；
+3. Provider 切换后按 provider 显示对应字段；
+4. OpenAI-compatible 显示 model、baseUrl、fallback、retry、capabilities override、apiKeyOverride；
+5. Ollama 显示 model、host、keepAlive、capabilities override；
+6. 非敏感 DebugModelConfig 写入 sessionStorage；apiKeyOverride 仅 React state + POST body；
+7. 扩展 createConversationRuntime() 接收 modelConfig / apiKeyOverride；
+8. Route 从 body + sessionStorage + env merge 后创建 runtime；
+9. Debug Panel 只展示已脱敏配置和 effective model profile。
 ```
 
 **完成标准**
@@ -773,8 +949,8 @@ CoreObserver
 ```txt
 - 浏览器可在模型未完成时收到 text:delta；
 - 每行是合法独立 JSON；
-- workflow:finish 只在持久化成功后发送；
-- Core 成功但持久化失败时发送 persistence_failed，而不是 finish。
+- workflow:finish 只在 completeRun() 成功后发送；
+- Core 成功但持久化失败时发送 workflow:error(code=workflow_failed, details.reason=persistence_failed)，而不是 finish。
 ```
 
 ### 11.3 07-03：实现浏览器 NDJSON Parser 与 Wire Event Guard
@@ -786,13 +962,12 @@ CoreObserver
 **怎么做**
 
 ```txt
-1. 用 TextDecoder 的 stream 模式；
-2. 引入 pendingBuffer；
-3. 封装可复用 async generator 或 parser；
-4. 对每行 JSON.parse；
-5. 用 runtime guard 校验 Wire Event type 与必要字段；
-6. 对半行、空行、多行同批、非法 JSON、未知 type、finish/error 后额外事件建立明确错误处理；
-7. 不将 parser 与 React 组件逻辑混写。
+1. 在 chat-stream-transport.ts 实现 encodeNdjson() 与 validateChatWorkflowStreamWireEvent()；
+2. 与 chat-stream-contract-verifier.ts 共用 guard，避免页面与 verify 脚本漂移；
+3. 用 TextDecoder 的 stream 模式实现 browser parser / async generator；
+4. 引入 pendingBuffer；
+5. 对半行、空行、多行同批、非法 JSON、未知 type、finish/error 后额外事件建立明确错误处理；
+6. 不将 parser 与 React 组件逻辑混写。
 ```
 
 **完成标准**
@@ -813,14 +988,15 @@ CoreObserver
 **怎么做**
 
 ```txt
-1. 将当前一次性 response.json() 消费逻辑改为 NDJSON consume；
+1. 优先升级 conversation-workspace.tsx，将 response.json() 改为 NDJSON consume；
 2. 引入 localTurnId 和 ChatTurnStatus；
-3. 创建临时 user / assistant message；
-4. text:delta 只追加临时 assistant 文本；
-5. finish 时校验文本一致性并刷新 conversation detail；
-6. error 时保留 partial text 并显示明确失败状态；
-7. 禁止把 client history 作为服务端会话历史真相来源；
-8. 发送按钮在当前轮终止前禁用。
+3. 发送 POST 时附带 sessionStorage 中的 modelConfig 与当前 apiKeyOverride；
+4. 创建临时 user / assistant message；
+5. text:delta 只追加临时 assistant 文本；
+6. finish 时按 §9.1 判定 completed / degraded，并校验文本一致性；
+7. error 时按 §9.2 映射 UI 状态，保留 partial text；
+8. 禁止把 client history 作为服务端会话历史真相来源；
+9. 发送按钮在当前轮终止前禁用。
 ```
 
 **完成标准**
@@ -867,11 +1043,13 @@ CoreObserver
 **怎么做**
 
 ```txt
-1. 在合适位置新增 NDJSON parser / encoder 的开发验证脚本；
-2. 通过可控 mock stream 构造半行、多行、finish、error、protocol error；
-3. 在 Demo 页面验证真实 OpenAI-compatible 与 Ollama 流；
-4. 将每个场景的实际结果记录到 .code-reviews/v1.1/ 对应 Stage 7 review；
-5. 不要求引入 Vitest、Playwright、E2E。
+1. 在 chat-stream-transport.ts 或 scripts/ 下新增 NDJSON parser / encoder 验证入口；
+2. 复用 validateChatWorkflowStreamWireEvent() 与 chat-stream-contract-verifier.ts 的 mock 场景；
+3. 构造半行、多行、finish、error、protocol error；
+4. 持久化失败可通过开发开关触发，例如 env DEBUG_FORCE_COMPLETE_RUN_FAIL=1（仅 dev）；
+5. 在 Demo 页面验证真实 OpenAI-compatible 与 Ollama 流；
+6. 将每个场景的实际结果记录到 .code-reviews/v1.1/ 对应 Stage 7 review；
+7. 不要求引入 Vitest、Playwright、E2E。
 ```
 
 **完成标准**
@@ -985,14 +1163,15 @@ CoreObserver
 ### 场景 H：Core 成功但持久化失败
 
 ```txt
-1. 使用可控 Repository 或临时故障触发 completeRun 失败。
+1. 设置 DEBUG_FORCE_COMPLETE_RUN_FAIL=1（或等价 dev hook）触发 completeRun 失败。
 
 预期：
 - text:delta 已保留；
 - 不发送 workflow:finish；
-- 收到 persistence_failed；
+- 收到 workflow:error(code=workflow_failed, details.reason=persistence_failed)；
 - 页面显示刷新后可能丢失；
-- 不把当前临时消息加入 completed history。
+- 不把当前临时消息加入 completed history；
+- failed workflow run 中可看到 partial_output_text / output 快照（若已实现）。
 ```
 
 ### 场景 I：NDJSON 网络分片
@@ -1034,7 +1213,14 @@ CoreObserver
 ```txt
 [Route]
 - /api/conversations/[id]/messages 使用 NDJSON
-- pending / complete / fail / persistence-failed 语义明确
+- POST body 支持 message + modelConfig + apiKeyOverride
+- pending / complete / fail / persistence-failed（workflow_failed + details.reason）语义明确
+
+[Config]
+- 非敏感 modelConfig → sessionStorage
+- apiKeyOverride → React state + POST only
+- createConversationRuntime() 接收 merge 后配置
+- Ollama strategy 在 model-factory 注册
 
 [Transport]
 - Core → Wire 单一 mapper
