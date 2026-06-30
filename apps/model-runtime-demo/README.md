@@ -105,6 +105,12 @@ V1.1 stage-07 的工作台可在会话页选择 `openai-compatible` 或 `ollama`
 只保存在当前页面 React state 与单次 POST body 中，不写入数据库、Wire Event、trace 或 Debug
 Panel。模型创建仍在宿主侧 strategy registry 中完成，不修改 `ai-core` Workflow。
 
+长期记忆抽取跟随当前聊天模型：OpenAI-compatible 通过 Vercel AI SDK structured output
+生成 `ModelMemoryExtractor` 的对象结果；Ollama 通过 `format: "json"` 生成 JSON 后由同一
+Zod schema 校验。写入与召回仍由 demo 注入的 `MemoryProvider` 负责，因此 Ollama 只替换
+聊天/抽取模型，不提供 embedding 或数据库能力；`OPENAI_EMBEDDING_MODEL` 与
+`DATABASE_URL` 仍决定真实长期记忆是否可持久化。
+
 本地契约样例位于 `app/lib/chat-stream-contract-verifier.ts`，覆盖正常完成、空白 delta、
 stream 不支持、步骤失败、output safety 拒绝、memory 写回降级与 Wire 序列化边界。
 可用以下命令在控制台复现这些场景：
@@ -142,11 +148,12 @@ pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
 A. Persona：/companions/[id]/edit 配置 userAddress、hobbies、appearance → Prompt Preview 分区正确
 B. OpenAI 流式：/conversations/[id] 发送消息 → NDJSON text:delta 增量 → finish 后 debug 面板完整
 C. Ollama 流式：会话页 provider=ollama → 流式回复；runtime 显示 ollama 模型名
-D. 工具规划：注册工具 + 支持 toolCalling 的模型 → Timeline 区分 plan / call / result / delta
-E. Fallback：配置 fallback 模型 → runtime 显示实际使用模型与 capability skip
-F. Safety / partial：见 verify:stream-contract 契约场景；UI 需本地确认标注文案
-G. NDJSON：pnpm verify:stream-contract（chunk 边界、raw 剥离）
-H. 工程：pnpm typecheck && pnpm lint && pnpm build
+D. Ollama 记忆写回：启用 Postgres 记忆后发送明确长期事件 → Memory Events 显示 extract/save 成功
+E. 工具规划：注册工具 + 支持 toolCalling 的模型 → Timeline 区分 plan / call / result / delta
+F. Fallback：配置 fallback 模型 → runtime 显示实际使用模型与 capability skip
+G. Safety / partial：见 verify:stream-contract 契约场景；UI 需本地确认标注文案
+H. NDJSON：pnpm verify:stream-contract（chunk 边界、raw 剥离）
+I. 工程：pnpm typecheck && pnpm lint && pnpm build
 ```
 
 自动化契约验证：

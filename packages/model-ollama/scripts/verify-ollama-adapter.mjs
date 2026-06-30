@@ -148,6 +148,39 @@ record("fallbackGenerate", {
   fallbackUsed: fallbackOutput.runtime?.fallbackUsed,
 });
 
+const jsonModeRequests = [];
+const jsonModeModel = new OllamaChatModel(
+  { model: "json-local" },
+  {
+    async chat(request) {
+      jsonModeRequests.push(request);
+      return createChatResponse(request.model, '{"ok":true}');
+    },
+  },
+);
+const jsonModeOutput = await jsonModeModel.generate({
+  messages: [{ role: "user", content: "json please" }],
+  structuredOutput: {
+    type: "object",
+    schema: {
+      parse(value) {
+        if (value?.ok !== true) {
+          throw new Error("invalid structured output");
+        }
+        return value;
+      },
+    },
+    name: "json_mode_result",
+  },
+});
+assert(jsonModeRequests[0]?.format === "json", "json response format should map to Ollama format");
+assert(jsonModeOutput.text === '{"ok":true}', "json mode output mismatch");
+assert(jsonModeOutput.structuredOutput?.ok === true, "json structured output mismatch");
+record("jsonResponseFormat", {
+  requestFormat: jsonModeRequests[0]?.format,
+  structuredOutput: jsonModeOutput.structuredOutput,
+});
+
 const midStreamCalls = [];
 const midStreamModel = new OllamaChatModel(
   {

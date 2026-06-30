@@ -28,8 +28,8 @@ export function toOllamaMessages(messages: ChatMessage[]): Message[] {
 export function toOllamaRequestOptions(
   input: GenerateInput,
   keepAlive?: string | number,
-): Pick<ChatRequest, "messages" | "options" | "keep_alive"> {
-  const request: Pick<ChatRequest, "messages" | "options" | "keep_alive"> = {
+): Pick<ChatRequest, "messages" | "options" | "keep_alive" | "format"> {
+  const request: Pick<ChatRequest, "messages" | "options" | "keep_alive" | "format"> = {
     messages: toOllamaMessages(input.messages),
   };
   const options: NonNullable<ChatRequest["options"]> = {};
@@ -48,6 +48,10 @@ export function toOllamaRequestOptions(
 
   if (keepAlive !== undefined) {
     request.keep_alive = keepAlive;
+  }
+
+  if (input.structuredOutput?.type === "object") {
+    request.format = "json";
   }
 
   return request;

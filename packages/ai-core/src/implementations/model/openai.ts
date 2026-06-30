@@ -8,6 +8,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   generateText,
+  Output as AiOutput,
   streamText,
   type LanguageModelUsage,
   type LanguageModel,
@@ -187,6 +188,16 @@ export class OpenAICompatibleModel implements ChatModel {
       options.maxOutputTokens = input.maxTokens;
     }
 
+    if (input.structuredOutput?.type === "object") {
+      options.output = AiOutput.object({
+        schema: input.structuredOutput.schema,
+        ...(input.structuredOutput.name !== undefined ? { name: input.structuredOutput.name } : {}),
+        ...(input.structuredOutput.description !== undefined
+          ? { description: input.structuredOutput.description }
+          : {}),
+      });
+    }
+
     return options;
   }
 
@@ -208,6 +219,10 @@ export class OpenAICompatibleModel implements ChatModel {
 
     if (toolCalls !== undefined) {
       output.toolCalls = toolCalls;
+    }
+
+    if (input.structuredOutput !== undefined) {
+      output.structuredOutput = result.output;
     }
 
     return output;
@@ -264,6 +279,7 @@ interface TextOptions {
   model: LanguageModel;
   messages: ModelMessage[];
   tools?: ToolSet;
+  output?: ReturnType<typeof AiOutput.object>;
   temperature?: number;
   maxOutputTokens?: number;
   maxRetries: number;

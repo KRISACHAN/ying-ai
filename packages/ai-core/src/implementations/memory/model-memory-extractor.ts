@@ -65,11 +65,16 @@ export class ModelMemoryExtractor implements MemoryExtractor {
           this.model.generate({
             messages: buildExtractionMessages(input, attempt > 0, this.maxHistoryMessages),
             temperature: 0,
+            structuredOutput: {
+              type: "object",
+              schema: MemoryExtractionResultSchema,
+              name: "memory_extraction_result",
+              description: "Long-term memories extracted from the current conversation turn.",
+            },
           }),
           this.timeoutMs,
         );
-        const json = parseJsonObject(output.text);
-        const parsed = MemoryExtractionResultSchema.parse(json);
+        const parsed = MemoryExtractionResultSchema.parse(output.structuredOutput);
 
         return {
           memories: parsed.memories.map((memory) => ({
@@ -155,24 +160,6 @@ function buildExtractionMessages(
       ].join("\n"),
     },
   ];
-}
-
-/** 解析模型输出的 JSON；支持从 markdown 包裹中提取 `{...}` 子串。 */
-function parseJsonObject(text: string): unknown {
-  const trimmed = text.trim();
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-
-    if (start < 0 || end <= start) {
-      throw new Error("Memory extraction output is not JSON");
-    }
-
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
 }
 
 export type { ExtractedMemory };

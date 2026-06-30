@@ -183,6 +183,10 @@ export class OllamaChatModel implements ChatModel {
       output.toolCalls = toolCalls;
     }
 
+    if (input.structuredOutput !== undefined) {
+      output.structuredOutput = input.structuredOutput.schema.parse(JSON.parse(output.text));
+    }
+
     return output;
   }
 

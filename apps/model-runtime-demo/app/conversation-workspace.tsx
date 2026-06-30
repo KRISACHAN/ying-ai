@@ -392,8 +392,12 @@ function ModelConfigForm({
             onChange={(event) => {
               onChange(
                 event.target.value === "ollama"
-                  ? { provider: "ollama", model: "llama3.1", host: "http://127.0.0.1:11434" }
-                  : { provider: "openai-compatible", model: "" },
+                  ? {
+                      provider: "ollama",
+                      model: "dzgg/gemma-4-abliterated:e2b-v2",
+                      host: "http://127.0.0.1:11434",
+                    }
+                  : { provider: "openai-compatible", model: "gpt-4o-mini" },
               );
             }}
           >

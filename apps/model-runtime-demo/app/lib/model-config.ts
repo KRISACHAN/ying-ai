@@ -85,7 +85,7 @@ export function loadDefaultDebugModelConfig(env: NodeJS.ProcessEnv): DebugModelC
 
     return {
       provider: "ollama",
-      model: readOptionalEnv(env, "OLLAMA_MODEL") ?? "llama3.1",
+      model: readOptionalEnv(env, "OLLAMA_MODEL") ?? "dzgg/gemma-4-abliterated:e2b-v2",
       ...(host !== undefined ? { host } : {}),
       ...(keepAlive !== undefined ? { keepAlive } : {}),
       ...profileOverrideToDebugCapabilities(readProfileOverride(env, "OLLAMA_MODEL")),

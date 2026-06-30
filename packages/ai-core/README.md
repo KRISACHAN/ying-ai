@@ -278,7 +278,7 @@ flowchart TD
 
 6. 写回（generate 之后，不阻断主回复）
    ├─ summaryUpdater.update + summary.save  → 压缩旧 history（可选）
-   ├─ memoryExtractor.extract(...)          → 额外 1 次 LLM（JSON 抽取）
+   ├─ memoryExtractor.extract(...)          → 额外 1 次 LLM（structuredOutput 抽取）
    └─ memory.save(...)                      → 额外 N 次 embedding + DB INSERT
 
 7. 返回
@@ -334,17 +334,17 @@ flowchart LR
 
 ### 4.2 单轮流程中的 AI / LLM 知识点
 
-| 知识点                 | 出现在哪一步                                      | 说明                                                 |
-| ---------------------- | ------------------------------------------------- | ---------------------------------------------------- |
-| **Chat Completion**    | 主 `generate`、工具二次生成                       | `ChatMessage[]` → 文本回复                           |
-| **RAG**                | `Memory.recall`                                   | query 向量化 → TopK → 注入 system prompt             |
-| **结构化输出（JSON）** | `MemoryExtractor`、`SummaryUpdater`               | LLM + Zod schema 校验                                |
-| **滚动上下文窗口**     | `Summary` + `recentHistory`                       | 长对话压缩旧消息，控制 token                         |
-| **Persona Prompting**  | `buildPersonaPrompt` / `buildPersonaSystemPrompt` | 结构化 Persona、用户称呼、兴趣与外貌设定驱动回复风格 |
-| **Emotion Prompting**  | `Emotion.analyze`（阶段 5）                       | 情绪连续性注入 prompt                                |
-| **Function Calling**   | 主 `generate` + Tool 循环（阶段 6）               | `toolCalls` → execute → re-generate                  |
-| **Embedding**          | recall / save                                     | 语义检索与持久化（在 `memory-postgres`）             |
-| **主模型重试与降级**   | 每次 `generate`                                   | `ModelRuntimeInfo` 记录尝试与错误摘要                |
+| 知识点                | 出现在哪一步                                      | 说明                                                      |
+| --------------------- | ------------------------------------------------- | --------------------------------------------------------- |
+| **Chat Completion**   | 主 `generate`、工具二次生成                       | `ChatMessage[]` → 文本回复                                |
+| **RAG**               | `Memory.recall`                                   | query 向量化 → TopK → 注入 system prompt                  |
+| **结构化输出**        | `MemoryExtractor`、`SummaryUpdater`               | `GenerateInput.structuredOutput` / JSON + Zod schema 校验 |
+| **滚动上下文窗口**    | `Summary` + `recentHistory`                       | 长对话压缩旧消息，控制 token                              |
+| **Persona Prompting** | `buildPersonaPrompt` / `buildPersonaSystemPrompt` | 结构化 Persona、用户称呼、兴趣与外貌设定驱动回复风格      |
+| **Emotion Prompting** | `Emotion.analyze`（阶段 5）                       | 情绪连续性注入 prompt                                     |
+| **Function Calling**  | 主 `generate` + Tool 循环（阶段 6）               | `toolCalls` → execute → re-generate                       |
+| **Embedding**         | recall / save                                     | 语义检索与持久化（在 `memory-postgres`）                  |
+| **主模型重试与降级**  | 每次 `generate`                                   | `ModelRuntimeInfo` 记录尝试与错误摘要                     |
 
 ### 4.3 记忆与隔离
 
@@ -519,6 +519,23 @@ await model.stream({
 OpenAI-compatible adapter 会先筛选 primary / fallback profile，能力不满足的候选不会发请求，并记录到
 `ModelRuntimeInfo.capabilitySkips` 或 `ModelCapabilityUnavailableError.capabilitySkips`。未声明
 `requiredCapabilities` 的旧 `generate()` 调用保持 V1.0 行为。
+
+内部结构化任务可通过 `GenerateInput.structuredOutput` 声明对象 schema。OpenAI-compatible
+adapter 使用 Vercel AI SDK `Output.object({ schema })` 生成并校验结构化对象；非 AI SDK
+adapter 可映射到自身的 JSON/结构化输出能力后再用同一 schema 校验。`ModelMemoryExtractor`
+使用该契约抽取长期记忆，不再依赖从自由文本中手动截取 JSON。
+
+```ts
+await model.generate({
+  messages,
+  temperature: 0,
+  structuredOutput: {
+    type: "object",
+    schema: MemoryExtractionResultSchema,
+    name: "memory_extraction_result",
+  },
+});
+```
 
 `DefaultToolPlanningProvider` 是独立规划器：有工具时要求模型满足 `toolCalling: true`，只返回
 `no_tool` 或 `tool_calls`，不会执行工具，也不会把规划模型的自然语言 `text` 作为用户可见回复。

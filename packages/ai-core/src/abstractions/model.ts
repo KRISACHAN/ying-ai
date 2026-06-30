@@ -5,6 +5,7 @@
  * 只通过 generate / stream 与模型交互。toolCalls 结构已预留，执行循环在阶段 6 接入。
  */
 import type { CoreProvider } from "./provider";
+import type { z } from "zod";
 
 export type ChatMessageRole = "system" | "user" | "assistant" | "tool";
 
@@ -26,8 +27,17 @@ export interface GenerateInput {
   tools?: Record<string, unknown>;
   temperature?: number;
   maxTokens?: number;
+  /** 请求模型生成经过 schema 校验的结构化对象；不支持的 adapter 可忽略。 */
+  structuredOutput?: GenerateStructuredOutput;
   /** 本次调用必须满足的模型能力；未声明时保持 V1.0 兼容行为。 */
   requiredCapabilities?: RequiredModelCapabilities;
+}
+
+export interface GenerateStructuredOutput {
+  type: "object";
+  schema: z.ZodType<unknown>;
+  name?: string;
+  description?: string;
 }
 
 /** Token 用量统计（来自 AI SDK usage）。 */
@@ -42,6 +52,7 @@ export interface GenerateOutput {
   text: string;
   model: string;
   raw: unknown;
+  structuredOutput?: unknown;
   toolCalls?: ModelToolCall[];
   usage?: GenerateUsage;
   runtime?: ModelRuntimeInfo;
