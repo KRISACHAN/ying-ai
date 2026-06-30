@@ -13,7 +13,7 @@ import type {
   WorkflowRunDetail,
   WorkflowRunListItem,
 } from "./lib/debug-types";
-import type { DebugModelConfig } from "./lib/model-config";
+import { validateDebugModelConfig, type DebugModelConfig } from "./lib/model-config";
 
 const MODEL_CONFIG_STORAGE_KEY = "demo:model-config:v1";
 
@@ -60,9 +60,10 @@ export function ConversationWorkspace({
       const stored = window.sessionStorage.getItem(MODEL_CONFIG_STORAGE_KEY);
 
       if (stored !== null) {
-        setModelConfig(JSON.parse(stored) as DebugModelConfig);
+        setModelConfig(validateDebugModelConfig(JSON.parse(stored)));
       }
     } catch {
+      window.sessionStorage.removeItem(MODEL_CONFIG_STORAGE_KEY);
       setModelConfig(defaultModelConfig);
     }
   }, [defaultModelConfig]);

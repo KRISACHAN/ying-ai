@@ -548,9 +548,18 @@ export class DebugRepository {
     userMessageId: string;
     error: unknown;
     observerEvents: SerializedCoreEvent[];
+    partialOutputText?: string;
   }): Promise<WorkflowRunDetail> {
     const client = await this.pool.connect();
     const errorSummary = toSafeErrorMessage(input.error);
+    const errorTrace = findErrorTrace(input.observerEvents);
+    const errorWorkflowId = findErrorWorkflowId(input.observerEvents);
+    const debugContext = buildFailureDebugContext({
+      workflowId: errorWorkflowId,
+      ...(input.partialOutputText !== undefined
+        ? { partialOutputText: input.partialOutputText }
+        : {}),
+    });
 
     try {
       await client.query("BEGIN");
@@ -570,7 +579,8 @@ export class DebugRepository {
             observer_events_json = $4,
             error_summary = $5,
             trace_json = $6,
-            workflow_id = $7
+            workflow_id = $7,
+            debug_context_json = $8
           WHERE id = $1 AND conversation_id = $2 AND user_message_id = $3
           RETURNING *
         `,
@@ -580,8 +590,9 @@ export class DebugRepository {
           input.userMessageId,
           toJsonParam(input.observerEvents),
           errorSummary,
-          toJsonParam(findErrorTrace(input.observerEvents)),
-          findErrorWorkflowId(input.observerEvents),
+          toJsonParam(errorTrace),
+          errorWorkflowId,
+          toJsonParam(debugContext),
         ],
       );
       await client.query(
@@ -1037,6 +1048,20 @@ function rowToRunDetail(row: RunRow): WorkflowRunDetail {
     toolSnapshot: row.tool_snapshot_json,
     errorSummary: row.error_summary,
     createdAt: row.created_at.toISOString(),
+  };
+}
+
+function buildFailureDebugContext(input: {
+  partialOutputText?: string;
+  workflowId: string | null;
+}): Record<string, unknown> | null {
+  if (input.partialOutputText === undefined || input.partialOutputText === "") {
+    return null;
+  }
+
+  return {
+    partial_output_text: input.partialOutputText,
+    workflow_id: input.workflowId,
   };
 }
 

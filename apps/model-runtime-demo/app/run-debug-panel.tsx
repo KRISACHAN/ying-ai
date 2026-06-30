@@ -98,6 +98,10 @@ export function RunDebugPanel({
         <DebugPre title="Summary Context" value={debugContext?.summaryContext ?? "（无）"} />
         <DebugPre title="Emotion Context" value={debugContext?.emotionContext ?? "（无）"} />
         <DebugPre title="Initial Generate Messages" value={debugContext?.messages ?? []} />
+        <DebugPre
+          title="Partial Output Text"
+          value={getPartialOutputText(debugContext) ?? "（无）"}
+        />
       </section>
 
       <section className="debug-section">
@@ -309,6 +313,15 @@ function formatEmotion(emotion: EmotionState | null | undefined): string {
   }
 
   return `${emotion.current} / ${Number(emotion.intensity.toFixed(2))}`;
+}
+
+function getPartialOutputText(debugContext: unknown): string | null {
+  if (typeof debugContext !== "object" || debugContext === null || Array.isArray(debugContext)) {
+    return null;
+  }
+
+  const value = (debugContext as Record<string, unknown>).partial_output_text;
+  return typeof value === "string" && value !== "" ? value : null;
 }
 
 function render(value: unknown): string {

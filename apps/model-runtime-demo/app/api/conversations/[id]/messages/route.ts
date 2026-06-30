@@ -146,6 +146,7 @@ async function streamConversation(input: {
   let finishEvent: ChatWorkflowStreamWireEvent | null = null;
   let generatedOutput: ChatWorkflowOutput | null = null;
   let terminalSent = false;
+  let partialOutputText = "";
 
   try {
     for await (const event of input.runtime.core.streamWorkflow({
@@ -180,6 +181,10 @@ async function streamConversation(input: {
 
       const wireEvent = toChatWorkflowStreamWireEvent(event);
 
+      if (event.type === "text:delta") {
+        partialOutputText += event.text;
+      }
+
       if (event.type === "workflow:error") {
         await input.repository.failRun({
           conversationId: input.conversationId,
@@ -187,6 +192,7 @@ async function streamConversation(input: {
           userMessageId: input.pending.userMessage.id,
           error: new Error(event.error.message),
           observerEvents: serializeEvents(input.runtime.observer.events),
+          ...(partialOutputText !== "" ? { partialOutputText } : {}),
         });
         enqueue(input.controller, wireEvent);
         terminalSent = true;
@@ -211,14 +217,18 @@ async function streamConversation(input: {
     } catch (error) {
       const safeMessage = toSafeRuntimeMessage(error);
 
-      await input.repository.markRunPersistenceFailure({
-        conversationId: input.conversationId,
-        runId: input.pending.run.id,
-        userMessageId: input.pending.userMessage.id,
-        output: generatedOutput,
-        observerEvents: serializeEvents(input.runtime.observer.events),
-        error: new Error(`persistence failed after model output: ${safeMessage}`),
-      });
+      try {
+        await input.repository.markRunPersistenceFailure({
+          conversationId: input.conversationId,
+          runId: input.pending.run.id,
+          userMessageId: input.pending.userMessage.id,
+          output: generatedOutput,
+          observerEvents: serializeEvents(input.runtime.observer.events),
+          error: new Error(`persistence failed after model output: ${safeMessage}`),
+        });
+      } catch {
+        // The browser contract must still expose the original persistence failure semantics.
+      }
 
       enqueue(
         input.controller,
@@ -245,6 +255,7 @@ async function streamConversation(input: {
         userMessageId: input.pending.userMessage.id,
         error: new Error(safeMessage),
         observerEvents: serializeEvents(input.runtime.observer.events),
+        ...(partialOutputText !== "" ? { partialOutputText } : {}),
       });
     } catch {
       // The stream is already established; expose the original failure to the browser.

@@ -11,7 +11,6 @@ export type DebugModelConfig =
       baseUrl?: string;
       retry?: {
         maxAttempts?: number;
-        initialDelayMs?: number;
       };
       fallback?: {
         model: string;
@@ -274,14 +273,9 @@ function readOptionalRetry(value: unknown): OpenAIDebugRetry {
     throw new Error("modelConfig.retry must be an object.");
   }
   const maxAttempts = readOptionalNumberValue(value.maxAttempts, "modelConfig.retry.maxAttempts");
-  const initialDelayMs = readOptionalNumberValue(
-    value.initialDelayMs,
-    "modelConfig.retry.initialDelayMs",
-  );
 
   return {
     ...(maxAttempts !== undefined ? { maxAttempts } : {}),
-    ...(initialDelayMs !== undefined ? { initialDelayMs } : {}),
   };
 }
 
