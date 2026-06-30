@@ -1,8 +1,6 @@
 # @ying-companion/model-runtime-demo
 
-阶段 1～8 的 Next.js 调试应用。它不是正式用户产品，而是本地 AI Companion Core
-调试工作台：创建伴侣、创建/继续/删除会话、持久化消息/情绪/摘要、回看 Workflow
-Trace，并在独立页面管理长期记忆。
+V1.0 持久化调试工作台 + **V1.1 Core Workflow Debug Workbench**。不是正式用户产品，而是本地 AI Companion Core 调试宿主：创建伴侣、配置 Persona、OpenAI-compatible / Ollama 聊天、NDJSON 流式输出、Workflow Timeline，以及长期记忆管理。
 
 ## 环境变量
 
@@ -121,7 +119,46 @@ pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
 - **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
 - **scope 隔离**：工作台固定使用 `ownerType=custom`、`ownerId=local-debug-owner`，长期记忆按 `owner + companion` 隔离；删除会话不会删除长期记忆。
 
-## Stage 8 手工验收
+## 聊天状态（V1.1）
+
+会话页每条 assistant 回合可能处于：
+
+| 状态                 | 含义                                                        |
+| -------------------- | ----------------------------------------------------------- |
+| `success`            | 流式完成且持久化成功                                        |
+| `degraded`           | 主回复完成，后置 Memory / Emotion / Summary 等步骤降级      |
+| `partial-failed`     | 已有部分 `text:delta`，但未成功完成（无 `workflow:finish`） |
+| `failed`             | 首个 delta 前失败或无可展示文本                             |
+| `safety-rejected`    | 完整文本 output safety 拒绝                                 |
+| `persistence-failed` | 模型输出已生成，但 DB 持久化失败；刷新后可能丢失            |
+
+`workflow:finish` 仅在 `DebugRepository.completeRun()` 成功后发送；持久化失败走 `workflow:error` + `details.reason=persistence_failed`。
+
+## V1.1 手工验收
+
+主链路（需有效 API key / 本地 Ollama + 可选 Postgres）：
+
+```txt
+A. Persona：/companions/[id]/edit 配置 userAddress、hobbies、appearance → Prompt Preview 分区正确
+B. OpenAI 流式：/conversations/[id] 发送消息 → NDJSON text:delta 增量 → finish 后 debug 面板完整
+C. Ollama 流式：会话页 provider=ollama → 流式回复；runtime 显示 ollama 模型名
+D. 工具规划：注册工具 + 支持 toolCalling 的模型 → Timeline 区分 plan / call / result / delta
+E. Fallback：配置 fallback 模型 → runtime 显示实际使用模型与 capability skip
+F. Safety / partial：见 verify:stream-contract 契约场景；UI 需本地确认标注文案
+G. NDJSON：pnpm verify:stream-contract（chunk 边界、raw 剥离）
+H. 工程：pnpm typecheck && pnpm lint && pnpm build
+```
+
+自动化契约验证：
+
+```bash
+pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
+pnpm --filter @ying-companion/model-ollama verify:adapter
+```
+
+验收记录：[`.code-reviews/v1.1/acceptance/manual-verification.md`](../../.code-reviews/v1.1/acceptance/manual-verification.md)
+
+## V1.0 持久化验收（仍有效）
 
 ```txt
 1. 打开 /，创建一个伴侣，再用该伴侣创建会话。

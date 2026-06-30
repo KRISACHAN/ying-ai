@@ -1,6 +1,6 @@
 # @ying-companion/ai-core
 
-AI Companion Core V1 的纯 SDK 核心包。提供可插拔的 Provider 抽象、模型运行时与聊天工作流编排，供宿主应用注入配置并驱动「用户输入 → 伴侣回复」的完整生命周期。
+AI Companion Core 纯 SDK 核心包（V1.0 基线 + V1.1 流式扩展）。提供可插拔的 Provider 抽象、模型运行时与聊天工作流编排，供宿主应用注入配置并驱动「用户输入 → 伴侣回复」的完整生命周期。
 
 ---
 
@@ -525,6 +525,47 @@ OpenAI-compatible adapter 会先筛选 primary / fallback profile，能力不满
 
 ---
 
+## 5.2 V1.1 流式工作流（`streamWorkflow`）
+
+### 双路入口
+
+| 方法                | 返回类型                                 | 用途                             |
+| ------------------- | ---------------------------------------- | -------------------------------- |
+| `executeWorkflow()` | `Promise<ChatWorkflowOutput>`            | 非流式、后台任务、旧宿主兼容     |
+| `streamWorkflow()`  | `AsyncIterable<ChatWorkflowStreamEvent>` | 聊天 UI、实时 Timeline、调试面板 |
+
+`streamWorkflow()` 必须以 `workflow:finish`（成功）或 `workflow:error`（失败）收口；仅有 `text:delta` 不代表成功完成。Core 门面对漏发终止事件会补发安全的 `workflow:error`。
+
+### Core 流事件
+
+```txt
+workflow:start
+step:start / step:end
+text:delta
+tool:call / tool:result
+workflow:finish | workflow:error
+```
+
+最终用户可见回复走 `model.stream()` → `text:delta`；情绪分析、记忆抽取、摘要更新、工具规划与工具执行等内部步骤仍使用非流式 `generate()`。
+
+### Core Event vs Wire Event
+
+- **Core Event**（`ChatWorkflowStreamEvent`）：可含 `Date`、完整 `ChatWorkflowOutput`、调试上下文。
+- **Wire Event**（宿主定义，如 demo 的 `ChatWorkflowStreamWireEvent`）：JSON 可序列化 DTO；不得透传 `raw`、`Error` 实例或未转换的 `Date`。
+
+NDJSON、HTTP、持久化顺序（`workflow:finish` 晚于 DB 写回）由宿主负责，见 [`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)。
+
+### 错误语义摘要
+
+| 情况                         | 预期行为                                       |
+| ---------------------------- | ---------------------------------------------- |
+| 首个 `text:delta` 前模型失败 | retry / fallback 或 `workflow:error`           |
+| 已输出部分文本后失败         | 保留 partial text；`workflow:error`，无 finish |
+| Output Safety 拒绝           | `workflow:error`；不发送 `workflow:finish`     |
+| Memory / Emotion 等后置失败  | 主回复可完成；trace / debug 标 degraded        |
+
+---
+
 ## 6. Provider 默认实现一览
 
 | 插槽                   | 默认实现                                       | `meta.id`                 |
@@ -547,7 +588,10 @@ OpenAI-compatible adapter 会先筛选 primary / fallback profile，能力不满
 ## 相关文档
 
 - V1.0 总体规划：[`.requirements/prompts/03-v1.0-plan.md`](../../.requirements/prompts/03-v1.0-plan.md)
+- V1.1 总体规划：[`.requirements/prompts/04-v1.1-plan.md`](../../.requirements/prompts/04-v1.1-plan.md)
 - V1 边界：[`.requirements/prompts/02-execution.md`](../../.requirements/prompts/02-execution.md)
 - V1.0 阶段规格：[`.requirements/stages/v1.0/`](../../.requirements/stages/v1.0/)
+- V1.1 阶段规格：[`.requirements/stages/v1.1/`](../../.requirements/stages/v1.1/)
+- Ollama 适配器：[`packages/model-ollama`](../model-ollama/README.md)
 - 调试应用：[`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)
 - PostgreSQL 记忆：[`packages/memory-postgres`](../memory-postgres/README.md)

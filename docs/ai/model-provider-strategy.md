@@ -47,3 +47,43 @@ fallback 不满足能力时记录 capability skip，不发请求
 - 有工具时调用 `generate({ requiredCapabilities: { toolCalling: true } })`；
 - 模型不支持工具调用时降级为 `no_tool(reason=tool_calling_unavailable)`；
 - 规划器不执行工具，也不把模型规划文本作为用户可见回复。
+
+## Stream Workflow Lifecycle (V1.1)
+
+详细事件顺序与 Core API：[`packages/ai-core/README.md`](../../packages/ai-core/README.md) § 5.2。
+
+```txt
+Persona → Safety input → Summary load → Memory recall → Emotion
+→ Tool list → Tool plan (generate) → Tool execute (generate, if any)
+→ Final response (stream → text:delta)
+→ Safety output (full text) → Summary save → Memory extract/save
+→ workflow:finish
+```
+
+宿主消费：`core.streamWorkflow()` → map Core Event → Wire Event → NDJSON POST response.
+
+Implementation reference: [`apps/model-runtime-demo/app/lib/chat-stream-wire.ts`](../../apps/model-runtime-demo/app/lib/chat-stream-wire.ts).
+
+## Core Event / Wire Event / NDJSON
+
+| Layer     | Type                           | Owner      |
+| --------- | ------------------------------ | ---------- |
+| Core      | `ChatWorkflowStreamEvent`      | `ai-core`  |
+| Wire      | `ChatWorkflowStreamWireEvent`  | demo host  |
+| Transport | POST + `ReadableStream` NDJSON | demo route |
+
+Rules: strip `raw`, serialize dates as ISO strings, map `Error` to `SafeWorkflowError`. Do not duplicate full DTO definitions here — see stage-02 spec and demo wire mapper.
+
+Verify: `pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract`
+
+## Ollama Local Development
+
+See [`packages/model-ollama/README.md`](../../packages/model-ollama/README.md). Chat provider and embedding provider are independent.
+
+## Debug Workbench Observability
+
+See [`apps/model-runtime-demo/README.md`](../../apps/model-runtime-demo/README.md) — Timeline, runtime, Persona preview, memory/emotion/summary panels, chat turn status.
+
+## V1.1 Limitations
+
+See [`.code-reviews/v1.1/conclusion.md`](../../.code-reviews/v1.1/conclusion.md) § 已知限制.

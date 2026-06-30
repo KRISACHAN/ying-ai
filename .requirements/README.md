@@ -16,8 +16,10 @@ Root archive for **ying-companion requirement and planning documents**. AI agent
     01-detail.md
     02-execution.md
     03-v1.0-plan.md
+    04-v1.1-plan.md
   stages/                   # Versioned executable stage task archives
     v1.0/
+    v1.1/
       stage-{NN}/
         {NN}-{topic}.md       # Main stage spec (source of truth when merged)
         {NN}-{topic}-patch.md # Optional amendment / change record
@@ -38,8 +40,9 @@ Numbered files form a **sequential planning pipeline**. Read in order when you n
 | [`prompts/01-detail.md`](prompts/01-detail.md)       | Core module capabilities | Context recall, tool use, agent pipeline, persona, memory, emotion, safety — _what_ the AI companion core must support                                                                   |
 | [`prompts/02-execution.md`](prompts/02-execution.md) | Execution constraints    | V1 scope boundaries: pure core/SDK, no auth/users/deploy, pluggable slots, env vars, no tests/UI focus for v1, structured stage output format                                            |
 | [`prompts/03-v1.0-plan.md`](prompts/03-v1.0-plan.md) | V1.0 master roadmap      | **AI Companion Core V1.0** eight-stage plan (Model Runtime → Core abstractions → chat loop → memory → emotion → tools → workflow → debug UI); lists planned sub-task filenames per stage |
+| [`prompts/04-v1.1-plan.md`](prompts/04-v1.1-plan.md) | V1.1 master roadmap      | **V1.1** eight-stage plan (Persona → stream contract → model profiles → step refactor → streaming workflow → Ollama → NDJSON workbench → documentation & review)                         |
 
-**Relationship:** `02-execution.md` was used to produce `03-v1.0-plan.md`. Stage task files under `stages/v1.0/` are the **detailed specs** derived from that roadmap — prefer them over the high-level bullets inside `03-v1.0-plan.md` when implementing.
+**Relationship:** `02-execution.md` was used to produce `03-v1.0-plan.md` and constrains both releases. Stage task files under `stages/{version}/` are the **detailed specs** — prefer them over high-level bullets inside plan files when implementing.
 
 ---
 
@@ -96,16 +99,31 @@ stages/v1.0/stage-08/
 
 **V1.0 topic:** `@ying-companion/ai-core` core SDK plus `apps/model-runtime-demo` debug workbench. The release covers runtime, DI, chat workflow, memory, emotion, tools, workflow orchestration, and observability. Core must **not** read env vars or host demo UI.
 
+**V1.1 topic:** Persona extensions, workflow-level streaming (`streamWorkflow`), model capability profiles, tool planning, Ollama adapter (`packages/model-ollama`), NDJSON debug workbench. V1.0 `executeWorkflow()` remains compatible. **Stage 8** is documentation, manual acceptance, and review archive only — no new Core features.
+
+```txt
+stages/v1.1/stage-01/  01-persona-profile.md
+stages/v1.1/stage-02/  02-v1.1-contract.md
+stages/v1.1/stage-03/  03-model-provider-strategy.md
+stages/v1.1/stage-04/  04-workflow-step-refactor.md
+stages/v1.1/stage-05/  05-streaming-workflow.md (+ refactor patch)
+stages/v1.1/stage-06/  06-ollama-model-adapter.md
+stages/v1.1/stage-07/  07-debug-workbench-streaming.md
+stages/v1.1/stage-08/  08-documentation-and-review.md
+```
+
+Reviews: [`.code-reviews/v1.1/`](../.code-reviews/v1.1/conclusion.md). Do not rewrite frozen stage docs to fake history; new work builds on the V1.1 baseline.
+
 ---
 
 ## Typical Agent Workflow
 
 ```txt
 1. Planning / orientation
-   → prompts/00-basic.md → 01-detail.md → 03-v1.0-plan.md (skip 02 unless tracing plan origin)
+   → prompts/00-basic.md → 01-detail.md → 03-v1.0-plan.md or 04-v1.1-plan.md
 
 2. Before implementing a stage
-   → stages/v1.0/stage-{NN}/{NN}-{topic}.md (main spec)
+   → stages/{version}/stage-{NN}/{NN}-{topic}.md (main spec)
    → skim patches only if merge note or ambiguity requires history
 
 3. During implementation
@@ -137,6 +155,8 @@ When generating **new** requirement or stage docs, follow project convention: **
 **"What must the AI core do?"** → [`prompts/01-detail.md`](prompts/01-detail.md)
 
 **"What are the V1.0 stages?"** → [`prompts/03-v1.0-plan.md`](prompts/03-v1.0-plan.md) § 总体阶段规划
+
+**"What are the V1.1 stages?"** → [`prompts/04-v1.1-plan.md`](prompts/04-v1.1-plan.md) · [`stages/v1.1/`](stages/v1.1/)
 
 **"What was implemented for stage 1?"** → [`stages/v1.0/stage-01/01-model-runtime.md`](stages/v1.0/stage-01/01-model-runtime.md)
 

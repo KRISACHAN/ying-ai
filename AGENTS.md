@@ -25,16 +25,17 @@
 
 ## Project Snapshot
 
-| Layer           | Location                  | Status                                                                         |
-| --------------- | ------------------------- | ------------------------------------------------------------------------------ |
-| **AI Core SDK** | `packages/ai-core`        | V1.1 in progress — persona/profile, stream contract, model provider strategy   |
-| **Debug app**   | `apps/model-runtime-demo` | V1.1 debug workbench — persisted state, persona config, provider observability |
-| **Product API** | `apps/api`                | Scaffold — planned RBAC backend                                                |
-| **Product web** | `apps/web`                | Scaffold — planned user frontend                                               |
+| Layer              | Location                  | Status                                                                                  |
+| ------------------ | ------------------------- | --------------------------------------------------------------------------------------- |
+| **AI Core SDK**    | `packages/ai-core`        | **V1.1 complete** — `streamWorkflow`, tool planning, model profiles, shared step runner |
+| **Ollama adapter** | `packages/model-ollama`   | **V1.1 complete** — `createOllamaChatModel()`                                           |
+| **Debug app**      | `apps/model-runtime-demo` | **V1.1 complete** — NDJSON streaming workbench, Persona, OpenAI + Ollama                |
+| **Product API**    | `apps/api`                | Scaffold — planned RBAC backend                                                         |
+| **Product web**    | `apps/web`                | Scaffold — planned user frontend                                                        |
 
-**V1 boundary** ([`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in.
+**V1 boundary** ([`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in. **Core Event** (`ChatWorkflowStreamEvent`) stays in Core; **Wire Event** (`ChatWorkflowStreamWireEvent`) is mapped in the demo — do not serialize `Date` / `raw` / `Error` to the network.
 
-**Current package:** V1.0 is frozen under [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/) with reviews under [`.code-reviews/v1.0/`](.code-reviews/v1.0/). V1.1 execution is tracked under [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/) with roadmap [`.requirements/prompts/04-v1.1-plan.md`](.requirements/prompts/04-v1.1-plan.md).
+**Current package:** V1.0 frozen (tag `v1.0`) — [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/) · [`.code-reviews/v1.0/`](.code-reviews/v1.0/). **V1.1 complete** — stages [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/) · conclusion [`.code-reviews/v1.1/conclusion.md`](.code-reviews/v1.1/conclusion.md) · roadmap [`.requirements/prompts/04-v1.1-plan.md`](.requirements/prompts/04-v1.1-plan.md).
 
 ---
 
@@ -61,6 +62,7 @@ Full conventions: [`.requirements/README.md`](.requirements/README.md). Requirem
 | When                                | Read / do                                                            |
 | ----------------------------------- | -------------------------------------------------------------------- |
 | Check if a V1.0 commit was reviewed | `v1.0/{n}-{7-char-sha}/` folder                                      |
+| Check V1.1 stage / release reviews  | `v1.1/{n}-{7-char-sha}/` · `v1.1/conclusion.md` · `v1.1/acceptance/` |
 | Understand past findings            | `{tool}-review.md` in that versioned folder                          |
 | Verify fixes                        | `{model}-followup.md` in same folder                                 |
 | Write a new review                  | `.codex/skills/code-review/` → `.code-reviews/{version}/{n}-{slug}/` |
@@ -99,7 +101,10 @@ Shared tool map: [docs/ai/platforms.md](docs/ai/platforms.md). Tool-specific beh
 
 When editing under `apps/` or `packages/`, read that package's `README.md`:
 
-- [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — V1.0 debug workbench env vars and local run
+- [packages/ai-core/README.md](packages/ai-core/README.md) — Core SDK, `executeWorkflow` / `streamWorkflow`, tool planning
+- [packages/model-ollama/README.md](packages/model-ollama/README.md) — Ollama adapter, capability overrides
+- [packages/memory-postgres/README.md](packages/memory-postgres/README.md) — Postgres memory + embedding (independent of chat provider)
+- [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — NDJSON workbench, env vars, local run
 - [apps/web/README.md](apps/web/README.md) · [apps/api/README.md](apps/api/README.md) — product scaffolds
 
 ---
