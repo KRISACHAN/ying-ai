@@ -338,7 +338,7 @@ flowchart LR
 | --------------------- | ------------------------------------------------- | --------------------------------------------------------- |
 | **Chat Completion**   | 主 `generate`、工具二次生成                       | `ChatMessage[]` → 文本回复                                |
 | **RAG**               | `Memory.recall`                                   | query 向量化 → TopK → 注入 system prompt                  |
-| **结构化输出**        | `MemoryExtractor`、`SummaryUpdater`               | `GenerateInput.structuredOutput` / JSON + Zod schema 校验 |
+| **结构化输出**        | `MemoryExtractor`                                 | `GenerateInput.structuredOutput` / JSON + Zod schema 校验 |
 | **滚动上下文窗口**    | `Summary` + `recentHistory`                       | 长对话压缩旧消息，控制 token                              |
 | **Persona Prompting** | `buildPersonaPrompt` / `buildPersonaSystemPrompt` | 结构化 Persona、用户称呼、兴趣与外貌设定驱动回复风格      |
 | **Emotion Prompting** | `Emotion.analyze`（阶段 5）                       | 情绪连续性注入 prompt                                     |
@@ -522,8 +522,9 @@ OpenAI-compatible adapter 会先筛选 primary / fallback profile，能力不满
 
 内部结构化任务可通过 `GenerateInput.structuredOutput` 声明对象 schema。OpenAI-compatible
 adapter 使用 Vercel AI SDK `Output.object({ schema })` 生成并校验结构化对象；非 AI SDK
-adapter 可映射到自身的 JSON/结构化输出能力后再用同一 schema 校验。`ModelMemoryExtractor`
-使用该契约抽取长期记忆，不再依赖从自由文本中手动截取 JSON。
+adapter 可映射到自身的 JSON/结构化输出能力后再用同一 schema 校验。Adapter 收到
+`structuredOutput` 时必须填充 `GenerateOutput.structuredOutput`，或显式抛出不支持结构化输出的错误。
+`ModelMemoryExtractor` 使用该契约抽取长期记忆，不再依赖从自由文本中手动截取 JSON。
 
 ```ts
 await model.generate({

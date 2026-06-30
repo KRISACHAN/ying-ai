@@ -1,8 +1,8 @@
 /**
  * 基于 LLM + Zod 的结构化记忆抽取器。
  *
- * 用低 temperature 的 generate 输出 JSON，经 schema 校验后返回 ExtractedMemory[]。
- * 支持超时与 JSON 解析失败重试。
+ * 用低 temperature 的 generate 请求结构化对象，经 schema 校验后返回 ExtractedMemory[]。
+ * 支持超时与结构化输出失败重试。
  */
 import { z } from "zod";
 
@@ -55,7 +55,7 @@ export class ModelMemoryExtractor implements MemoryExtractor {
     this.timeoutMs = options.timeoutMs ?? 15_000;
   }
 
-  /** 调用 LLM 抽取结构化记忆；JSON 解析失败时按 retryCount 重试。 */
+  /** 调用 LLM 抽取结构化记忆；结构化输出缺失或不符合 schema 时按 retryCount 重试。 */
   public async extract(input: MemoryExtractionInput): Promise<MemoryExtractionResult> {
     let lastError: unknown;
 
@@ -74,6 +74,10 @@ export class ModelMemoryExtractor implements MemoryExtractor {
           }),
           this.timeoutMs,
         );
+        if (output.structuredOutput === undefined) {
+          throw new Error("Memory extraction requires GenerateOutput.structuredOutput");
+        }
+
         const parsed = MemoryExtractionResultSchema.parse(output.structuredOutput);
 
         return {
@@ -118,7 +122,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
-/** 构造记忆抽取的 system/user 消息；isRetry 时追加 JSON 格式纠错指令。 */
+/** 构造记忆抽取的 system/user 消息；isRetry 时追加结构化输出纠错指令。 */
 function buildExtractionMessages(
   input: MemoryExtractionInput,
   isRetry: boolean,
@@ -129,7 +133,7 @@ function buildExtractionMessages(
     .map((message) => `${message.role}: ${message.content}`)
     .join("\n");
   const retryInstruction = isRetry
-    ? "\n上一次输出不是合法 JSON 或不符合 schema。请只输出合法 JSON，不要添加解释。"
+    ? "\n上一次结构化输出不符合 schema。请只返回符合 schema 的 JSON 对象，不要添加解释。"
     : "";
 
   return [

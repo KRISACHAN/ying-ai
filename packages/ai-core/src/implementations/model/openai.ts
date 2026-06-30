@@ -350,9 +350,13 @@ function toAiSdkMessages(messages: ChatMessage[]): ModelMessage[] {
   });
 }
 
-/** 拒绝空文本且无 toolCalls 的模型输出。 */
+/** 拒绝空文本、无 toolCalls、且无结构化对象的模型输出。 */
 function validateGenerateOutput(output: GenerateOutput): void {
-  if (!output.text.trim() && (output.toolCalls?.length ?? 0) === 0) {
+  if (
+    !output.text.trim() &&
+    output.structuredOutput === undefined &&
+    (output.toolCalls?.length ?? 0) === 0
+  ) {
     throw new Error("Model output is empty");
   }
 }

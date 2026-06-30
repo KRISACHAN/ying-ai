@@ -330,7 +330,11 @@ function getMaxAttempts(maxRetries: number): number {
 }
 
 function validateGenerateOutput(output: GenerateOutput): void {
-  if (!output.text.trim() && (output.toolCalls?.length ?? 0) === 0) {
+  if (
+    !output.text.trim() &&
+    output.structuredOutput === undefined &&
+    (output.toolCalls?.length ?? 0) === 0
+  ) {
     throw new Error("Ollama model output is empty");
   }
 }

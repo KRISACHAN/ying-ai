@@ -27,7 +27,10 @@ export interface GenerateInput {
   tools?: Record<string, unknown>;
   temperature?: number;
   maxTokens?: number;
-  /** 请求模型生成经过 schema 校验的结构化对象；不支持的 adapter 可忽略。 */
+  /**
+   * 请求模型生成经过 schema 校验的结构化对象。
+   * Adapter 收到该字段时必须填充 GenerateOutput.structuredOutput，或显式抛出不支持结构化输出的错误。
+   */
   structuredOutput?: GenerateStructuredOutput;
   /** 本次调用必须满足的模型能力；未声明时保持 V1.0 兼容行为。 */
   requiredCapabilities?: RequiredModelCapabilities;
