@@ -193,7 +193,9 @@ function normalizeSource(item: TavilyResult, index: number): WebSearchSource | n
     return null;
   }
 
-  const publishedAt = readString(item.published_date) ?? readString(item.publishedDate);
+  const publishedAt = normalizePublishedAt(
+    readString(item.published_date) ?? readString(item.publishedDate),
+  );
   const score =
     typeof item.score === "number" && Number.isFinite(item.score) ? item.score : undefined;
   const faviconUrl = normalizeHttpUrl(readString(item.favicon_url) ?? readString(item.favicon));
@@ -238,6 +240,20 @@ function truncate(value: string | undefined, maxLength: number): string | undefi
   }
 
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+}
+
+function normalizePublishedAt(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const timestamp = Date.parse(value);
+
+  if (!Number.isFinite(timestamp)) {
+    return undefined;
+  }
+
+  return new Date(timestamp).toISOString();
 }
 
 function mapHttpError(status: number): WebSearchError {

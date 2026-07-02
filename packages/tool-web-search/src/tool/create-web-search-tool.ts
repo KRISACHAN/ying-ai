@@ -107,6 +107,7 @@ async function executeWebSearchTool(
         query: request.query,
         provider: response.provider,
         durationMs: response.durationMs,
+        empty: true,
       });
     }
 
