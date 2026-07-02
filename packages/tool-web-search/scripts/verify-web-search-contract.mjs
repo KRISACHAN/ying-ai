@@ -71,6 +71,7 @@ async function verifiesNoResults() {
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "TOOL_EXECUTION_FAILED");
   assert.equal(result.metadata.code, "WEB_SEARCH_NO_RESULTS");
+  assert.equal(result.metadata.empty, true);
 }
 
 async function verifiesInvalidArguments() {
@@ -144,6 +145,12 @@ async function verifiesTavilyNormalization() {
                 content: "Second snippet",
                 published_date: "2026-07-02",
               },
+              {
+                title: "Bad date",
+                url: "https://example.net/c",
+                content: "Bad date snippet",
+                published_date: "not-a-date",
+              },
             ],
           };
         },
@@ -155,10 +162,16 @@ async function verifiesTavilyNormalization() {
 
   assert.equal(fetchCalls.length, 1);
   assert.equal(response.provider, "tavily");
-  assert.equal(response.sources.length, 2);
+  assert.equal(response.sources.length, 3);
   assert.equal(response.sources[0].url, "https://example.com/a");
-  assert.equal(response.sources[1].publishedAt, "2026-07-02");
-  assert.equal(response.metadata.sourceCount, 2);
+  assert.equal(response.sources[1].publishedAt, "2026-07-02T00:00:00.000Z");
+  assert.equal(response.sources[2].title, "Bad date");
+  assert.equal(response.sources[2].publishedAt, undefined);
+  assert.equal(
+    response.sources.some((source) => source.publishedAt === "not-a-date"),
+    false,
+  );
+  assert.equal(response.metadata.sourceCount, 3);
 }
 
 main().catch((error) => {
