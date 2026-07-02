@@ -75,10 +75,12 @@ packages/ai-core
 ├── 不读取环境变量
 ├── 不直连 PostgreSQL
 ├── 不依赖 Tavily SDK、HTTP URL 搜索 API 或浏览器能力
-├── 不硬编码 web_search 分支
+├── 不在 Workflow / formatToolResultForModel 中硬编码 web_search 分支
+├── 允许扩展 MemoryExtractionInput（见 §9.2）
 └── 只通过 ToolRegistry.list / execute 消费工具
 
 packages/tool-web-search
+├── 可依赖 @ying-companion/ai-core（ToolDefinition / ToolHandler）
 ├── 定义供应商无关搜索契约
 ├── 实现 Tavily Adapter
 ├── 创建 web_search Tool
@@ -98,7 +100,7 @@ apps/model-runtime-demo
 
 完成本阶段后，必须满足：
 
-- `packages/tool-web-search` 存在且不依赖 `ai-core` 以外的宿主实现；
+- `packages/tool-web-search` 存在，可依赖 `@ying-companion/ai-core`（`ToolDefinition` / `ToolHandler`），但不依赖 Demo / Next.js 等宿主实现；
 - 供应商无关的 `WebSearchClient`、`WebSearchRequest`、`WebSearchResponse`、`WebSearchSource` 已冻结；
 - Tavily 是首个实现，但后续接 Exa、Brave、Serper、Bing 或内部搜索不需要修改 Workflow、Tool Definition 或来源渲染契约；
 - `web_search` 通过现有 `ToolRegistry` 注册和执行，Workflow 不出现专用搜索 if/else；
@@ -109,9 +111,10 @@ apps/model-runtime-demo
 - Tavily 响应必须标准化，最多保留 5 个来源，且不把 raw provider response、raw content、HTML 或全文写入 Prompt、UI 安全结构或长期存储；
 - Final Response 可以使用标准化来源中的外部事实，并受本文件第十章事实约束；
 - 本轮成功使用 `web_search` 时，Memory Extractor 仍可提取用户稳定偏好和个人经历，但不得把外部网页事实写入长期 Memory / pgvector；
-- 搜索失败、无结果、参数错误、限流、超时等均转为稳定 `ToolResult`，不得向模型或前端泄漏原始错误栈；
+- 搜索失败、无结果、参数错误、限流、超时等均转为稳定 `ToolResult`（`metadata.domain` + `metadata.code`），不得向模型或前端泄漏原始错误栈；
 - Debug Workbench 能观察当前搜索可用状态、查询词、工具调用、来源摘要、错误码、Provider、耗时以及模型能力；
 - 现有 `executeWorkflow()`、`streamWorkflow()`、OpenAI-compatible / Ollama Adapter、Memory scope 与会话持久化不被破坏；
+- `pnpm --filter @ying-companion/tool-web-search verify:web-search-contract` 通过（不依赖真实 Tavily 付费请求）；
 - 相关 package 的 typecheck、lint、build 均通过，并完成本文件定义的人工验收场景。
 
 ---
@@ -123,9 +126,13 @@ apps/model-runtime-demo
 ```txt
 packages/
 ├── ai-core/
-│   └── 不新增 Tavily 依赖；继续只消费 ToolRegistry
+│   ├── 不新增 Tavily 依赖；Workflow 不出现 web_search 专用分支
+│   └── 允许小幅扩展 Memory 契约（见 §9.2）
 │
 └── tool-web-search/
+    ├── package.json          # dependencies: @ying-companion/ai-core, Tavily SDK 或 HTTP client
+    ├── scripts/
+    │   └── verify-web-search-contract.mjs
     ├── src/
     │   ├── abstractions/
     │   │   └── web-search.ts
@@ -135,21 +142,20 @@ packages/
     │   │   └── create-web-search-tool.ts
     │   ├── errors/
     │   │   └── web-search-error.ts
-    │   ├── index.ts
-    │   └── package.json
+    │   └── index.ts
     └── README.md
 
 apps/model-runtime-demo/
-├── app/api/conversations/[id]/route.ts
-├── app/api/chat/route.ts
+├── app/api/conversations/[id]/route.ts   # 新增 PATCH webSearchEnabled（当前仅有 GET / DELETE）
+├── app/api/conversations/[id]/messages/route.ts
 ├── lib/
-│   ├── web-search-runtime.ts
-│   ├── tool-registry-factory.ts
+│   ├── web-search-runtime.ts             # resolveWebSearchRegistration / infra 探测
+│   ├── companion-runtime.ts              # createConversationRuntime + createDemoTools 条件注册
 │   ├── debug-repository.ts
-│   ├── debug-types.ts
-│   └── companion-runtime.ts
+│   └── debug-types.ts
 ├── migrations/
-│   └── 000X_add_web_search_enabled.sql
+│   ├── 0003_add_web_search_enabled.sql
+│   └── 0004_workflow_runs_assistant_message_unique.sql
 └── .env.example
 ```
 
@@ -163,7 +169,8 @@ apps/model-runtime-demo
 → 负责“是否允许当前对话使用搜索、如何创建 Adapter、如何保存开关与展示调试信息”。
 
 packages/ai-core
-→ 不知道 web_search 的供应商细节；只把它当成一个普通 Tool。
+→ 不知道 web_search 的供应商细节；只把它当成一个普通 Tool；
+→ 可为 Memory 隔离扩展 `MemoryExtractionInput`，但不得在 Workflow / formatToolResultForModel 中硬编码 web_search 分支。
 ```
 
 ---
@@ -218,6 +225,7 @@ export interface WebSearchClient {
 - publishedAt 必须为 ISO 字符串；
 - metadata 只能承载安全、可 JSON 序列化的补充信息；
 - 不在该抽象中放模型、Prompt、ToolRegistry 或 Demo UI 类型。
+- `excludeDomains` 仅作为供应商无关契约预留；V1.2 Tool Definition 不暴露给模型，宿主也不映射。
 ```
 
 ### 5.2 `web_search` Tool Definition
@@ -266,7 +274,62 @@ interface WebSearchToolData {
   durationMs?: number;
   sources: WebSearchSource[];
   sourceCount: number;
+  /** 外部事实引用规则；由 createWebSearchTool 写入，随 result 进入 model tool message */
+  usageInstructions: string;
 }
+```
+
+成功时推荐 `ToolResult` 形状（`error.code` 保持既有 union，domain 码走 `metadata`）：
+
+```ts
+const result: ToolResult = {
+  toolCallId: input.call.id,
+  name: "web_search",
+  ok: true,
+  result: {
+    query: response.query,
+    provider: response.provider,
+    durationMs: response.durationMs,
+    sources: response.sources,
+    sourceCount: response.sources.length,
+    usageInstructions: WEB_SEARCH_USAGE_INSTRUCTIONS,
+  },
+  metadata: {
+    provider: response.provider,
+    durationMs: response.durationMs,
+    sourceCount: response.sources.length,
+    domain: "web_search",
+  },
+};
+```
+
+失败时：
+
+```ts
+const result: ToolResult = {
+  toolCallId: input.call.id,
+  name: "web_search",
+  ok: false,
+  result: null,
+  error: {
+    code: "TOOL_EXECUTION_FAILED",
+    message: "Web Search 请求超时",
+  },
+  metadata: {
+    provider: "tavily",
+    domain: "web_search",
+    code: "WEB_SEARCH_TIMEOUT",
+  },
+};
+```
+
+约束：
+
+```txt
+- 不扩展 packages/ai-core 的 ToolExecutionErrorCode union；
+- UI / Debug 按 metadata.domain + metadata.code 分支，不得解析 error.message 自由文本；
+- formatToolResultForModel 保持通用 JSON 序列化，只输出 result 字段；
+- sources 完整副本只放在 result.sources；metadata 仅承载 UI / Debug 摘要，避免 Prompt 重复膨胀。
 ```
 
 禁止放入：
@@ -365,6 +428,8 @@ WEB_SEARCH_NO_RESULTS
 
 所有失败
 → ToolResult.ok = false；
+→ ToolResult.error.code 保持 TOOL_EXECUTION_FAILED / TOOL_INVALID_ARGUMENTS 等既有值；
+→ 稳定 domain 码写入 ToolResult.metadata.domain + ToolResult.metadata.code；
 → 不向模型或 UI 透传 provider stack、API key 或原始响应。
 ```
 
@@ -422,6 +487,22 @@ PATCH /api/conversations/[id]
 ```
 
 发送消息时以数据库中持久化的会话开关为准；不得由每一条消息临时提交、直接信任前端布尔值。
+
+宿主注册落点（按当前仓库结构写死）：
+
+```txt
+resolveWebSearchRegistration()
+→ apps/model-runtime-demo/app/lib/web-search-runtime.ts
+
+createDemoTools({ webSearch, memory, scope, fallbackEmotion })
+→ apps/model-runtime-demo/app/lib/companion-runtime.ts
+
+createConversationRuntime({ companion, conversationId, webSearchEnabled, modelConfig, ... })
+→ 读取 conversation 持久化开关 + 当前 ModelProfile，再决定是否 register(web_search)
+
+POST /api/conversations/[id]/messages
+→ 从 repository.getConversationDetail() 取 webSearchEnabled 传入 createConversationRuntime()
+```
 
 ### 7.3 Debug Runtime 可用状态
 
@@ -521,11 +602,34 @@ Web Search Result
 
 禁止因为一次搜索而关闭整轮 Memory 提取；需要排除的是**外部来源事实**，不是用户自身信息。
 
+本阶段允许的 `ai-core` 小改（有意扩展契约，不是 Workflow 搜索分支）：
+
+```txt
+packages/ai-core/src/abstractions/memory.ts
+→ MemoryExtractionInput 增加 externalContextUsed?: boolean、excludedToolNames?: string[]
+
+packages/ai-core/src/implementations/memory/model-memory-extractor.ts
+→ 当 externalContextUsed / excludedToolNames 存在时，补充 extractor system prompt
+
+packages/ai-core/src/implementations/workflow/workflow-steps.ts
+→ extractAndSaveMemories 从本轮 toolResults 推导上述字段（例如存在 ok=true 的 web_search）
+```
+
 ---
 
 ## 十、外部事实与来源引用约束
 
-对成功的 `web_search` Result，`formatToolResultForModel(result)` 或 Final Response Tool Context 必须注入等价规则：
+对成功的 `web_search` Result，等价规则必须进入模型可见的 tool role message，但**不得**在 `ai-core` 的 `formatToolResultForModel` 或 `SimpleChatWorkflow` 中硬编码 `tool.name === "web_search"`。
+
+推荐落点：
+
+```txt
+1. packages/tool-web-search 定义常量 WEB_SEARCH_USAGE_INSTRUCTIONS；
+2. createWebSearchTool 将其写入 WebSearchToolData.usageInstructions；
+3. ai-core 现有 formatToolResultForModel 原样 JSON 序列化 result，规则随 result 进入 Final Response 上下文。
+```
+
+`usageInstructions` 必须包含等价语义：
 
 ```txt
 以下内容来自外部网页搜索，仅作为本轮参考资料。
@@ -565,15 +669,35 @@ Web Search Result
 ```txt
 DebugWorkflowRun.assistantMessageId
 → DebugMessage.id
+
+DebugWorkflowRun.tool_snapshot_json.results[]
+→ 从中提取 name=web_search 且 ok=true 的 ToolResult.result.sources
 ```
 
-迁移语义：
+来源存储字段（V1.2 stage 1 明确选型）：
+
+```txt
+复用现有 debug_workflow_runs.tool_snapshot_json，不新增 sources 专用列。
+tool_snapshot_json 由 pickToolSnapshot(output) 写入，至少包含：
+  results: output.toolResults
+  calls / definitions / dropped / followUpGenerated
+
+stage 2 刷新恢复时：
+  assistant message → assistantMessageId → workflow run → tool_snapshot_json.results
+  → 找到 web_search 成功结果 → 映射 WebSearchSource[]
+```
+
+`assistant_message_id` 与现有代码对齐：
+
+```txt
+- 0001_create_debug_workspace.sql 已创建 assistant_message_id 列；
+- DebugRepository.completeRun() 已在同一事务内写入 assistant message 并回填 assistant_message_id；
+- 本阶段只需补 UNIQUE partial index，并重做 sources 写入策略，不是从零实现关联事务。
+```
+
+迁移语义（仅需新增 index migration，例如 0004）：
 
 ```sql
-ALTER TABLE debug_workflow_runs
-ADD COLUMN IF NOT EXISTS assistant_message_id <与 debug_messages.id 相同类型> NULL
-REFERENCES debug_messages(id) ON DELETE SET NULL;
-
 CREATE UNIQUE INDEX IF NOT EXISTS debug_workflow_runs_assistant_message_id_unique
 ON debug_workflow_runs (assistant_message_id)
 WHERE assistant_message_id IS NOT NULL;
@@ -585,21 +709,20 @@ WHERE assistant_message_id IS NOT NULL;
 - 一个 completed workflow run 最多关联一条 assistant message；
 - 一条 assistant message 最多关联一个 workflow run；
 - failed run、输入拒绝、未生成 assistant 文本的 run 可保持 assistantMessageId = null；
-- 刷新恢复时，某条 assistant message 的来源只从其关联 workflow run 的安全结果 JSON 读取；
+- 刷新恢复时，某条 assistant message 的来源只从其关联 workflow run 的 tool_snapshot_json 读取；
 - 禁止按 conversationId 猜测“最近一条 run”并把来源挂到错误消息上。
 ```
 
 ### 11.2 原子持久化顺序
 
-对于正常完成的 assistant 回复，宿主必须采用同一事务或等价原子语义：
+对于正常完成的 assistant 回复，宿主必须采用同一事务或等价原子语义。当前 `DebugRepository.completeRun()` 已具备事务骨架，本阶段在其上扩展 sources 安全写入即可：
 
 ```txt
-1. 创建或更新 workflow run；
-2. 保存 assistant message；
-3. 将 workflow run.assistantMessageId 关联到该 message；
-4. 保存安全的 workflow result / sources；
-5. 提交事务；
-6. 之后才对客户端发送成功完成语义。
+1. workflow 完成，得到 assistant text、ToolResult、Runtime、Trace；
+2. 在同一事务内 INSERT assistant debug_message；
+3. UPDATE debug_workflow_run（含 assistant_message_id、trace_json、tool_snapshot_json 等）；
+4. 提交事务；
+5. 仅提交成功后对客户端发送 workflow:finish / 成功完成语义。
 ```
 
 禁止：
@@ -635,7 +758,8 @@ useChat.stop() / 客户端停止消费
 ```txt
 - 客户端 stop 后不得据此把 run 标记为 aborted / partial；
 - 只有服务端确实观测到 workflow 自身失败时，才按既有错误语义记录失败；
-- 阶段 2 UI 必须避免把客户端停止显示误导为“服务端已取消”。
+- 阶段 2 UI 必须避免把客户端停止显示误导为“服务端已取消”；
+- 场景 8 的完整 UI 文案与 stopped-locally 交互在阶段 2 验收；阶段 1 仅冻结语义并验证持久化不被误标 aborted。
 ```
 
 ---
@@ -651,7 +775,8 @@ useChat.stop() / 客户端停止消费
 - 配置 package、tsconfig、exports、README；
 - 定义 WebSearchClient / Request / Response / Source；
 - 定义稳定 domain error；
-- 确保 package 不依赖 Demo UI 和 ai-core 实现细节。
+- 配置 package.json：依赖 `@ying-companion/ai-core`，不依赖 Demo / Next.js；
+- 预留 scripts/verify-web-search-contract.mjs 与 verify:web-search-contract 脚本入口。
 ```
 
 完成标准：
@@ -659,7 +784,8 @@ useChat.stop() / 客户端停止消费
 ```txt
 - package 可被 Demo 引入；
 - types 可独立 typecheck；
-- 契约不出现 Tavily SDK 类型泄漏。
+- 契约不出现 Tavily SDK 类型泄漏；
+- verify:web-search-contract 脚本骨架存在（可在子任务 03 补全断言）。
 ```
 
 ### 13.2 子任务 02：实现 TavilyWebSearchClient
@@ -690,8 +816,9 @@ useChat.stop() / 客户端停止消费
 - createWebSearchTool(client, options)；
 - 固定模型可见参数；
 - 将 Tool args 转为 WebSearchRequest；
-- 返回安全 WebSearchToolData；
-- 对错误映射为 ToolResult.ok=false。
+- 返回含 usageInstructions 的安全 WebSearchToolData；
+- 对错误映射为 ToolResult.ok=false，domain 码写入 metadata；
+- 实现 verify:web-search-contract（mock Tavily / 纯结构校验，不依赖真实付费请求）。
 ```
 
 完成标准：
@@ -699,7 +826,8 @@ useChat.stop() / 客户端停止消费
 ```txt
 - Tool 可被既有 ToolRegistry 注册；
 - Tool execute 不依赖 Workflow 内部类型；
-- Tool result 可被 Final Response 安全消费。
+- Tool result 可被 Final Response 安全消费；
+- pnpm --filter @ying-companion/tool-web-search verify:web-search-contract 通过。
 ```
 
 ### 13.4 子任务 04：实现对话开关与条件注册
@@ -707,9 +835,11 @@ useChat.stop() / 客户端停止消费
 内容：
 
 ```txt
-- migration：debug_conversations.web_search_enabled；
-- repository / type / API 支持读取与 PATCH 更新；
-- runtime 工厂根据 infra、conversation、ModelProfile 决定是否创建并注册 Tool；
+- migration 0003：debug_conversations.web_search_enabled；
+- DebugConversation / repository / GET detail 返回 webSearchEnabled；
+- 在 conversations/[id]/route.ts 新增 PATCH { webSearchEnabled }；
+- web-search-runtime.ts + companion-runtime.ts 条件注册；
+- messages/route.ts 读取 conversation.webSearchEnabled 传入 createConversationRuntime；
 - Debug 数据输出可用状态与原因。
 ```
 
@@ -728,10 +858,10 @@ useChat.stop() / 客户端停止消费
 
 ```txt
 - 复用既有 Tool Planning / Tool Execute / Final Response；
-- 格式化 web_search Tool Result 的外部事实规则；
-- 扩展 Memory Extraction Input 与 Extractor prompt；
+- 通过 WebSearchToolData.usageInstructions 注入外部事实规则（不改 ai-core formatToolResultForModel）；
+- ai-core：扩展 MemoryExtractionInput + ModelMemoryExtractor prompt + workflow-steps 传参；
 - 禁止 web_search 结果进入长期 Memory 候选来源；
-- 将安全 sources 写入 Workflow Trace / result JSON。
+- 确保 pickToolSnapshot / tool_snapshot_json 含完整 ToolResult，供 stage 2 恢复 sources。
 ```
 
 完成标准：
@@ -749,10 +879,9 @@ useChat.stop() / 客户端停止消费
 内容：
 
 ```txt
-- migration：debug_workflow_runs.assistant_message_id；
-- 实现 assistant message 与 completed run 原子关联；
-- 保存来源到安全 run result；
-- Debug 页面或 console 能查看 query、sources、duration、error、availability。
+- migration 0004：debug_workflow_runs.assistant_message_id UNIQUE partial index；
+- 在既有 completeRun 事务上确认 tool_snapshot_json 含 web_search sources；
+- Debug 页面或 console 能查看 query、sources、duration、metadata.code、availability。
 ```
 
 完成标准：
@@ -761,7 +890,7 @@ useChat.stop() / 客户端停止消费
 - 两轮连续搜索后，来源可以准确归属各自 assistant message；
 - 刷新前后的来源恢复数据一致；
 - 持久化失败不得伪造成功；
-- stop 后服务端完成的消息与来源可在刷新后恢复。
+- stop 语义不被误标 aborted（完整 UI 验证留 stage 2）。
 ```
 
 ---
@@ -821,7 +950,7 @@ useChat.stop() / 客户端停止消费
 前置：搜索开启。
 操作：输入无意义或极端罕见 query，或使用受控异常 mock。
 预期：
-- Tool Result 有稳定 domain code；
+- Tool Result 有稳定 metadata.code（如 WEB_SEARCH_NO_RESULTS）；
 - 最终回复坦诚未获得可靠资料；
 - 不把猜测包装成搜索结论；
 - 不泄漏 provider stack。
@@ -845,7 +974,7 @@ useChat.stop() / 客户端停止消费
 前置：同一 conversation 连续进行两次不同搜索。
 操作：刷新页面或重新加载 conversation。
 预期：
-- 每条 assistant message 只显示自身 workflow run 的 sources；
+- 每条 assistant message 只显示自身 workflow run 的 tool_snapshot_json 中 web_search sources；
 - 第一轮来源不会挂到第二轮消息；
 - 不按“最新 workflow run”进行错误恢复。
 ```
@@ -896,8 +1025,9 @@ apps/model-runtime-demo
 ├── Web Search 对话级开关
 ├── 条件 Tool 注册
 ├── 搜索 Trace / Runtime / 来源安全数据
-├── workflow run ↔ assistant message 关联
-└── 可恢复来源所需的安全结果 JSON
+├── workflow run ↔ assistant message 关联（UNIQUE index）
+├── tool_snapshot_json 中的 web_search sources
+└── verify:web-search-contract 契约脚本
 
 .requirements/stages/v1.2/stage-01
 └── 本实施文档与对应 review 记录
@@ -907,8 +1037,8 @@ apps/model-runtime-demo
 
 ```txt
 - 安全且标准化的 WebSearchSource；
-- assistant message 与 workflow run 的稳定关联；
-- 可在流与持久化结果中恢复的 sources；
+- assistant message 与 workflow run 的稳定关联（含 UNIQUE index）；
+- 可在 tool_snapshot_json 中恢复的 sources；
 - 已有 Core Event / Wire Event 边界；
 - 已有对话级 web search enabled 状态。
 ```
