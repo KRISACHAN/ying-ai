@@ -4,7 +4,7 @@ import type { MemoryRecord, MemoryScope, RecalledMemory } from "../../abstractio
 import type { CoreObserver } from "../../abstractions/observer";
 import type { CompanionPersona } from "../../abstractions/persona";
 import type { ConversationSummary, SummaryScope } from "../../abstractions/summary";
-import type { ToolDefinition } from "../../abstractions/tool";
+import type { ToolDefinition, ToolResult } from "../../abstractions/tool";
 import type { ToolPlan } from "../../abstractions/tool-planning";
 import type { ChatWorkflowExecutionContext } from "../../abstractions/workflow";
 import { createNeutralEmotion } from "../emotion/transition";
@@ -497,6 +497,7 @@ interface ExtractAndSaveOptions {
   history: ChatMessage[];
   conversationId?: string;
   messageIds?: string[];
+  toolResults?: ToolResult[];
 }
 
 /** 抽取本轮记忆并保存（importance < 3 在 Workflow 层过滤）；失败不阻断主链路。 */
@@ -523,6 +524,7 @@ export async function extractAndSaveMemories(
           userMessage: options.userMessage,
           assistantMessage: options.assistantMessage,
           history: options.history.slice(-6),
+          ...deriveMemoryExternalContext(options.toolResults ?? []),
         });
         const extracted = result.memories;
 
@@ -639,6 +641,26 @@ export async function extractAndSaveMemories(
       ...(result.degraded ? { degraded: true, reason: result.reason } : {}),
     }),
   });
+}
+
+function deriveMemoryExternalContext(toolResults: ToolResult[]): {
+  externalContextUsed?: boolean;
+  excludedToolNames?: string[];
+} {
+  const successfulResults = toolResults.filter((result) => result.ok !== false);
+  const externalContextUsed = successfulResults.some(
+    (result) => result.metadata?.externalContext === true,
+  );
+  const excludedToolNames = successfulResults
+    .filter((result) => result.metadata?.memoryPolicy === "exclude-external-facts")
+    .map((result) => result.name);
+
+  return {
+    ...(externalContextUsed ? { externalContextUsed: true } : {}),
+    ...(excludedToolNames.length > 0
+      ? { excludedToolNames: Array.from(new Set(excludedToolNames)) }
+      : {}),
+  };
 }
 
 /** 将记忆对象裁剪为 Observer payload 可安全展示的字段。 */

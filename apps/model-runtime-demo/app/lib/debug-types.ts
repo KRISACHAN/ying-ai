@@ -42,6 +42,7 @@ export interface DebugConversation {
   title: string;
   lastMessagePreview: string | null;
   emotion: EmotionState | null;
+  webSearchEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

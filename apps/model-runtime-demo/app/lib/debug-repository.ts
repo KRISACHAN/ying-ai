@@ -56,6 +56,7 @@ interface ConversationRow {
   title: string;
   last_message_preview: string | null;
   emotion_json: EmotionState | null;
+  web_search_enabled: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -344,6 +345,24 @@ export class DebugRepository {
     );
 
     return (result.rowCount ?? 0) > 0;
+  }
+
+  public async updateConversationWebSearchEnabled(
+    id: string,
+    webSearchEnabled: boolean,
+  ): Promise<DebugConversation | null> {
+    await this.ready();
+    const result = await this.pool.query<ConversationRow>(
+      `
+        UPDATE debug_conversations
+        SET web_search_enabled = $4, updated_at = NOW()
+        WHERE owner_type = $1 AND owner_id = $2 AND id = $3
+        RETURNING *
+      `,
+      [LOCAL_DEBUG_OWNER.type, LOCAL_DEBUG_OWNER.id, id, webSearchEnabled],
+    );
+
+    return result.rows[0] !== undefined ? rowToConversation(result.rows[0]) : null;
   }
 
   public async listMessages(conversationId: string): Promise<DebugMessage[]> {
@@ -889,6 +908,7 @@ function rowToConversation(row: ConversationRow): DebugConversation {
     title: row.title,
     lastMessagePreview: row.last_message_preview,
     emotion: normalizeEmotion(row.emotion_json),
+    webSearchEnabled: row.web_search_enabled === true,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };

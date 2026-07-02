@@ -24,6 +24,7 @@ import {
   type DebugModelRequestSecrets,
 } from "./model-config";
 import { resolveChatMemoryRuntime, type MemoryRuntime } from "./memory-config";
+import { resolveWebSearchRuntime, type WebSearchRuntime } from "./web-search-runtime";
 
 export const DEFAULT_SUMMARY_OPTIONS: Required<SummaryOptions> = {
   enabled: false,
@@ -51,6 +52,7 @@ export interface ConversationRuntime {
   core: ReturnType<typeof createCompanionCore>;
   observer: CollectingObserver;
   memoryRuntime: MemoryRuntime;
+  webSearchRuntime: WebSearchRuntime;
   scope: MemoryScope;
   modelConfig: DebugModelConfig;
 }
@@ -58,6 +60,7 @@ export interface ConversationRuntime {
 export async function createConversationRuntime(input: {
   companion: DebugCompanion;
   conversationId: string;
+  webSearchEnabled: boolean;
   emotion: EmotionState | null;
   repository?: DebugRepository;
   modelConfig?: DebugModelConfig;
@@ -71,6 +74,11 @@ export async function createConversationRuntime(input: {
   );
   const model = createConfiguredModel(resolvedModel.providerConfig);
   const memoryRuntime = await resolveChatMemoryRuntime(process.env);
+  const webSearchRuntime = resolveWebSearchRuntime({
+    env: process.env,
+    model,
+    conversationEnabled: input.webSearchEnabled,
+  });
   const repository = input.repository ?? new DebugRepository();
   const scope: MemoryScope = {
     ownerType: LOCAL_DEBUG_OWNER.type,
@@ -81,6 +89,7 @@ export async function createConversationRuntime(input: {
     memory: memoryRuntime.provider,
     scope,
     fallbackEmotion: input.emotion ?? createNeutralDemoEmotion(),
+    webSearchRuntime,
   });
   const systemPrompt = input.companion.customInstructions.trim();
   const core = createCompanionCore({
@@ -110,6 +119,7 @@ export async function createConversationRuntime(input: {
     core,
     observer,
     memoryRuntime,
+    webSearchRuntime,
     scope,
     modelConfig: resolvedModel.debugConfig,
   };
@@ -141,6 +151,11 @@ export function attachProviderMetadata(
       toolProvider: inspection.providers.tools,
       debugModelConfig: runtime.modelConfig,
       memoryStatus: runtime.memoryRuntime.status,
+      webSearch: {
+        status: runtime.webSearchRuntime.status,
+        registered: runtime.webSearchRuntime.tool !== undefined,
+        config: runtime.webSearchRuntime.config,
+      },
       ...(runtime.memoryRuntime.reason !== undefined
         ? { memoryReason: runtime.memoryRuntime.reason }
         : {}),
@@ -172,6 +187,7 @@ function createDemoTools(options: {
   memory: MemoryProvider;
   scope: MemoryScope;
   fallbackEmotion: EmotionState;
+  webSearchRuntime: WebSearchRuntime;
 }): LocalToolRegistry {
   const tools = new LocalToolRegistry();
 
@@ -278,6 +294,10 @@ function createDemoTools(options: {
       result: readCurrentEmotion(input.metadata) ?? options.fallbackEmotion,
     }),
   );
+
+  if (options.webSearchRuntime.tool !== undefined) {
+    tools.register(options.webSearchRuntime.tool.definition, options.webSearchRuntime.tool.handler);
+  }
 
   return tools;
 }

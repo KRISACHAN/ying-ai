@@ -763,6 +763,7 @@ async function runMemoryExtractSaveStep(
   streamEmitter?: WorkflowStreamEmitter,
 ): Promise<void> {
   const modelOutput = requireStateValue(state.generation, "generation").finalOutput;
+  const generation = requireStateValue(state.generation, "generation");
 
   state.memoryResult = await extractAndSaveMemories({
     observer: context.core.observer,
@@ -775,6 +776,7 @@ async function runMemoryExtractSaveStep(
     userMessage: state.input.message,
     assistantMessage: modelOutput.text,
     history: state.sanitizedHistory,
+    toolResults: generation.toolResults,
     ...(state.input.conversationId !== undefined
       ? { conversationId: state.input.conversationId }
       : {}),

@@ -91,6 +91,9 @@ importers:
       '@ying-companion/model-ollama':
         specifier: workspace:*
         version: link:../../packages/model-ollama
+      '@ying-companion/tool-web-search':
+        specifier: workspace:*
+        version: link:../../packages/tool-web-search
       next:
         specifier: ^15.0.0
         version: 15.5.19(@opentelemetry/api@1.9.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -149,6 +152,12 @@ importers:
       ollama:
         specifier: ^0.6.3
         version: 0.6.3
+
+  packages/tool-web-search:
+    dependencies:
+      '@ying-companion/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
 
 packages:
 

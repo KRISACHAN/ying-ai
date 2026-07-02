@@ -20,11 +20,20 @@ OPENAI_FALLBACK_MODEL_SUPPORTS_USAGE=false
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 DATABASE_URL=
 MEMORY_POSTGRES_TABLE=companion_memories
+TAVILY_API_KEY=
+WEB_SEARCH_ENABLED=true
+WEB_SEARCH_TIMEOUT_MS=10000
+WEB_SEARCH_MAX_RESULTS=5
 ```
 
 `OPENAI_FALLBACK_MODEL` 为空时不启用降级。重试次数为空或非法时按 `0` 处理。能力覆盖变量为空时使用
 OpenAI-compatible adapter 默认值：`streaming=true`、`toolCalling=false`、`usage=false`。只有确认当前
 模型和网关支持工具调用或稳定 usage 后，才把对应能力显式设为 `true`。
+
+V1.2 Web Search 默认按会话关闭。只有同时满足以下条件时，宿主才会注册 `web_search`
+工具：`TAVILY_API_KEY` 存在、`WEB_SEARCH_ENABLED !== false`、当前模型链路支持
+`toolCalling`、`debug_conversations.web_search_enabled = true`。关闭或不可用时不会注册
+Disabled Tool，Planner 看不到 `web_search`。
 
 V1.1 Persona Profile 字段保存在 `debug_companions`：
 
@@ -66,6 +75,8 @@ createdb ying_companion_dev
 psql -d ying_companion_dev -f packages/memory-postgres/migrations/0001_create_companion_memories.sql
 psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0001_create_debug_workspace.sql
 psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0002_extend_debug_companion_persona.sql
+psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0003_add_web_search_enabled.sql
+psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0004_workflow_runs_assistant_message_unique.sql
 ```
 
 然后填写 `apps/model-runtime-demo/.env` 中的 `OPENAI_API_KEY`、`OPENAI_MODEL` 与
@@ -76,7 +87,8 @@ DATABASE_URL=postgresql://localhost:5432/ying_companion_dev
 ```
 
 首次 companion 读写会自动补齐 V1.1 Persona Profile 列，便于旧本地库继续运行；新环境和
-CI 仍建议显式执行上面的 migration，确保 schema 版本可审计。
+CI 仍建议显式执行上面的 migration，确保 schema 版本可审计。V1.2 也会自动补齐
+`web_search_enabled` 与 `assistant_message_id` partial unique index，显式 migration 仍是推荐路径。
 
 打开 Next.js 输出的本地地址：
 
@@ -95,6 +107,10 @@ Event 通过 `app/lib/chat-stream-wire.ts` 的唯一映射转换为 Wire Event�
 `DebugRepository.completeRun()` 成功写回 assistant message、workflow run、conversation
 emotion 与 preview 后才发送。旧的 `POST /api/chat` 保留为 legacy 非流式调试入口，不承载
 V1.1 工作台主链路。
+
+Conversation API 的 `GET /api/conversations/[id]` 返回 `conversation.webSearchEnabled`。
+`PATCH /api/conversations/[id]` 接收 `{ "webSearchEnabled": boolean }` 并持久化对话级搜索开关。
+消息发送不会信任请求体里的临时搜索开关，只读取数据库中的会话值。
 
 V1.1 stage-07 已将持久化会话 Route 接入 `POST + fetch + ReadableStream + NDJSON`。
 `app/lib/chat-stream-transport.ts` 提供 NDJSON 编码、浏览器增量解析与 Wire Event runtime
@@ -117,12 +133,14 @@ stream 不支持、步骤失败、output safety 拒绝、memory 写回降级与 
 
 ```bash
 pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
+pnpm --filter @ying-companion/model-runtime-demo verify:web-search-contract
 ```
 
 - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
 - **滚动摘要**：Stage 8 工作台接入 `debug_conversation_summaries` 持久化摘要，但默认关闭；启用后重启 dev server 仍可恢复。
 - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，展示 Effective Persona、Persona Prompt Preview、最终 system prompt、Conversation Summary、长期记忆块、Recent History 与当前用户输入。滚动摘要开启后重点查看 `summaryContext`、`recentHistory`、`summarizedMessages`、Conversation Summary、Updated Summary 与 Summary Events。
-- **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
+- **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；满足 V1.2 双层门控时额外注册 `web_search`。`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
+- **Web Search Runtime**：`ChatWorkflowOutput.metadata.webSearch` 展示 `enabled`、`user_disabled`、`infra_unavailable`、`model_unsupported` 之一，以及是否实际注册工具。
 - **scope 隔离**：工作台固定使用 `ownerType=custom`、`ownerId=local-debug-owner`，长期记忆按 `owner + companion` 隔离；删除会话不会删除长期记忆。
 
 ## 聊天状态（V1.1）
@@ -161,6 +179,7 @@ I. 工程：pnpm typecheck && pnpm lint && pnpm build
 ```bash
 pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
 pnpm --filter @ying-companion/model-ollama verify:adapter
+pnpm --filter @ying-companion/model-runtime-demo verify:web-search-contract
 ```
 
 验收记录：[`.code-reviews/v1.1/acceptance/manual-verification.md`](../../.code-reviews/v1.1/acceptance/manual-verification.md)

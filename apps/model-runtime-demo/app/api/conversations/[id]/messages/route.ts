@@ -79,6 +79,7 @@ export async function POST(
     runtime = await createConversationRuntime({
       companion: detail.companion,
       conversationId: id,
+      webSearchEnabled: detail.conversation.webSearchEnabled,
       emotion: detail.conversation.emotion,
       repository,
       ...(modelConfig !== undefined ? { modelConfig } : {}),

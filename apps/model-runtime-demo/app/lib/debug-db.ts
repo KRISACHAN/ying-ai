@@ -13,6 +13,13 @@ ALTER TABLE debug_companions
   ADD COLUMN IF NOT EXISTS user_display_name TEXT,
   ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS appearance JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE debug_conversations
+  ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT false;
+
+CREATE UNIQUE INDEX IF NOT EXISTS debug_workflow_runs_assistant_message_id_unique
+ON debug_workflow_runs (assistant_message_id)
+WHERE assistant_message_id IS NOT NULL;
 `;
 
 export function getDebugPool(env: NodeJS.ProcessEnv = process.env): Pool {

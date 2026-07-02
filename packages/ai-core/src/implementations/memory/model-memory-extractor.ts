@@ -135,6 +135,17 @@ function buildExtractionMessages(
   const retryInstruction = isRetry
     ? "\n上一次结构化输出不符合 schema。请只返回符合 schema 的 JSON 对象，不要添加解释。"
     : "";
+  const externalContextInstruction = input.externalContextUsed
+    ? [
+        "",
+        "本轮对话使用了外部工具上下文。",
+        "不得将外部工具来源中的公开事实、新闻、价格、日期、链接或搜索结论写入长期记忆。",
+        "仍可抽取用户明确表达的稳定偏好、个人经历、身份信息、关系边界或长期项目。",
+        input.excludedToolNames !== undefined && input.excludedToolNames.length > 0
+          ? `需排除外部事实的工具：${input.excludedToolNames.join(", ")}。`
+          : "",
+      ].join("\n")
+    : "";
 
   return [
     {
@@ -150,6 +161,7 @@ function buildExtractionMessages(
         "",
         "记忆类型只能是 fact、preference、relationship、event。",
         "重要度为 1 到 5。只有 importance >= 3 的记忆会被保存。",
+        externalContextInstruction,
         "",
         '请只输出 JSON，格式为：{"memories":[{"type":"preference","content":"用户喜欢五月天","importance":4,"reason":"用户明确表达了长期音乐偏好"}]}',
         retryInstruction,

@@ -103,6 +103,8 @@ export interface MemoryExtractionInput {
   userMessage: string;
   assistantMessage: string;
   history?: ChatMessage[];
+  externalContextUsed?: boolean;
+  excludedToolNames?: string[];
 }
 
 export interface MemoryExtractionResult {
