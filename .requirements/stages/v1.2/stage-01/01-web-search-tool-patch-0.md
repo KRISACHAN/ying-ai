@@ -1,106 +1,277 @@
-# V1.2 Stage 1 Patch：模型无关的 Web Search 触发与 Demo 最小验证
+# V1.2 Stage 1 Patch 0：多模型 Web Search 与 OpenAI Responses Native Search
 
 > 适用对象：`prod` 当前 V1.2 Stage 1 / Stage 2 代码。
 >
-> 目标：修复“用户明确要求联网搜索，但 Ollama、默认 OpenAI-compatible 或其它没有原生 Tool Calling 能力的模型仍回答无法搜索”的问题。
->
-> 本补丁不修改 Tavily Provider，不将所有模型伪装为原生 Function Calling 模型，也不把搜索逻辑硬编码进 `packages/ai-core` 的 Workflow。
+> 目标：让 Ollama、`OPENAI_MODEL`、其它 OpenAI-compatible 模型在用户明确要求时都能稳定联网；同时让配置了官方 OpenAI 凭据的环境优先使用 **OpenAI Responses API 内建 Web Search**，而非把它误当作普通 Function Calling。
 
 ---
 
-## 1. 根因
+## 1. 对上一版 Patch 的纠正
 
-当前逻辑将 **Web Search 是否注册** 与 **当前模型是否原生支持 Tool Calling** 绑定：
+上一版只解决了“模型不支持原生 Tool Calling 时，宿主强制触发 Tavily 搜索”的问题，但遗漏了一个事实：
 
 ```txt
-conversation.webSearchEnabled
-+ TAVILY_API_KEY
-+ WEB_SEARCH_ENABLED
-+ model.capabilities.toolCalling === true
-↓
-注册 web_search
+当前 OPENAI_MODEL
+→ provider = openai-compatible
+→ @ai-sdk/openai-compatible + generateText / streamText
+→ 通用 OpenAI-compatible 路径
+→ 不是 OpenAI 官方 Responses API 调用
+→ 因此不会自动获得 OpenAI 内建 Web Search。
 ```
 
-这会导致：
+`OPENAI_BASE_URL` 可能指向官方 OpenAI，也可能指向任意兼容网关；不能因为模型名或 base URL 看起来像 OpenAI，就假设它支持 Responses Web Search。
+
+正确目标不是只做 Tavily，也不是把所有模型虚假标为 `toolCalling=true`，而是引入两个可替换的搜索后端：
 
 ```txt
-Ollama / OpenAI-compatible / 其它普通文本模型
-→ 默认 toolCalling=false
-→ web_search 根本不注册
-→ Planner 不可见
-→ 即使用户说“帮我联网搜索”，模型也只能回答“我无法搜索”
+WebSearchClient
+├── TavilyWebSearchClient
+│   └── 适用于所有聊天模型：Ollama / OpenAI-compatible / 其它模型
+│
+└── OpenAIResponsesWebSearchClient
+    └── 使用 OpenAI 官方 Responses API 的内建 web_search
+    └── 适用于配置了官方 OpenAI 凭据的宿主
 ```
 
-正确分层应为：
+两者都输出同一个 `WebSearchResponse`，都复用已有：
 
 ```txt
-“是否允许联网搜索”
-→ 由会话开关 + Tavily 基础设施决定。
-
-“是否能自动判断何时调用工具”
-→ 由模型原生 Tool Calling 能力决定。
-
-“用户明确要求联网搜索时能否执行”
-→ 必须不依赖模型原生 Tool Calling。
-```
-
----
-
-## 2. 最终行为
-
-```txt
-会话 Web Search 开启
-+ Tavily 可用
-↓
-web_search 始终注册到当前 Conversation Runtime
-↓
-
-A. 用户点击 Demo 的“联网搜索”按钮
-→ 宿主确定性产出 web_search Tool Plan
-
-B. 用户消息包含明确联网搜索意图
-→ 宿主确定性产出 web_search Tool Plan
-
-C. 用户未明确要求搜索，且模型支持原生 Tool Calling
-→ 继续交给 DefaultToolPlanningProvider 自动规划
-
-D. 用户未明确要求搜索，且模型不支持原生 Tool Calling
-→ no_tool，正常聊天
+web_search Tool
+→ ToolRegistry
+→ Tool Result
+→ Final Response
+→ Workflow Snapshot / UI 来源
 ```
 
 因此：
 
 ```txt
-Ollama
-→ 明确搜索 / 点击搜索时可用。
-
-GPT / OpenAI-compatible
-→ 明确搜索 / 点击搜索时一定可用；支持原生 Tool Calling 时仍保留自动搜索。
-
-其它文本模型
-→ 明确搜索 / 点击搜索时可用；不需要支持 Tool Calling。
+聊天模型
+≠
+搜索 Provider
 ```
+
+Ollama 可以用 Tavily，也可以用 OpenAI Responses Web Search；最终生成仍由 Ollama 完成。
+
+---
+
+## 2. 最终策略
+
+### 2.1 两层能力拆分
+
+```txt
+A. 聊天模型能力
+- 是否支持原生 Function Calling
+- 只影响“模型能否自动决定调用工具”
+
+B. 搜索 Provider 能力
+- Tavily 或 OpenAI Responses Native Web Search 是否可用
+- 决定“用户明确要求时系统是否能真正联网”
+```
+
+用户明确要求搜索时，绝不能依赖 A。
+
+### 2.2 Web Search Backend 选择
+
+新增宿主配置：
+
+```txt
+WEB_SEARCH_BACKEND=auto | tavily | openai-responses
+```
+
+语义：
+
+```txt
+tavily
+→ 只使用 TAVILY_API_KEY。
+
+openai-responses
+→ 只使用官方 OpenAI Responses API；不可用时不偷偷改走 Tavily，明确报告 infra_unavailable。
+
+auto
+→ 优先 OpenAI Responses；不可用时回退 Tavily；两者都不可用则 infra_unavailable。
+```
+
+`auto` 的优先顺序：
+
+```txt
+1. OPENAI_WEB_SEARCH_ENABLED !== false
+2. 有可用的官方 OpenAI API Key
+3. OPENAI_WEB_SEARCH_MODEL 已配置，或可安全继承 OPENAI_MODEL
+4. OpenAI Responses Client 初始化成功
+→ 使用 openai-responses
+
+否则：
+5. TAVILY_API_KEY 存在且 WEB_SEARCH_ENABLED !== false
+→ 使用 tavily
+
+否则：infra_unavailable
+```
+
+### 2.3 官方 OpenAI 与 generic OpenAI-compatible 的显式边界
+
+新增环境变量：
+
+```env
+# 搜索后端；默认 auto
+WEB_SEARCH_BACKEND=auto
+
+# OpenAI Responses Native Web Search
+OPENAI_WEB_SEARCH_ENABLED=true
+OPENAI_WEB_SEARCH_API_KEY=
+OPENAI_WEB_SEARCH_MODEL=
+```
+
+约束：
+
+```txt
+- OPENAI_WEB_SEARCH_API_KEY 为空时，可回退读取 OPENAI_API_KEY；
+- OPENAI_WEB_SEARCH_MODEL 为空时，可回退读取 OPENAI_MODEL；
+- OPENAI_WEB_SEARCH_API_KEY 只能用于官方 OpenAI API；
+- 不复用 OPENAI_BASE_URL；该变量是 generic OpenAI-compatible Chat Adapter 的 endpoint，可能不是 Responses API；
+- 不根据模型字符串、base URL 或“看起来像 GPT”自动推断 Responses API 兼容性；
+- 若用户选择 openai-responses，但 key / model 不可用，状态必须是 infra_unavailable，而非静默切换 Provider。
+```
+
+这样 `OPENAI_MODEL` 可以成为 OpenAI Native Search 的默认搜索模型，但前提是明确启用了官方 Responses 搜索配置；它不再被错误理解为“所有 OpenAI-compatible endpoint 都有内建搜索”。
 
 ---
 
 ## 3. 修改范围
 
 ```txt
+packages/tool-web-search/
+├── src/abstractions/web-search.ts
+├── src/implementations/tavily-web-search-client.ts
+├── src/implementations/openai-responses-web-search-client.ts   # 新增
+├── src/implementations/web-search-client-factory.ts            # 新增或等价实现
+├── src/tool/create-web-search-tool.ts
+├── src/index.ts
+├── package.json                                                 # 添加官方 openai SDK
+└── scripts/verify-web-search-contract.mjs
+
 apps/model-runtime-demo/
-├── app/lib/web-search-runtime.ts                 # 解除 Tool 注册与 toolCalling 的绑定
-├── app/lib/web-search-planning-provider.ts       # 新增：宿主确定性搜索规划器
-├── app/lib/companion-runtime.ts                  # 注入自定义 ToolPlanningProvider
-├── app/api/conversations/[id]/messages/route.ts  # 接收 forceWebSearch
-├── 对话页面的 composer / chat client              # 增加最小“联网搜索”开关
-└── app/lib/*-verifier.ts                          # 新增或扩展验证
+├── app/lib/web-search-runtime.ts
+├── app/lib/web-search-planning-provider.ts                      # 新增
+├── app/lib/companion-runtime.ts
+├── app/lib/model-config.ts
+├── app/api/conversations/[id]/messages/route.ts
+├── 对话 composer / runtime debug panel
+└── .env.example / README.md
 
 packages/ai-core/
-└── 不修改公共 Workflow 行为，不按 web_search 名称写分支
+└── 不新增 OpenAI、Tavily 或搜索 Provider 依赖；不按 web_search 名称硬编码 Workflow 分支。
 ```
 
 ---
 
-## 4. Patch 01：解除 Web Search 注册与模型能力绑定
+## 4. Patch 01：统一 WebSearchClient，不修改 Core
+
+### 4.1 契约调整
+
+OpenAI Responses 的原生引用并不保证提供 Tavily 风格的网页摘要。因此 `WebSearchSource.snippet` 不能继续作为强制字段。
+
+修改为：
+
+```ts
+export interface WebSearchSource {
+  id: string;
+  title: string;
+  url: string;
+  snippet?: string;
+  publishedAt?: string;
+  score?: number;
+  faviconUrl?: string;
+}
+
+export interface WebSearchResponse {
+  query: string;
+  sources: WebSearchSource[];
+  provider: "tavily" | "openai-responses" | string;
+  durationMs?: number;
+  metadata?: Record<string, unknown>;
+}
+```
+
+规则：
+
+```txt
+- title、url 仍为有效来源的必填字段；
+- snippet 有则展示，无则 UI 显示标题 / host，不制造伪摘要；
+- 不因 OpenAI native citation 缺少 excerpt 而丢弃真实来源；
+- Tool Result 与 UI 必须能处理 optional snippet。
+```
+
+### 4.2 OpenAIResponsesWebSearchClient
+
+新增：
+
+```txt
+packages/tool-web-search/src/implementations/openai-responses-web-search-client.ts
+```
+
+它实现 `WebSearchClient`，并通过 OpenAI 官方 SDK 调用 Responses API 的内建 Web Search。
+
+构造参数：
+
+```ts
+interface OpenAIResponsesWebSearchClientOptions {
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+  maxResults: number;
+}
+```
+
+调用语义：
+
+```txt
+- 使用 Responses API；
+- tools 中显式启用 OpenAI Web Search；
+- 对用户 query 强制要求先执行网页搜索，不允许只凭模型已有知识回答；
+- 请求 OpenAI 返回可恢复来源的 Web Search sources / URL citations；
+- 提取官方返回的来源、URL citation 或 web search action sources；
+- 标准化为 WebSearchSource[]；
+- 不持久化完整 Responses 原始对象。
+```
+
+实现要求：
+
+```txt
+- 具体 tool type、include 字段和 SDK response shape 必须以实现当日 OpenAI 官方文档为准；
+- 不能从模型回答正文正则猜 URL；
+- 来源只能取自 Responses API 的结构化 citation / source 数据；
+- 若 API 返回回答但没有任何可用来源，返回 WEB_SEARCH_NO_RESULTS 或 PROVIDER_ERROR，不把“无来源回答”伪装为可引用搜索结果；
+- 记录 provider=openai-responses、durationMs、search model；
+- 映射认证、限流、超时和 Provider 错误为既有稳定 domain code；
+- 401 / 403 / 参数错误不重试；网络、429、5xx 可有限重试；
+- 不泄漏 API key、原始 response、内部 reasoning 或异常 stack。
+```
+
+### 4.3 Provider Factory
+
+新增或扩展：
+
+```txt
+packages/tool-web-search/src/implementations/web-search-client-factory.ts
+```
+
+它只负责按宿主已经解析好的配置创建 Client：
+
+```ts
+export type WebSearchBackend = "tavily" | "openai-responses";
+
+export interface ResolvedWebSearchBackend {
+  backend: WebSearchBackend;
+  client: WebSearchClient;
+}
+```
+
+不在该 package 读取环境变量。
+
+---
+
+## 5. Patch 02：Demo Runtime 独立选择搜索 Provider
 
 ### 文件
 
@@ -108,9 +279,7 @@ packages/ai-core/
 apps/model-runtime-demo/app/lib/web-search-runtime.ts
 ```
 
-### 删除的错误逻辑
-
-删除下面这一类门控：
+删除错误的前置条件：
 
 ```ts
 if (!supportsToolCalling(input.model)) {
@@ -118,83 +287,74 @@ if (!supportsToolCalling(input.model)) {
 }
 ```
 
-也删除只为上述逻辑服务的：
+`resolveWebSearchRuntime()` 不再接收 `model: ChatModel`。搜索注册与 ChatModel 原生 Tool Calling 解耦。
+
+推荐类型：
 
 ```ts
-supportsToolCalling(model)
-ModelProfile import
-model: ChatModel input
-model_unsupported status
-```
+export type WebSearchRuntimeStatus =
+  | "enabled"
+  | "user_disabled"
+  | "infra_unavailable";
 
-### 修改后的接口
-
-```ts
-export type WebSearchRuntimeStatus = "enabled" | "user_disabled" | "infra_unavailable";
+export type WebSearchBackend = "tavily" | "openai-responses";
 
 export interface WebSearchRuntime {
   status: WebSearchRuntimeStatus;
+  backend?: WebSearchBackend;
   tool?: CreatedWebSearchTool;
   config: {
+    requestedBackend: "auto" | WebSearchBackend;
     maxResults: number;
     timeoutMs: number;
     retryCount: number;
   };
+  reason?: "missing_openai_responses_config" | "missing_tavily_config" | "user_disabled";
 }
-
-export function resolveWebSearchRuntime(input: {
-  env: NodeJS.ProcessEnv;
-  conversationEnabled: boolean;
-}): WebSearchRuntime;
 ```
 
-### 修改后的注册语义
+后端决策伪代码：
 
 ```ts
-export function resolveWebSearchRuntime(input: {
-  env: NodeJS.ProcessEnv;
-  conversationEnabled: boolean;
-}): WebSearchRuntime {
-  const config = readWebSearchConfig(input.env);
+const requestedBackend = readWebSearchBackend(env); // auto | tavily | openai-responses
 
-  if (!input.conversationEnabled) {
-    return { status: "user_disabled", config };
-  }
+if (!conversationEnabled) return userDisabled;
 
-  const apiKey = readOptionalEnv(input.env, "TAVILY_API_KEY");
-  const infraEnabled = input.env.WEB_SEARCH_ENABLED?.trim().toLowerCase() !== "false";
-
-  if (apiKey === undefined || !infraEnabled) {
-    return { status: "infra_unavailable", config };
-  }
-
-  const client = new TavilyWebSearchClient({
-    apiKey,
-    maxResults: config.maxResults,
-    timeoutMs: config.timeoutMs,
-    retryCount: config.retryCount,
-  });
-
-  return {
-    status: "enabled",
-    tool: createWebSearchTool(client, { maxResults: config.maxResults }),
-    config,
-  };
+if (requestedBackend === "openai-responses") {
+  return tryCreateOpenAIResponsesRuntime() ?? infraUnavailable;
 }
+
+if (requestedBackend === "tavily") {
+  return tryCreateTavilyRuntime() ?? infraUnavailable;
+}
+
+return (
+  tryCreateOpenAIResponsesRuntime() ??
+  tryCreateTavilyRuntime() ??
+  infraUnavailable
+);
 ```
 
-### 约束
+### 搜索 Provider 与最终聊天模型组合
+
+必须支持：
 
 ```txt
-- `enabled` 只表示“当前会话允许且基础设施具备搜索能力”；
-- 不再表示模型是否有原生 Tool Calling；
-- Runtime UI 可新增 `plannerMode` 字段，但不要继续把搜索状态写成 model_unsupported；
-- `web_search` 必须继续受 conversation.webSearchEnabled 控制。
+聊天模型                    搜索后端
+────────────────────────────────────────────
+Ollama                      Tavily
+Ollama                      OpenAI Responses
+OpenAI-compatible gateway   Tavily
+OpenAI-compatible gateway   OpenAI Responses
+Official OPENAI_MODEL       OpenAI Responses
+Official OPENAI_MODEL       Tavily
 ```
+
+这才是“无论 Ollama、GPT 还是其它模型都能搜索”的正确含义。
 
 ---
 
-## 5. Patch 02：新增宿主级确定性搜索规划器
+## 6. Patch 03：保留模型自动规划，新增宿主确定性规划
 
 ### 新文件
 
@@ -202,145 +362,49 @@ export function resolveWebSearchRuntime(input: {
 apps/model-runtime-demo/app/lib/web-search-planning-provider.ts
 ```
 
-### 设计原则
+该 Provider 继续是宿主层 `ToolPlanningProvider`，不引入新 Workflow。
+
+策略：
 
 ```txt
-- 它实现 ai-core 的 ToolPlanningProvider；
-- 它不是新 Workflow；
-- 它不是模型 Adapter；
-- 它不改 ToolRegistry；
-- 它只决定“这轮是否明确需要 host 直接发起 web_search Tool Call”；
-- 未触发确定性搜索时，保留 DefaultToolPlanningProvider 的既有自动规划能力。
+1. web_search 未注册
+   → 对支持原生 Tool Calling 的模型交给 DefaultToolPlanningProvider；
+   → 其它模型 no_tool。
+
+2. forceWebSearch=true
+   → 直接生成 web_search Tool Call。
+
+3. 用户明确写“联网搜索 / 网上搜 / 帮我查 / 搜索一下”等
+   → 直接生成 web_search Tool Call。
+
+4. 没有明确要求，模型支持 native function calling
+   → 交给 DefaultToolPlanningProvider 自动规划。
+
+5. 没有明确要求，模型不支持 native function calling
+   → no_tool。
 ```
 
-### 推荐实现
-
-```ts
-import {
-  DefaultToolPlanningProvider,
-  type ModelToolCall,
-  type ToolPlan,
-  type ToolPlanningInput,
-  type ToolPlanningProvider,
-} from "@ying-companion/ai-core";
-
-export interface DemoWebSearchPlanningProviderOptions {
-  forceWebSearch?: boolean;
-  modelSupportsNativeToolCalling: boolean;
-}
-
-export class DemoWebSearchPlanningProvider implements ToolPlanningProvider {
-  public readonly meta = {
-    id: "tool-planning.demo-web-search",
-    kind: "tool-planning",
-    name: "Demo Web Search Planning Provider",
-  } as const;
-
-  private readonly fallbackPlanner = new DefaultToolPlanningProvider();
-
-  public constructor(private readonly options: DemoWebSearchPlanningProviderOptions) {}
-
-  public async plan(input: ToolPlanningInput): Promise<ToolPlan> {
-    const webSearchAvailable = "web_search" in input.tools;
-
-    if (!webSearchAvailable) {
-      return this.options.modelSupportsNativeToolCalling
-        ? this.fallbackPlanner.plan(input)
-        : { type: "no_tool", reason: "no_tools" };
-    }
-
-    const latestUserText = getLatestUserText(input.messages);
-    const requested =
-      this.options.forceWebSearch === true || hasExplicitWebSearchIntent(latestUserText);
-
-    if (requested) {
-      return {
-        type: "tool_calls",
-        calls: [createHostWebSearchCall(latestUserText)],
-      };
-    }
-
-    if (this.options.modelSupportsNativeToolCalling) {
-      return this.fallbackPlanner.plan(input);
-    }
-
-    return { type: "no_tool", reason: "tool_calling_unavailable" };
-  }
-}
-
-function createHostWebSearchCall(query: string): ModelToolCall {
-  return {
-    id: `host-web-search-${crypto.randomUUID()}`,
-    name: "web_search",
-    arguments: { query },
-  };
-}
-```
-
-### 明确搜索意图
-
-V1.2 不做语义分类器，只做可解释的中文关键词匹配。最小词表：
-
-```ts
-const EXPLICIT_WEB_SEARCH_PATTERNS = [
-  /联网搜索/iu,
-  /网上搜/iu,
-  /帮我搜/iu,
-  /帮我查/iu,
-  /搜索(?:一下|下)?/iu,
-  /查一下/iu,
-  /查查/iu,
-  /最新(?:新闻|消息|动态|情况)/iu,
-];
-```
-
-约束：
+关键区分：
 
 ```txt
-- 只检查本轮最新 user message；
-- 命中时 query 默认使用完整用户输入；
-- 不尝试删除“帮我查”“搜索一下”等自然语言前缀，避免把检索词剪坏；
-- UI 的 forceWebSearch 优先级高于关键词；
-- 不把“天气”“价格”“新闻”等名词本身视作强制搜索，避免普通闲聊被误搜；
-- 模型原生 Tool Calling 的自动搜索仍保留，只是作为非强制路径。
+OpenAI Responses Native Web Search
+→ 是 WebSearchClient 的执行 Provider。
+
+DefaultToolPlanningProvider 的 native tool calling
+→ 是聊天模型是否自动产生 Tool Plan 的能力。
+
+两者独立，不能混为一个 capability。
 ```
 
-### Planner Runtime 标记
-
-建议给 `ToolPlan.runtime` 或本轮 Debug Metadata 增加安全宿主标记：
-
-```ts
-{
-  planner: "host-forced-web-search" | "model-native" | "no-tool",
-}
-```
-
-该字段仅用于 Debug / UI；不要伪造 `ModelRuntimeInfo.usedModel`。
+明确搜索意图只做可解释关键词；Demo 的 force 开关优先级最高。
 
 ---
 
-## 6. Patch 03：在 Conversation Runtime 注入规划器
+## 7. Patch 04：Conversation Runtime 与 Route
 
-### 文件
+### `companion-runtime.ts`
 
-```txt
-apps/model-runtime-demo/app/lib/companion-runtime.ts
-```
-
-### 修改输入
-
-```ts
-export async function createConversationRuntime(input: {
-  companion: DebugCompanion;
-  conversationId: string;
-  webSearchEnabled: boolean;
-  forceWebSearch?: boolean;
-  emotion: EmotionState | null;
-  // existing fields
-}): Promise<ConversationRuntime>;
-```
-
-### 修改 Web Search Runtime 创建
+`resolveWebSearchRuntime`：
 
 ```ts
 const webSearchRuntime = resolveWebSearchRuntime({
@@ -349,9 +413,9 @@ const webSearchRuntime = resolveWebSearchRuntime({
 });
 ```
 
-不再传入 `model`。
+不再传 model。
 
-### 注入 Provider
+保留模型原生 Tool Calling 判断，但仅供 Planner 决策：
 
 ```ts
 const modelSupportsNativeToolCalling = [model.primaryProfile, model.fallbackProfile].some(
@@ -362,39 +426,13 @@ const toolPlanningProvider = new DemoWebSearchPlanningProvider({
   forceWebSearch: input.forceWebSearch,
   modelSupportsNativeToolCalling,
 });
-
-const core = createCompanionCore({
-  model,
-  observer,
-  emotion: new ModelEmotionEngine({ model }),
-  memory: memoryRuntime.provider,
-  summary: new PostgresDebugSummaryProvider(repository),
-  tools,
-  toolPlanningProvider,
-  persona: new DefaultPersonaProvider(/* existing mapping */),
-});
 ```
 
-### 必须保持
+`createDemoTools()` 只要 `webSearchRuntime.tool` 存在就注册。
 
-```txt
-- `createDemoTools()` 只要 webSearchRuntime.tool 存在就注册；
-- Tool 的存在不再受模型原生能力影响；
-- 未强制搜索且模型不支持 Tool Calling 时，Provider 返回 no_tool；
-- 最终 generate / stream 不传 tools，继续只消费 Tool Result。
-```
+### `messages/route.ts`
 
----
-
-## 7. Patch 04：Route 接收本轮强制搜索请求
-
-### 文件
-
-```txt
-apps/model-runtime-demo/app/api/conversations/[id]/messages/route.ts
-```
-
-### 请求体
+请求体增加：
 
 ```ts
 interface ConversationMessageRequestBody {
@@ -405,59 +443,24 @@ interface ConversationMessageRequestBody {
 }
 ```
 
-### 解析
-
-```ts
-const forceWebSearch = raw.forceWebSearch === true;
-```
-
-### Runtime 注入
-
-```ts
-runtime = await createConversationRuntime({
-  companion: detail.companion,
-  conversationId: id,
-  webSearchEnabled: detail.conversation.webSearchEnabled,
-  forceWebSearch,
-  emotion: detail.conversation.emotion,
-  repository,
-  // existing model config and API key mapping
-});
-```
-
-### 安全约束
+`forceWebSearch` 只影响本轮 Runtime，不持久化。会话总开关仍只读取数据库：
 
 ```txt
-- forceWebSearch 只影响本次请求；不持久化；
-- conversation.webSearchEnabled 仍是外部请求总开关；
-- 会话关闭时，即使请求带 forceWebSearch=true，也不注册 Tool，不发 Tavily 请求；
-- Route 可以在 Web Search 未可用且 forceWebSearch=true 时返回普通聊天流，但 Debug metadata 必须标识未执行原因；
-- 不要因为强制搜索不可用而直接让整轮聊天失败。
+conversation.webSearchEnabled=false
+→ 即使 forceWebSearch=true，也不注册 Tool、不调用任何搜索 Provider。
 ```
 
 ---
 
-## 8. Patch 05：Demo 最小可见入口
+## 8. Patch 05：Demo 最小可见效果
 
-### 目标
-
-不重做聊天 UI，只增加一个让你能立即验证的本轮开关。
-
-### 修改对话 composer
-
-在当前发送区域增加：
+在 composer 添加本轮 toggle：
 
 ```txt
-[ 🌐 联网搜索 ]  开 / 关
+[ 🌐 联网搜索 ]
 ```
 
-推荐状态：
-
-```ts
-const [forceWebSearch, setForceWebSearch] = useState(false);
-```
-
-发送 body：
+发送时：
 
 ```ts
 {
@@ -467,98 +470,85 @@ const [forceWebSearch, setForceWebSearch] = useState(false);
 }
 ```
 
-发送完成或失败后：
+发送结束后重置为 false。
 
-```ts
-setForceWebSearch(false);
-```
-
-### UI 约束
+会话级 `webSearchEnabled` 保持独立：
 
 ```txt
-- 当前会话 webSearchEnabled=false：按钮 disabled，文案“先开启会话联网搜索”；
-- 当前会话启用但 Tavily 不可用：按钮可显示不可用状态，避免用户误以为模型问题；
-- forceWebSearch=true 时：发送按钮可显示“联网搜索并发送”；
-- 不把该 toggle 持久化到 conversation；
-- 聊天调试面板至少显示：
-  - Web Search Runtime 状态；
-  - 本轮 planner 模式（host-forced / model-native / no-tool）；
-  - 是否注册 web_search；
-  - 查询词、Tool Result、来源数量、错误码。
+- 会话总开关关闭：本轮按钮 disabled，提示“先开启本会话联网搜索”；
+- 搜索 Provider 不可用：按钮显示不可用原因；
+- 本轮强制搜索：发送按钮文案“联网搜索并发送”；
+- 不把 force 状态写入数据库。
 ```
 
-### 会话级开关入口
-
-若 Stage 2 已有 `webSearchEnabled` Switch，则复用；没有则在会话页设置区加入最小 Switch：
+Debug Panel 至少展示：
 
 ```txt
-允许本会话联网搜索：开 / 关
+Web Search Runtime
+├── enabled / user_disabled / infra_unavailable
+├── backend: tavily | openai-responses
+├── requestedBackend: auto | tavily | openai-responses
+├── planner: host-forced | explicit-intent | model-native | no-tool
+├── registered: true / false
+├── query
+├── sourceCount
+└── metadata.code（失败时）
 ```
 
-它调用既有：
-
-```txt
-PATCH /api/conversations/[id]
-{ "webSearchEnabled": true }
-```
+来源卡必须显示 `provider`；这能直观看出本轮是 Tavily 还是 OpenAI Responses 搜索。
 
 ---
 
-## 9. Patch 06：验证
+## 9. 验证
+
+### 自动验证
 
 新增或扩展：
 
-```txt
-apps/model-runtime-demo/app/lib/web-search-planning-verifier.ts
-```
-
-并提供：
-
 ```bash
+pnpm --filter @ying-companion/tool-web-search verify:web-search-contract
 pnpm --filter @ying-companion/model-runtime-demo verify:web-search-planning
 ```
 
 必须覆盖：
 
 ```txt
-1. conversationEnabled=false
-   → 不注册 web_search。
-
-2. conversationEnabled=true + Tavily 可用 + model.toolCalling=false
-   → 仍注册 web_search。
-
-3. model.toolCalling=false + forceWebSearch=true
-   → host 生成 web_search Tool Call。
-
-4. model.toolCalling=false + 文本“帮我联网搜索今天新加坡天气”
-   → host 生成 web_search Tool Call。
-
-5. model.toolCalling=false + 普通聊天
-   → no_tool。
-
-6. model.toolCalling=true + 普通时效问题
-   → 委托 DefaultToolPlanningProvider。
-
-7. forceWebSearch=true 但 conversationEnabled=false
-   → 不调用 Tavily；不产生 web_search Tool Call；聊天仍可完成。
-
-8. primary 不可用且 fallback 不支持原生 Tool Calling
-   → forceWebSearch 仍可执行搜索；最终回复使用 fallback 生成。
-
-9. source 中含试图改变角色或请求额外操作的内容
-   → 最终模型仅把它当外部资料，不执行额外操作。
+1. Tavily client 标准化来源。
+2. OpenAI Responses client 从结构化 citation / source 数据标准化来源。
+3. OpenAI Responses 无可用来源时不伪造 sources。
+4. auto 优先 OpenAI Responses，缺失时回退 Tavily。
+5. 强制 openai-responses 缺配置时是 infra_unavailable，不静默切 Tavily。
+6. Ollama + Tavily + forceWebSearch：产生 web_search Tool Call。
+7. Ollama + OpenAI Responses + forceWebSearch：产生 web_search Tool Call。
+8. OpenAI-compatible gateway + Tavily + forceWebSearch：产生 web_search Tool Call。
+9. Official OPENAI_MODEL + OpenAI Responses + forceWebSearch：产生 web_search Tool Call。
+10. 不支持 native function calling 的模型，普通闲聊为 no_tool。
+11. 支持 native function calling 的模型，非强制场景继续走 DefaultToolPlanningProvider。
+12. 会话总开关关闭时，任何 backend 与 forceWebSearch 都不得发起外部请求。
+13. 包含间接指令的来源仍只作为不可信资料，不改变角色、权限、任务范围或触发额外动作。
 ```
 
-手工验证最短路径：
+### 最短手工验证
 
 ```txt
-1. 配置 TAVILY_API_KEY；
-2. 在会话页打开“允许本会话联网搜索”；
-3. provider 选择 Ollama；
-4. 点“🌐 联网搜索”；
-5. 输入“今天新加坡天气怎么样？”；
-6. 观察 Tool Panel 出现 web_search、查询词与来源；
-7. 最终回复正常流式生成，而非“我无法搜索”。
+A. Ollama + Tavily
+1. WEB_SEARCH_BACKEND=tavily
+2. 开启会话搜索
+3. 点击“联网搜索”
+4. 问“今天新加坡天气怎么样？”
+5. 预期：Tool Panel 看到 web_search；backend=tavily；最终回复正常。
+
+B. OpenAI Native Search
+1. WEB_SEARCH_BACKEND=openai-responses
+2. 配置 OPENAI_WEB_SEARCH_API_KEY 和 OPENAI_WEB_SEARCH_MODEL
+3. 开启会话搜索
+4. 点击“联网搜索”
+5. 预期：backend=openai-responses；来源来自结构化 Responses citation/source；最终聊天模型可为 OPENAI_MODEL 或 Ollama。
+
+C. Auto fallback
+1. WEB_SEARCH_BACKEND=auto
+2. 移除 OpenAI Responses 配置，仅保留 TAVILY_API_KEY
+3. 预期：backend=tavily。
 ```
 
 ---
@@ -566,28 +556,32 @@ pnpm --filter @ying-companion/model-runtime-demo verify:web-search-planning
 ## 10. 非目标
 
 ```txt
-- 不强制让所有模型 capability.toolCalling=true；
-- 不改变 Ollama Adapter 的原生 Tool Calling 实现；
-- 不在 ai-core Workflow 写搜索专用分支；
-- 不让最终回复阶段重新携带 tools；
+- 不把 OpenAI Responses API 伪装成 generic OpenAI-compatible endpoint；
+- 不强制所有模型 toolCalling=true；
+- 不把 OpenAI/Tavily SDK 放入 ai-core；
+- 不让最终回复阶段再次传 tools；
 - 不把 forceWebSearch 持久化；
-- 不做复杂意图分类器、自动搜索配额、缓存、RAG 或服务端取消。
+- 不做多 Provider 并发搜索、结果裁决、缓存、配额、RAG 或服务端取消。
 ```
 
 ---
 
 ## 11. 验收结论
 
-完成后，Web Search 的可用性由：
+完成后：
 
 ```txt
-Tavily 基础设施 + 当前会话授权
+“是否能够联网”
+→ 会话开关 + 搜索 Backend 配置决定。
+
+“使用 Tavily 还是 OpenAI 原生 Web Search”
+→ WEB_SEARCH_BACKEND 决定。
+
+“最终由谁聊天回答”
+→ 当前选择的聊天模型决定。
+
+“模型能否自动判断是否搜索”
+→ 仅由该聊天模型的 native function calling 能力决定。
 ```
 
-决定；模型原生 Tool Calling 只影响：
-
-```txt
-模型能否自动选择何时联网
-```
-
-用户通过明确自然语言或 Demo 的“联网搜索”开关，必须能够在 Ollama、GPT 和其它模型下稳定触发搜索。
+用户通过 Demo 的“联网搜索”开关或明确自然语言请求，必须能在 Ollama、`OPENAI_MODEL` 和其它模型路径下稳定获得真实外部搜索结果。
