@@ -1167,6 +1167,7 @@ function pickEmotionSnapshot(output: ChatWorkflowOutput): unknown {
 
 function pickToolSnapshot(output: ChatWorkflowOutput): unknown {
   return {
+    webSearch: output.metadata?.webSearch,
     results: output.toolResults ?? [],
     definitions: output.metadata?.debugContext?.toolDefinitions ?? [],
     calls: output.metadata?.debugContext?.toolCalls ?? [],

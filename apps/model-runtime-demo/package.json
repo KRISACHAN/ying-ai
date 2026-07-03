@@ -7,9 +7,10 @@
     "dev": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres build && next dev",
     "build": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres --filter @ying-companion/tool-web-search build && next build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ignore-pattern next-env.d.ts",
+    "lint": "eslint . --ignore-pattern next-env.d.ts --ignore-pattern .verify-dist",
     "verify:stream-contract": "pnpm --filter @ying-companion/ai-core build && node scripts/verify-stream-contract.mjs",
     "verify:web-search-contract": "pnpm --filter @ying-companion/tool-web-search verify:web-search-contract",
+    "verify:web-search-planning": "pnpm --filter @ying-companion/ai-core build && pnpm --filter @ying-companion/tool-web-search build && tsc -p tsconfig.verify.json && cp scripts/verify-package.json .verify-dist/package.json && node .verify-dist/scripts/verify-web-search-planning.js",
     "clean": "rm -rf .next .turbo"
   },
   "dependencies": {

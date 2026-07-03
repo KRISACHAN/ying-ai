@@ -13,7 +13,7 @@ export interface WebSearchSource {
   id: string;
   title: string;
   url: string;
-  snippet: string;
+  snippet?: string;
   publishedAt?: string;
   score?: number;
   faviconUrl?: string;

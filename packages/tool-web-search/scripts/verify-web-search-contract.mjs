@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   createWebSearchTool,
+  OpenAIResponsesWebSearchClient,
   TavilyWebSearchClient,
   WebSearchError,
+  WEB_SEARCH_FAILURE_USAGE_INSTRUCTIONS,
   WEB_SEARCH_USAGE_INSTRUCTIONS,
 } from "../dist/index.js";
 
@@ -14,6 +16,8 @@ async function main() {
   await verifiesInvalidArguments();
   await verifiesProviderErrors();
   await verifiesTavilyNormalization();
+  await verifiesOpenAIResponsesNormalization();
+  await verifiesOpenAIResponsesNoSources();
   console.log("verify:web-search-contract passed");
 }
 
@@ -72,6 +76,9 @@ async function verifiesNoResults() {
   assert.equal(result.error.code, "TOOL_EXECUTION_FAILED");
   assert.equal(result.metadata.code, "WEB_SEARCH_NO_RESULTS");
   assert.equal(result.metadata.empty, true);
+  assert.equal(result.result.query, "nothing");
+  assert.equal(result.result.sourceCount, 0);
+  assert.equal(result.result.usageInstructions, WEB_SEARCH_FAILURE_USAGE_INSTRUCTIONS);
 }
 
 async function verifiesInvalidArguments() {
@@ -109,6 +116,8 @@ async function verifiesProviderErrors() {
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "TOOL_EXECUTION_FAILED");
     assert.equal(result.metadata.code, code);
+    assert.equal(result.result.query, "valid query");
+    assert.equal(result.result.usageInstructions, WEB_SEARCH_FAILURE_USAGE_INSTRUCTIONS);
     assert.ok(!String(result.error.message).includes("stack"));
   }
 }
@@ -172,6 +181,104 @@ async function verifiesTavilyNormalization() {
     false,
   );
   assert.equal(response.metadata.sourceCount, 3);
+}
+
+async function verifiesOpenAIResponsesNormalization() {
+  const fetchCalls = [];
+  const client = new OpenAIResponsesWebSearchClient({
+    apiKey: "test-key",
+    model: "gpt-test-search",
+    timeoutMs: 1000,
+    maxResults: 5,
+    retryCount: 0,
+    fetch: async (url, init) => {
+      fetchCalls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            output: [
+              {
+                type: "web_search_call",
+                action: {
+                  sources: [
+                    {
+                      title: "Search Source",
+                      url: "https://example.com/source#section",
+                      snippet: "Structured source snippet",
+                    },
+                    { title: "Bad", url: "javascript:alert(1)" },
+                  ],
+                },
+              },
+              {
+                type: "message",
+                content: [
+                  {
+                    type: "output_text",
+                    text: "answer",
+                    annotations: [
+                      {
+                        type: "url_citation",
+                        title: "Citation Source",
+                        url: "https://example.org/citation",
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          };
+        },
+      };
+    },
+  });
+
+  const response = await client.search({ query: "latest source" });
+  const body = JSON.parse(fetchCalls[0].init.body);
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, "https://api.openai.com/v1/responses");
+  assert.equal(body.model, "gpt-test-search");
+  assert.deepEqual(body.tools, [{ type: "web_search" }]);
+  assert.equal(body.tool_choice, "required");
+  assert.deepEqual(body.include, ["web_search_call.action.sources"]);
+  assert.equal(response.provider, "openai-responses");
+  assert.equal(response.sources.length, 2);
+  assert.equal(response.sources[0].url, "https://example.org/citation");
+  assert.equal(response.sources[0].snippet, undefined);
+  assert.equal(response.sources[1].url, "https://example.com/source");
+  assert.equal(response.sources[1].snippet, "Structured source snippet");
+  assert.equal(response.metadata.model, "gpt-test-search");
+  assert.equal(response.metadata.sourceCount, 2);
+}
+
+async function verifiesOpenAIResponsesNoSources() {
+  const client = new OpenAIResponsesWebSearchClient({
+    apiKey: "test-key",
+    model: "gpt-test-search",
+    timeoutMs: 1000,
+    maxResults: 5,
+    retryCount: 0,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          output: [{ type: "message", content: [{ type: "output_text", text: "answer" }] }],
+        };
+      },
+    }),
+  });
+  const tool = createWebSearchTool(client);
+  const result = await tool.handler({
+    call: { name: "web_search", arguments: { query: "needs sources" } },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.metadata.code, "WEB_SEARCH_NO_RESULTS");
+  assert.equal(result.metadata.empty, true);
 }
 
 main().catch((error) => {

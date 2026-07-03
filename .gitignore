@@ -57,6 +57,9 @@ web_modules/
 .turbo/
 **/.turbo/
 
+# Local verifier output
+**/.verify-dist/
+
 # Optional stylelint cache
 .stylelintcache
 

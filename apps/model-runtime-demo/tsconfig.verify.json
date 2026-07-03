@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".verify-dist",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "scripts/verify-web-search-planning.ts",
+    "app/lib/web-search-planning-provider.ts",
+    "app/lib/web-search-runtime.ts"
+  ]
+}

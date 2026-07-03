@@ -21,19 +21,26 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 DATABASE_URL=
 MEMORY_POSTGRES_TABLE=companion_memories
 TAVILY_API_KEY=
+WEB_SEARCH_BACKEND=auto
 WEB_SEARCH_ENABLED=true
 WEB_SEARCH_TIMEOUT_MS=10000
 WEB_SEARCH_MAX_RESULTS=5
+OPENAI_WEB_SEARCH_ENABLED=true
+OPENAI_WEB_SEARCH_API_KEY=
+OPENAI_WEB_SEARCH_MODEL=
 ```
 
 `OPENAI_FALLBACK_MODEL` 为空时不启用降级。重试次数为空或非法时按 `0` 处理。能力覆盖变量为空时使用
 OpenAI-compatible adapter 默认值：`streaming=true`、`toolCalling=false`、`usage=false`。只有确认当前
 模型和网关支持工具调用或稳定 usage 后，才把对应能力显式设为 `true`。
 
-V1.2 Web Search 默认按会话关闭。只有同时满足以下条件时，宿主才会注册 `web_search`
-工具：`TAVILY_API_KEY` 存在、`WEB_SEARCH_ENABLED !== false`、当前模型链路支持
-`toolCalling`、`debug_conversations.web_search_enabled = true`。关闭或不可用时不会注册
-Disabled Tool，Planner 看不到 `web_search`。
+V1.2 Web Search 默认按会话关闭。只有会话级 `debug_conversations.web_search_enabled = true`
+且搜索 backend 可用时，宿主才会注册 `web_search` 工具；搜索注册与聊天模型的 native
+`toolCalling` 能力解耦。`WEB_SEARCH_BACKEND=auto | tavily | openai-responses`，`auto`
+优先 OpenAI Responses native web search，缺少官方 OpenAI 搜索配置时回退 Tavily。
+`OPENAI_BASE_URL` 只属于 generic OpenAI-compatible chat adapter，不会被复用为 Responses
+API endpoint。会话关闭时，即使本轮 `forceWebSearch=true` 或 backend/key 已配置，也不会注册
+Tool 或发起外部请求。
 
 V1.1 Persona Profile 字段保存在 `debug_companions`：
 
@@ -139,8 +146,8 @@ pnpm --filter @ying-companion/model-runtime-demo verify:web-search-contract
 - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
 - **滚动摘要**：Stage 8 工作台接入 `debug_conversation_summaries` 持久化摘要，但默认关闭；启用后重启 dev server 仍可恢复。
 - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，展示 Effective Persona、Persona Prompt Preview、最终 system prompt、Conversation Summary、长期记忆块、Recent History 与当前用户输入。滚动摘要开启后重点查看 `summaryContext`、`recentHistory`、`summarizedMessages`、Conversation Summary、Updated Summary 与 Summary Events。
-- **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；满足 V1.2 双层门控时额外注册 `web_search`。`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
-- **Web Search Runtime**：`ChatWorkflowOutput.metadata.webSearch` 展示 `enabled`、`user_disabled`、`infra_unavailable`、`model_unsupported` 之一，以及是否实际注册工具。
+- **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；会话搜索开启且 backend 可用时额外注册 `web_search`。`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
+- **Web Search Runtime**：`ChatWorkflowOutput.metadata.webSearch` 展示 `enabled`、`user_disabled`、`infra_unavailable`、`backend`、`requestedBackend`、`planner`、`registered` 与不可用原因。点击“联网搜索”或用户明确要求搜索时，demo 宿主会确定性规划 `web_search`；普通场景仍只让支持 native function calling 的聊天模型自动规划。
 - **scope 隔离**：工作台固定使用 `ownerType=custom`、`ownerId=local-debug-owner`，长期记忆按 `owner + companion` 隔离；删除会话不会删除长期记忆。
 
 ## 聊天状态（V1.1）

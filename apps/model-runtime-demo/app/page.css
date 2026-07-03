@@ -486,6 +486,33 @@ body {
   background: #ffffff;
 }
 
+.composer-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.secondary-button.is-active {
+  border-color: #176b87;
+  background: #e9f8fb;
+  color: #0f4f65;
+}
+
+.web-search-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.web-search-controls span {
+  color: #5b6472;
+  font-size: 13px;
+}
+
 .memory-admin {
   display: grid;
   grid-template-columns: minmax(320px, 420px) 1fr;

@@ -53,6 +53,11 @@ export function ConversationWorkspace({
   const [streamEvents, setStreamEvents] = useState<ChatWorkflowStreamWireEvent[]>([]);
   const [modelConfig, setModelConfig] = useState<DebugModelConfig>(defaultModelConfig);
   const [apiKeyOverride, setApiKeyOverride] = useState("");
+  const [forceWebSearch, setForceWebSearch] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(
+    initialDetail.conversation.webSearchEnabled,
+  );
+  const [isUpdatingWebSearch, setIsUpdatingWebSearch] = useState(false);
   const activeTurnId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -135,6 +140,7 @@ export function ConversationWorkspace({
         body: JSON.stringify({
           message,
           modelConfig,
+          ...(forceWebSearch ? { forceWebSearch: true } : {}),
           ...(apiKeyOverride.trim() !== "" ? { apiKeyOverride } : {}),
         }),
       });
@@ -210,6 +216,7 @@ export function ConversationWorkspace({
       failPendingMessages(localTurnId, messageText);
     } finally {
       setIsSending(false);
+      setForceWebSearch(false);
       activeTurnId.current = null;
     }
   }
@@ -242,6 +249,7 @@ export function ConversationWorkspace({
     }
 
     setMessages(detailBody.messages);
+    setWebSearchEnabled(detailBody.conversation.webSearchEnabled);
     setRuns(runsBody.runs);
 
     const latestRun = runsBody.runs[0];
@@ -284,6 +292,46 @@ export function ConversationWorkspace({
     }
   }
 
+  async function toggleConversationWebSearch() {
+    if (isUpdatingWebSearch || isSending) {
+      return;
+    }
+
+    const nextEnabled = !webSearchEnabled;
+    setIsUpdatingWebSearch(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/conversations/${initialDetail.conversation.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ webSearchEnabled: nextEnabled }),
+      });
+      const body = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        conversation?: { webSearchEnabled?: boolean };
+        error?: { message?: string };
+      } | null;
+
+      if (!response.ok || body?.ok !== true) {
+        throw new Error(body?.error?.message ?? "更新联网搜索开关失败");
+      }
+
+      const persisted = body.conversation?.webSearchEnabled === true;
+      setWebSearchEnabled(persisted);
+
+      if (!persisted) {
+        setForceWebSearch(false);
+      }
+
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "更新联网搜索开关失败");
+    } finally {
+      setIsUpdatingWebSearch(false);
+    }
+  }
+
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -314,6 +362,18 @@ export function ConversationWorkspace({
           onChange={setModelConfig}
           onApiKeyOverrideChange={setApiKeyOverride}
         />
+
+        <section className="web-search-controls">
+          <button
+            className={`secondary-button ${webSearchEnabled ? "is-active" : ""}`}
+            type="button"
+            disabled={isSending || isUpdatingWebSearch}
+            onClick={toggleConversationWebSearch}
+          >
+            {webSearchEnabled ? "本会话联网已开启" : "开启本会话联网"}
+          </button>
+          <span>{webSearchEnabled ? "本轮可强制搜索" : "默认关闭，不会发起外部搜索"}</span>
+        </section>
 
         <div className="message-list">
           {messages.map((message) => {
@@ -358,9 +418,20 @@ export function ConversationWorkspace({
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={onKeyDown}
           />
-          <button className="button" type="button" disabled={isSending} onClick={sendMessage}>
-            {isSending ? "发送中" : "发送"}
-          </button>
+          <div className="composer-actions">
+            <button
+              className={`secondary-button ${forceWebSearch ? "is-active" : ""}`}
+              type="button"
+              disabled={isSending || !webSearchEnabled}
+              title={webSearchEnabled ? "本轮强制执行 web_search" : "先开启本会话联网搜索"}
+              onClick={() => setForceWebSearch((current) => !current)}
+            >
+              联网搜索
+            </button>
+            <button className="button" type="button" disabled={isSending} onClick={sendMessage}>
+              {isSending ? "发送中" : forceWebSearch ? "联网搜索并发送" : "发送"}
+            </button>
+          </div>
         </div>
       </section>
     </div>

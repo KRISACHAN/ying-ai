@@ -25,6 +25,7 @@ interface ConversationMessageRequestBody {
   message?: unknown;
   modelConfig?: unknown;
   apiKeyOverride?: unknown;
+  forceWebSearch?: unknown;
 }
 
 export async function POST(
@@ -86,6 +87,7 @@ export async function POST(
       ...(typeof raw.apiKeyOverride === "string" && raw.apiKeyOverride.trim() !== ""
         ? { apiKeyOverride: raw.apiKeyOverride }
         : {}),
+      ...(raw.forceWebSearch === true ? { forceWebSearch: true } : {}),
     });
   } catch (error) {
     if (pending !== undefined) {

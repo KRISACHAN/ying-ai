@@ -5,11 +5,14 @@ import {
   ModelEmotionEngine,
   ModelCapabilityUnavailableError,
   ModelRuntimeError,
+  SimpleChatWorkflow,
   type ChatWorkflowOutput,
+  type ChatModel,
   type CoreEvent,
   type CoreObserver,
   type EmotionState,
   type MemoryProvider,
+  type ModelProfile,
   type MemoryScope,
   type SummaryOptions,
 } from "@ying-companion/ai-core";
@@ -24,6 +27,10 @@ import {
   type DebugModelRequestSecrets,
 } from "./model-config";
 import { resolveChatMemoryRuntime, type MemoryRuntime } from "./memory-config";
+import {
+  DemoWebSearchPlanningProvider,
+  type DemoWebSearchPlannerMode,
+} from "./web-search-planning-provider";
 import { resolveWebSearchRuntime, type WebSearchRuntime } from "./web-search-runtime";
 
 export const DEFAULT_SUMMARY_OPTIONS: Required<SummaryOptions> = {
@@ -53,6 +60,7 @@ export interface ConversationRuntime {
   observer: CollectingObserver;
   memoryRuntime: MemoryRuntime;
   webSearchRuntime: WebSearchRuntime;
+  webSearchPlannerMode: () => DemoWebSearchPlannerMode;
   scope: MemoryScope;
   modelConfig: DebugModelConfig;
 }
@@ -65,6 +73,7 @@ export async function createConversationRuntime(input: {
   repository?: DebugRepository;
   modelConfig?: DebugModelConfig;
   apiKeyOverride?: DebugModelRequestSecrets["apiKeyOverride"];
+  forceWebSearch?: boolean;
 }): Promise<ConversationRuntime> {
   const observer = new CollectingObserver();
   const resolvedModel = resolveDebugModelConfig(
@@ -76,8 +85,11 @@ export async function createConversationRuntime(input: {
   const memoryRuntime = await resolveChatMemoryRuntime(process.env);
   const webSearchRuntime = resolveWebSearchRuntime({
     env: process.env,
-    model,
     conversationEnabled: input.webSearchEnabled,
+  });
+  const toolPlanningProvider = new DemoWebSearchPlanningProvider({
+    forceWebSearch: input.forceWebSearch === true,
+    modelSupportsNativeToolCalling: supportsNativeToolCalling(model),
   });
   const repository = input.repository ?? new DebugRepository();
   const scope: MemoryScope = {
@@ -99,6 +111,7 @@ export async function createConversationRuntime(input: {
     memory: memoryRuntime.provider,
     summary: new PostgresDebugSummaryProvider(repository),
     tools,
+    workflow: new SimpleChatWorkflow({ toolPlanningProvider }),
     persona: new DefaultPersonaProvider({
       id: input.companion.id,
       name: input.companion.name,
@@ -120,6 +133,7 @@ export async function createConversationRuntime(input: {
     observer,
     memoryRuntime,
     webSearchRuntime,
+    webSearchPlannerMode: () => toolPlanningProvider.getLastMode(),
     scope,
     modelConfig: resolvedModel.debugConfig,
   };
@@ -153,7 +167,12 @@ export function attachProviderMetadata(
       memoryStatus: runtime.memoryRuntime.status,
       webSearch: {
         status: runtime.webSearchRuntime.status,
+        backend: runtime.webSearchRuntime.backend,
         registered: runtime.webSearchRuntime.tool !== undefined,
+        planner: runtime.webSearchPlannerMode(),
+        ...(runtime.webSearchRuntime.reason !== undefined
+          ? { reason: runtime.webSearchRuntime.reason }
+          : {}),
         config: runtime.webSearchRuntime.config,
       },
       ...(runtime.memoryRuntime.reason !== undefined
@@ -161,6 +180,13 @@ export function attachProviderMetadata(
         : {}),
     },
   };
+}
+
+function supportsNativeToolCalling(model: ChatModel): boolean {
+  return [model.primaryProfile, model.fallbackProfile].some(
+    (profile): profile is ModelProfile =>
+      profile !== undefined && profile.capabilities.toolCalling === true,
+  );
 }
 
 export function toSafeRuntimeMessage(error: unknown): string {

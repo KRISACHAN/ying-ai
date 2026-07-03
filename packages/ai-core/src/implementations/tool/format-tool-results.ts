@@ -7,12 +7,15 @@ export function formatToolResultForModel(result: ToolResult): string {
       ok: false,
       error: result.error?.code ?? "TOOL_EXECUTION_FAILED",
       message: result.error?.message ?? "Tool execution failed",
+      result: result.result,
+      metadata: result.metadata,
     });
   }
 
   return safeJsonStringify({
     ok: true,
     result: result.result,
+    metadata: result.metadata,
   });
 }
 
