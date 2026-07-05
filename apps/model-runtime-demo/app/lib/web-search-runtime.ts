@@ -13,6 +13,9 @@ import type { WebSearchAvailability } from "./web-search-availability";
 
 export type { WebSearchAvailability } from "./web-search-availability";
 
+/** Aligns with demo `get_current_time` and companion-runtime persona context. */
+const DEMO_USAGE_INSTRUCTIONS_TIME_ZONE = "Asia/Shanghai";
+
 export interface DemoWorkflowWebSearchMetadata {
   query: string;
   provider: WebSearchProviderId;
@@ -98,7 +101,10 @@ export function createWebSearchToolIfAvailable(input: {
 
   return {
     availability,
-    tool: createWebSearchTool({ provider }),
+    tool: createWebSearchTool({
+      provider,
+      usageInstructionsTimeZone: DEMO_USAGE_INSTRUCTIONS_TIME_ZONE,
+    }),
   };
 }
 

@@ -752,5 +752,6 @@ E. 无效 TAVILY_API_KEY（临时改 .env）
 6. verify:web-search-contract（tavily 包）/ verify:web-search-workflow（demo）脚本与验收记录
 7. apps/model-runtime-demo/.env.example 更新（TAVILY_API_KEY、WEB_SEARCH_ENABLED、WEB_SEARCH_BACKEND、toolCalling 说明）
 8. 两份 package README
-9. .code-reviews/v1.2/stage-01 的执行与 Review 文档
+9. Demo Debug 可观测：ConversationWorkspace Web Search 可用性标签、RunDebugPanel Web Search Log
+10. .code-reviews/v1.2/stage-01 的执行与 Review 文档
 ```

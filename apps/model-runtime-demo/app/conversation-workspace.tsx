@@ -68,6 +68,7 @@ export function ConversationWorkspace({
     initialWebSearchAvailability,
   );
   const activeTurnId = useRef<string | null>(null);
+  const previousToolCallingRef = useRef<boolean | undefined>(undefined);
 
   const displayedWebSearchAvailability = useMemo((): WebSearchAvailability => {
     const caps = {
@@ -105,13 +106,18 @@ export function ConversationWorkspace({
       ...defaultModelConfig.capabilities,
       ...modelConfig.capabilities,
     };
+    const toolCalling = capabilities.toolCalling === true;
+    const previousToolCalling = previousToolCallingRef.current;
+    previousToolCallingRef.current = toolCalling;
 
-    if (capabilities.toolCalling !== true) {
+    if (!toolCalling) {
       setWebSearchAvailability({ available: false, reason: "tool_calling_unsupported" });
       return;
     }
 
-    setWebSearchAvailability(initialWebSearchAvailability);
+    if (previousToolCalling === false) {
+      setWebSearchAvailability(initialWebSearchAvailability);
+    }
   }, [modelConfig, defaultModelConfig, initialWebSearchAvailability]);
 
   useEffect(() => {

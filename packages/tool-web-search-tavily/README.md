@@ -19,6 +19,10 @@ const tool = createWebSearchTool({ provider });
 - **`TavilyWebSearchProvider`** — implements `WebSearchProvider` with Tavily Search API, retrieval strategy, and quality fallback
 - **`TavilyWebSearchError`** — Tavily-specific error mapped to `WebSearchProviderError`
 
+## Retrieval fallback
+
+When `evaluateSearchQuality()` marks the primary response as `poor`, the provider issues one fallback Tavily request (max 2 calls per search). The returned `sources` come from the fallback attempt only; primary sources are not merged. Usage and response time are summed across both attempts.
+
 ## Verification
 
 ```bash

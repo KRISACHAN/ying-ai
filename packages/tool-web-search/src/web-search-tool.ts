@@ -12,7 +12,10 @@ export interface WebSearchTool {
   handler: ToolHandler;
 }
 
-export function createWebSearchTool(options: { provider: WebSearchProvider }): WebSearchTool {
+export function createWebSearchTool(options: {
+  provider: WebSearchProvider;
+  usageInstructionsTimeZone?: string;
+}): WebSearchTool {
   return {
     definition: {
       name: WEB_SEARCH_TOOL_NAME,
@@ -56,7 +59,11 @@ export function createWebSearchTool(options: { provider: WebSearchProvider }): W
           name: WEB_SEARCH_TOOL_NAME,
           ...(input.call.id !== undefined ? { toolCallId: input.call.id } : {}),
           ok: true,
-          result: formatWebSearchForModel(search),
+          result: formatWebSearchForModel(search, {
+            ...(options.usageInstructionsTimeZone !== undefined
+              ? { usageInstructionsTimeZone: options.usageInstructionsTimeZone }
+              : {}),
+          }),
           metadata: {
             provider: options.provider.id,
             externalContext: true,

@@ -66,7 +66,11 @@ createdb ying_companion_dev
 psql -d ying_companion_dev -f packages/memory-postgres/migrations/0001_create_companion_memories.sql
 psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0001_create_debug_workspace.sql
 psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0002_extend_debug_companion_persona.sql
+psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0003_add_web_search_settings.sql
 ```
+
+`0003_add_web_search_settings.sql` 还包含 `debug_workflow_runs` 的 assistant message 唯一索引。
+`debug_conversations.web_search_enabled` 为 Stage 2 预留列；V1.2 Stage 01 的 Web Search 开关仅由 env `WEB_SEARCH_ENABLED` 控制，运行时暂不读写该列。
 
 然后填写 `apps/model-runtime-demo/.env` 中的 `OPENAI_API_KEY`、`OPENAI_MODEL` 与
 `DATABASE_URL`。本地默认可使用：

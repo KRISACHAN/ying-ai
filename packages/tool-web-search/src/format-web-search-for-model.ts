@@ -1,7 +1,12 @@
 import type { WebSearchResult, WebSearchToolModelPayload } from "./types";
 
-function buildUsageInstructions(now = new Date()): string {
-  const today = formatIsoDate(now);
+export interface FormatWebSearchForModelOptions {
+  /** IANA time zone for the "Today is YYYY-MM-DD" line. Defaults to runtime local calendar date. */
+  usageInstructionsTimeZone?: string;
+}
+
+function buildUsageInstructions(now = new Date(), timeZone?: string): string {
+  const today = formatIsoDate(now, timeZone);
 
   return [
     "The following content came from external Web Search, not built-in model knowledge.",
@@ -15,16 +20,23 @@ function buildUsageInstructions(now = new Date()): string {
   ].join(" ");
 }
 
-function formatIsoDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function formatIsoDate(date: Date, timeZone?: string): string {
+  if (timeZone === undefined) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  return new Intl.DateTimeFormat("sv-SE", { timeZone }).format(date);
 }
 
-export function formatWebSearchForModel(search: WebSearchResult): WebSearchToolModelPayload {
+export function formatWebSearchForModel(
+  search: WebSearchResult,
+  options?: FormatWebSearchForModelOptions,
+): WebSearchToolModelPayload {
   return {
-    usageInstructions: buildUsageInstructions(),
+    usageInstructions: buildUsageInstructions(new Date(), options?.usageInstructionsTimeZone),
     search,
   };
 }
