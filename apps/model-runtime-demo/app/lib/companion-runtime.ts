@@ -9,6 +9,7 @@ import {
   type CoreEvent,
   type CoreObserver,
   type EmotionState,
+  type ModelCapabilities,
   type MemoryProvider,
   type MemoryScope,
   type SummaryOptions,
@@ -24,6 +25,11 @@ import {
   type DebugModelRequestSecrets,
 } from "./model-config";
 import { resolveChatMemoryRuntime, type MemoryRuntime } from "./memory-config";
+import {
+  createWebSearchToolIfAvailable,
+  resolveWebSearchAvailability,
+  type WebSearchAvailability,
+} from "./web-search-runtime";
 
 export const DEFAULT_SUMMARY_OPTIONS: Required<SummaryOptions> = {
   enabled: false,
@@ -53,6 +59,7 @@ export interface ConversationRuntime {
   memoryRuntime: MemoryRuntime;
   scope: MemoryScope;
   modelConfig: DebugModelConfig;
+  webSearchAvailability: WebSearchAvailability;
 }
 
 export async function createConversationRuntime(input: {
@@ -81,6 +88,8 @@ export async function createConversationRuntime(input: {
     memory: memoryRuntime.provider,
     scope,
     fallbackEmotion: input.emotion ?? createNeutralDemoEmotion(),
+    env: process.env,
+    modelCapabilities: model.primaryProfile.capabilities,
   });
   const systemPrompt = input.companion.customInstructions.trim();
   const core = createCompanionCore({
@@ -112,6 +121,7 @@ export async function createConversationRuntime(input: {
     memoryRuntime,
     scope,
     modelConfig: resolvedModel.debugConfig,
+    webSearchAvailability: tools.webSearchAvailability,
   };
 }
 
@@ -141,11 +151,27 @@ export function attachProviderMetadata(
       toolProvider: inspection.providers.tools,
       debugModelConfig: runtime.modelConfig,
       memoryStatus: runtime.memoryRuntime.status,
+      webSearchAvailability: runtime.webSearchAvailability,
       ...(runtime.memoryRuntime.reason !== undefined
         ? { memoryReason: runtime.memoryRuntime.reason }
         : {}),
     },
   };
+}
+
+export function resolveWebSearchAvailabilityForModelConfig(
+  env: NodeJS.ProcessEnv,
+  modelConfig?: DebugModelConfig,
+  apiKeyOverride?: DebugModelRequestSecrets["apiKeyOverride"],
+): WebSearchAvailability {
+  const resolvedModel = resolveDebugModelConfig(
+    modelConfig,
+    env,
+    apiKeyOverride !== undefined ? { apiKeyOverride } : {},
+  );
+  const model = createConfiguredModel(resolvedModel.providerConfig);
+
+  return resolveWebSearchAvailability(env, model.primaryProfile.capabilities);
 }
 
 export function toSafeRuntimeMessage(error: unknown): string {
@@ -172,8 +198,14 @@ function createDemoTools(options: {
   memory: MemoryProvider;
   scope: MemoryScope;
   fallbackEmotion: EmotionState;
-}): LocalToolRegistry {
+  env: NodeJS.ProcessEnv;
+  modelCapabilities: ModelCapabilities;
+}): LocalToolRegistry & { webSearchAvailability: WebSearchAvailability } {
   const tools = new LocalToolRegistry();
+  const webSearch = createWebSearchToolIfAvailable({
+    env: options.env,
+    modelCapabilities: options.modelCapabilities,
+  });
 
   tools.register(
     {
@@ -279,7 +311,11 @@ function createDemoTools(options: {
     }),
   );
 
-  return tools;
+  if (webSearch.tool !== undefined) {
+    tools.register(webSearch.tool.definition, webSearch.tool.handler);
+  }
+
+  return Object.assign(tools, { webSearchAvailability: webSearch.availability });
 }
 
 function createCurrentTimeResult(now = new Date()): {

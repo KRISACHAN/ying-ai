@@ -4,6 +4,7 @@ import type { ConversationSummary, EmotionState, WorkflowTrace } from "@ying-com
 
 import type { ChatWorkflowStreamWireEvent } from "./lib/chat-stream-wire";
 import type { MemoryHealthView, WorkflowRunDetail, WorkflowRunListItem } from "./lib/debug-types";
+import { extractWebSearchDebugLog } from "./lib/web-search-debug-log";
 
 interface RunDebugPanelProps {
   run: WorkflowRunDetail | null;
@@ -39,6 +40,7 @@ export function RunDebugPanel({
         <RunSelector runs={runs} selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
         <p className="hint">选择或发送一条 AI 回复后，这里会展示对应 workflow run。</p>
         <StreamTimeline events={streamEvents} turnStatus={turnStatus} workflowId={workflowId} />
+        <WebSearchLogPanel streamEvents={streamEvents} toolSnapshot={null} />
         <MemoryHealthBlock health={health} />
       </aside>
     );
@@ -58,6 +60,8 @@ export function RunDebugPanel({
       <RunSelector runs={runs} selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
 
       <StreamTimeline events={streamEvents} turnStatus={turnStatus} workflowId={workflowId} />
+
+      <WebSearchLogPanel streamEvents={streamEvents} toolSnapshot={run?.toolSnapshot} />
 
       <section className="debug-section">
         <h3>运行总览</h3>
@@ -169,6 +173,47 @@ function StreamTimeline({
           : events.map((event, index) => `${index + 1}. ${formatWireEvent(event)}`).join("\n")}
       </pre>
       {deltaText !== "" ? <DebugPre title="Aggregated text:delta" value={deltaText} /> : null}
+    </section>
+  );
+}
+
+function WebSearchLogPanel({
+  streamEvents,
+  toolSnapshot,
+}: {
+  streamEvents: ChatWorkflowStreamWireEvent[];
+  toolSnapshot: unknown;
+}) {
+  const log = extractWebSearchDebugLog({ streamEvents, toolSnapshot });
+
+  if (log === null) {
+    return (
+      <section className="debug-section">
+        <h3>Web Search Log</h3>
+        <p className="hint">本轮尚未调用 web_search，或工具结果尚未返回。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="debug-section">
+      <h3>Web Search Log</h3>
+      <Rows
+        rows={[
+          ["Planner query", log.plannerQuery ?? "—"],
+          ["Retrieval query", log.retrieval?.retrievalQuery ?? log.plannerQuery ?? "—"],
+          ["Attempts", log.retrieval !== undefined ? String(log.retrieval.attempts) : "—"],
+          ["Primary reason", log.retrieval?.primaryReason ?? "—"],
+          ["Fallback used", log.retrieval?.fallbackUsed === true ? "yes" : "no"],
+          ["Source count", log.sourceCount !== undefined ? String(log.sourceCount) : "—"],
+        ]}
+      />
+      <DebugPre title="Planner arguments (tool:call)" value={log.plannerArguments ?? "（无）"} />
+      <DebugPre
+        title="Search engine requests (retrieval.requests)"
+        value={log.retrieval?.requests ?? "（无）"}
+      />
+      <DebugPre title="Retrieval metadata" value={log.retrieval ?? "（无）"} />
     </section>
   );
 }

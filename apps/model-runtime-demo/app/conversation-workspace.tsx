@@ -13,7 +13,16 @@ import type {
   WorkflowRunDetail,
   WorkflowRunListItem,
 } from "./lib/debug-types";
-import { validateDebugModelConfig, type DebugModelConfig } from "./lib/model-config";
+import {
+  validateDebugModelConfig,
+  mergeStoredModelConfigWithDefaults,
+  type DebugModelConfig,
+} from "./lib/model-config";
+import {
+  formatWebSearchAvailabilityLabel,
+  readWebSearchAvailability,
+  type WebSearchAvailability,
+} from "./lib/web-search-availability";
 
 const MODEL_CONFIG_STORAGE_KEY = "demo:model-config:v1";
 
@@ -34,12 +43,14 @@ export function ConversationWorkspace({
   initialRun,
   memoryHealth,
   defaultModelConfig,
+  initialWebSearchAvailability,
 }: {
   initialDetail: ConversationDetail;
   initialRuns: WorkflowRunListItem[];
   initialRun: WorkflowRunDetail | null;
   memoryHealth: MemoryHealthView | null;
   defaultModelConfig: DebugModelConfig;
+  initialWebSearchAvailability: WebSearchAvailability;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialDetail.messages);
@@ -53,20 +64,55 @@ export function ConversationWorkspace({
   const [streamEvents, setStreamEvents] = useState<ChatWorkflowStreamWireEvent[]>([]);
   const [modelConfig, setModelConfig] = useState<DebugModelConfig>(defaultModelConfig);
   const [apiKeyOverride, setApiKeyOverride] = useState("");
+  const [webSearchAvailability, setWebSearchAvailability] = useState<WebSearchAvailability>(
+    initialWebSearchAvailability,
+  );
   const activeTurnId = useRef<string | null>(null);
+
+  const displayedWebSearchAvailability = useMemo((): WebSearchAvailability => {
+    const caps = {
+      ...defaultModelConfig.capabilities,
+      ...modelConfig.capabilities,
+    };
+
+    if (caps.toolCalling !== true) {
+      return { available: false, reason: "tool_calling_unsupported" };
+    }
+
+    return webSearchAvailability;
+  }, [defaultModelConfig.capabilities, modelConfig.capabilities, webSearchAvailability]);
 
   useEffect(() => {
     try {
       const stored = window.sessionStorage.getItem(MODEL_CONFIG_STORAGE_KEY);
 
       if (stored !== null) {
-        setModelConfig(validateDebugModelConfig(JSON.parse(stored)));
+        setModelConfig(
+          mergeStoredModelConfigWithDefaults(
+            validateDebugModelConfig(JSON.parse(stored)),
+            defaultModelConfig,
+          ),
+        );
       }
     } catch {
       window.sessionStorage.removeItem(MODEL_CONFIG_STORAGE_KEY);
       setModelConfig(defaultModelConfig);
     }
   }, [defaultModelConfig]);
+
+  useEffect(() => {
+    const capabilities = {
+      ...defaultModelConfig.capabilities,
+      ...modelConfig.capabilities,
+    };
+
+    if (capabilities.toolCalling !== true) {
+      setWebSearchAvailability({ available: false, reason: "tool_calling_unsupported" });
+      return;
+    }
+
+    setWebSearchAvailability(initialWebSearchAvailability);
+  }, [modelConfig, defaultModelConfig, initialWebSearchAvailability]);
 
   useEffect(() => {
     try {
@@ -174,6 +220,12 @@ export function ConversationWorkspace({
           if (deltaText !== event.output.text) {
             failPendingMessages(localTurnId, "协议错误：delta 聚合文本与最终输出不一致");
             return;
+          }
+
+          const finishAvailability = readWebSearchAvailability(event.output.metadata);
+
+          if (finishAvailability !== null) {
+            setWebSearchAvailability(finishAvailability);
           }
 
           const nextStatus = hasDegradedTrace(event.output.trace) ? "degraded" : "completed";
@@ -309,7 +361,9 @@ export function ConversationWorkspace({
       <section className="chat-pane">
         <ModelConfigForm
           value={modelConfig}
+          defaultModelConfig={defaultModelConfig}
           apiKeyOverride={apiKeyOverride}
+          webSearchAvailability={displayedWebSearchAvailability}
           disabled={isSending}
           onChange={setModelConfig}
           onApiKeyOverrideChange={setApiKeyOverride}
@@ -369,19 +423,34 @@ export function ConversationWorkspace({
 
 function ModelConfigForm({
   value,
+  defaultModelConfig,
   apiKeyOverride,
+  webSearchAvailability,
   disabled,
   onChange,
   onApiKeyOverrideChange,
 }: {
   value: DebugModelConfig;
+  defaultModelConfig: DebugModelConfig;
   apiKeyOverride: string;
+  webSearchAvailability: WebSearchAvailability;
   disabled: boolean;
   onChange: (value: DebugModelConfig) => void;
   onApiKeyOverrideChange: (value: string) => void;
 }) {
+  const mergedCapabilities = {
+    ...defaultModelConfig.capabilities,
+    ...value.capabilities,
+  };
+  const toolCallingEnabled = mergedCapabilities.toolCalling === true;
+
   return (
     <section className="model-config-panel">
+      <p className="meta-line">{formatWebSearchAvailabilityLabel(webSearchAvailability)}</p>
+      <p className="meta-line">
+        toolCalling：
+        {toolCallingEnabled ? "已开启" : "未开启（需 OPENAI_MODEL_SUPPORTS_TOOL_CALLING=true）"}
+      </p>
       <div className="inline-fields">
         <label className="scope-field">
           <span>Provider</span>
@@ -390,14 +459,30 @@ function ModelConfigForm({
             value={value.provider}
             disabled={disabled}
             onChange={(event) => {
+              const preservedCapabilities = mergedCapabilities;
               onChange(
                 event.target.value === "ollama"
                   ? {
                       provider: "ollama",
-                      model: "dzgg/gemma-4-abliterated:e2b-v2",
-                      host: "http://127.0.0.1:11434",
+                      model:
+                        value.provider === "ollama"
+                          ? value.model
+                          : "dzgg/gemma-4-abliterated:e2b-v2",
+                      ...(value.provider === "ollama" && value.host !== undefined
+                        ? { host: value.host }
+                        : value.provider !== "ollama"
+                          ? { host: "http://127.0.0.1:11434" }
+                          : {}),
+                      capabilities: preservedCapabilities,
                     }
-                  : { provider: "openai-compatible", model: "gpt-4o-mini" },
+                  : {
+                      provider: "openai-compatible",
+                      model: value.provider === "openai-compatible" ? value.model : "gpt-4o-mini",
+                      ...(value.provider === "openai-compatible" && value.baseUrl !== undefined
+                        ? { baseUrl: value.baseUrl }
+                        : {}),
+                      capabilities: preservedCapabilities,
+                    },
               );
             }}
           >

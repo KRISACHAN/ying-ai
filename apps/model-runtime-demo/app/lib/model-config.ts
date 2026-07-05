@@ -121,7 +121,10 @@ export function resolveDebugModelConfig(
   env: NodeJS.ProcessEnv,
   secrets: DebugModelRequestSecrets = {},
 ): ResolvedDebugModelConfig {
-  const debugConfig = validateDebugModelConfig(input ?? loadDefaultDebugModelConfig(env));
+  const debugConfig = mergeDebugModelConfigWithEnvDefaults(
+    validateDebugModelConfig(input ?? loadDefaultDebugModelConfig(env)),
+    env,
+  );
 
   if (debugConfig.provider === "ollama") {
     const providerConfig: DemoModelProviderConfig = {
@@ -263,6 +266,129 @@ function profileOverrideToDebugCapabilities(override: ModelProfileOverride | und
   capabilities?: Partial<ModelCapabilities>;
 } {
   return override?.capabilities !== undefined ? { capabilities: override.capabilities } : {};
+}
+
+/** 客户端 modelConfig 未带 capabilities 时，回退到 env 中的 *_SUPPORTS_* 声明。 */
+function mergeDebugModelConfigWithEnvDefaults(
+  config: DebugModelConfig,
+  env: NodeJS.ProcessEnv,
+): DebugModelConfig {
+  if (config.provider === "ollama") {
+    const envCapabilities = profileOverrideToDebugCapabilities(
+      readProfileOverride(env, "OLLAMA_MODEL"),
+    ).capabilities;
+
+    return withMergedCapabilities(config, envCapabilities, config.capabilities);
+  }
+
+  const primaryEnvCapabilities = profileOverrideToDebugCapabilities(
+    readProfileOverride(env, "OPENAI_MODEL"),
+  ).capabilities;
+  const fallbackEnvCapabilities = profileOverrideToDebugCapabilities(
+    readProfileOverride(env, "OPENAI_FALLBACK_MODEL"),
+  ).capabilities;
+  const merged = withMergedCapabilities(config, primaryEnvCapabilities, config.capabilities);
+
+  if (config.fallback === undefined) {
+    return merged;
+  }
+
+  const fallbackCapabilities = mergeCapabilities(
+    fallbackEnvCapabilities,
+    config.fallback.capabilities,
+  );
+
+  if (fallbackCapabilities === undefined) {
+    const { capabilities, ...fallback } = config.fallback;
+    void capabilities;
+    return {
+      ...merged,
+      fallback,
+    };
+  }
+
+  return {
+    ...merged,
+    fallback: {
+      ...config.fallback,
+      capabilities: fallbackCapabilities,
+    },
+  };
+}
+
+function mergeCapabilities(
+  envDefaults: Partial<ModelCapabilities> | undefined,
+  explicit: Partial<ModelCapabilities> | undefined,
+): Partial<ModelCapabilities> | undefined {
+  const merged = {
+    ...(envDefaults ?? {}),
+    ...(explicit ?? {}),
+  };
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function withMergedCapabilities<T extends DebugModelConfig>(
+  config: T,
+  envDefaults: Partial<ModelCapabilities> | undefined,
+  explicit: Partial<ModelCapabilities> | undefined,
+): T {
+  const capabilities = mergeCapabilities(envDefaults, explicit);
+
+  if (capabilities === undefined) {
+    const { capabilities: existingCapabilities, ...rest } = config as T & {
+      capabilities?: Partial<ModelCapabilities>;
+    };
+    void existingCapabilities;
+    return rest as T;
+  }
+
+  return {
+    ...config,
+    capabilities,
+  };
+}
+
+/** 将 sessionStorage 恢复的 modelConfig 与服务端 default 合并，避免丢失 env 能力声明。 */
+export function mergeStoredModelConfigWithDefaults(
+  stored: DebugModelConfig,
+  defaults: DebugModelConfig,
+): DebugModelConfig {
+  if (stored.provider === "ollama" && defaults.provider === "ollama") {
+    return withMergedCapabilities(stored, defaults.capabilities, stored.capabilities);
+  }
+
+  if (stored.provider === "openai-compatible" && defaults.provider === "openai-compatible") {
+    const merged = withMergedCapabilities(stored, defaults.capabilities, stored.capabilities);
+
+    if (stored.fallback === undefined) {
+      return merged;
+    }
+
+    const fallbackCapabilities = mergeCapabilities(
+      defaults.fallback?.capabilities,
+      stored.fallback.capabilities,
+    );
+
+    if (fallbackCapabilities === undefined) {
+      const { capabilities, ...fallback } = stored.fallback;
+      void capabilities;
+      return {
+        ...merged,
+        fallback,
+      };
+    }
+
+    return {
+      ...merged,
+      fallback: {
+        ...stored.fallback,
+        capabilities: fallbackCapabilities,
+      },
+    };
+  }
+
+  return stored;
 }
 
 function readOptionalRetry(value: unknown): OpenAIDebugRetry {

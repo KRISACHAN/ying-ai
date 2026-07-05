@@ -15,6 +15,7 @@ import type {
 
 import { createId, ensureDebugWorkspaceSchema, getDebugPool, toSafeErrorMessage } from "./debug-db";
 import { LOCAL_DEBUG_OWNER } from "./debug-owner";
+import { deriveWebSearchMetadataFromToolResult } from "./web-search-runtime";
 import type {
   ConversationDetail,
   DebugCompanion,
@@ -1146,11 +1147,16 @@ function pickEmotionSnapshot(output: ChatWorkflowOutput): unknown {
 }
 
 function pickToolSnapshot(output: ChatWorkflowOutput): unknown {
+  const webSearch = (output.toolResults ?? [])
+    .map((result) => deriveWebSearchMetadataFromToolResult(result))
+    .filter((item) => item !== null);
+
   return {
     results: output.toolResults ?? [],
     definitions: output.metadata?.debugContext?.toolDefinitions ?? [],
     calls: output.metadata?.debugContext?.toolCalls ?? [],
     dropped: output.metadata?.debugContext?.droppedToolCalls ?? [],
+    webSearch,
     followUpGenerated: output.metadata?.toolFollowUpGenerated === true,
   };
 }

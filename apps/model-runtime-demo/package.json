@@ -4,17 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres build && next dev",
-    "build": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres build && next build",
+    "dev": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres --filter @ying-companion/tool-web-search --filter @ying-companion/tool-web-search-tavily build && next dev",
+    "build": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres --filter @ying-companion/tool-web-search --filter @ying-companion/tool-web-search-tavily build && next build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern next-env.d.ts",
     "verify:stream-contract": "pnpm --filter @ying-companion/ai-core build && node scripts/verify-stream-contract.mjs",
+    "verify:web-search-workflow": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres --filter @ying-companion/tool-web-search --filter @ying-companion/tool-web-search-tavily build && node scripts/verify-web-search-workflow.mjs",
     "clean": "rm -rf .next .turbo"
   },
   "dependencies": {
     "@ying-companion/ai-core": "workspace:*",
     "@ying-companion/memory-postgres": "workspace:*",
     "@ying-companion/model-ollama": "workspace:*",
+    "@ying-companion/tool-web-search": "workspace:*",
+    "@ying-companion/tool-web-search-tavily": "workspace:*",
     "next": "^15.0.0",
     "pg": "^8.13.0",
     "react": "^19.0.0",

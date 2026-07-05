@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ConversationWorkspace } from "../../conversation-workspace";
+import { resolveWebSearchAvailabilityForModelConfig } from "../../lib/companion-runtime";
 import { DebugRepository } from "../../lib/debug-repository";
 import { inspectMemoryHealth } from "../../lib/memory-config";
 import type { MemoryHealthView } from "../../lib/debug-types";
@@ -22,6 +23,10 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
   const latestRun = runs[0] !== undefined ? await repository.getRun(id, runs[0].id) : null;
   const health = await loadMemoryHealth();
   const defaultModelConfig = loadDefaultDebugModelConfig(process.env);
+  const initialWebSearchAvailability = resolveWebSearchAvailabilityForModelConfig(
+    process.env,
+    defaultModelConfig,
+  );
 
   return (
     <main className="conversation-shell">
@@ -42,6 +47,7 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
         initialRun={latestRun}
         memoryHealth={health}
         defaultModelConfig={defaultModelConfig}
+        initialWebSearchAvailability={initialWebSearchAvailability}
       />
     </main>
   );
