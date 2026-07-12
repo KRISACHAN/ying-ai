@@ -1,6 +1,6 @@
 # @ying-companion/model-runtime-demo
 
-V1.0 持久化调试工作台 + **V1.1 Core Workflow Debug Workbench**。不是正式用户产品，而是本地 AI Companion Core 调试宿主：创建伴侣、配置 Persona、OpenAI-compatible / Ollama 聊天、NDJSON 流式输出、Workflow Timeline，以及长期记忆管理。
+V1.0 持久化调试工作台 + **V1.2 Core Workflow Debug Workbench**。不是正式用户产品，而是本地 AI Companion Core 调试宿主：创建伴侣、配置 Persona、OpenAI-compatible / Ollama 聊天、AI SDK UI 聊天表面、NDJSON 流式输出、Web Search Sources、Workflow Timeline，以及长期记忆管理。
 
 ## 环境变量
 
@@ -20,6 +20,9 @@ OPENAI_FALLBACK_MODEL_SUPPORTS_USAGE=false
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 DATABASE_URL=
 MEMORY_POSTGRES_TABLE=companion_memories
+WEB_SEARCH_ENABLED=false
+WEB_SEARCH_BACKEND=tavily
+TAVILY_API_KEY=
 ```
 
 `OPENAI_FALLBACK_MODEL` 为空时不启用降级。重试次数为空或非法时按 `0` 处理。能力覆盖变量为空时使用
@@ -70,10 +73,19 @@ psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0003_add_web_se
 ```
 
 `0003_add_web_search_settings.sql` 还包含 `debug_workflow_runs` 的 assistant message 唯一索引。
-`debug_conversations.web_search_enabled` 为 Stage 2 预留列；V1.2 Stage 01 的 Web Search 开关仅由 env `WEB_SEARCH_ENABLED` 控制，运行时暂不读写该列。
+`debug_conversations.web_search_enabled` 暂不作为持久化用户设置读取；V1.2 的 composer Web Search switch 只存在于当前浏览器页面状态，刷新后按宿主可用性恢复默认。
 
 然后填写 `apps/model-runtime-demo/.env` 中的 `OPENAI_API_KEY`、`OPENAI_MODEL` 与
-`DATABASE_URL`。本地默认可使用：
+`DATABASE_URL`。如需启用 Web Search，还需要：
+
+```txt
+WEB_SEARCH_ENABLED=true
+WEB_SEARCH_BACKEND=tavily
+TAVILY_API_KEY=...
+OPENAI_MODEL_SUPPORTS_TOOL_CALLING=true
+```
+
+本地默认可使用：
 
 ```txt
 DATABASE_URL=postgresql://localhost:5432/ying_companion_dev
@@ -86,25 +98,36 @@ CI 仍建议显式执行上面的 migration，确保 schema 版本可审计。
 
 - `/`：会话历史列表。选择已有伴侣创建新会话，或进入伴侣创建页。
 - `/companions/new`、`/companions/[id]/edit`：配置 Persona，包含用户显示名、建议称呼、兴趣、外貌与补充指令；服务端会在每轮聊天时将最新配置注入 `DefaultPersonaProvider`。
-- `/conversations/[id]`：左侧调试工作台，右侧纯对话。刷新后消息、情绪、摘要和历史 run 仍可恢复。
+- `/conversations/[id]`：AI SDK UI 聊天表面为默认主视图；composer 内的“调试”按钮打开抽屉，抽屉内展示模型配置与 `RunDebugPanel`。Web Search switch 位于发送按钮左侧，调试按钮位于发送按钮旁；刷新后消息、情绪、摘要和历史 run 仍可恢复；当前流式回合的 Sources 卡片来自结构化 `web_search` ToolResult，不从模型自然语言解析 URL。
 - `/companions/[id]/memories`：长期记忆 CRUD。新增/修改 content 会重新 embedding；列表不展示 score，score 只在对话页本轮 recalled memories 中出现。
 - `/debug/model-runtime`：阶段 1 Model Runtime 独立验证入口，查看 Provider inspection、流式输出、最终使用模型、是否降级、尝试次数与错误摘要。
 
 对话发送经 `POST /api/conversations/[id]/messages`，响应为
-`application/x-ndjson; charset=utf-8`。客户端提交 `message`、可选非敏感 `modelConfig`，
-以及仅本次请求使用的 `apiKeyOverride`。服务端根据 conversation / companion 构造
+`application/x-ndjson; charset=utf-8`。客户端通过 AI SDK UI `useChat` + 自定义
+`DemoChatTransport` 提交 `message`、可选非敏感 `modelConfig`、页面级
+`webSearchEnabled`，以及仅本次请求使用的 `apiKeyOverride`。缺失
+`webSearchEnabled` 时服务端按 `false` 处理，避免旧调用方意外联网。服务端根据 conversation / companion 构造
 `scope`、history、emotion、summaryScope 与 Provider，调用 `core.streamWorkflow()`，将 Core
 Event 通过 `app/lib/chat-stream-wire.ts` 的唯一映射转换为 Wire Event。除
-`workflow:finish` 外，事件实时写入 NDJSON；`workflow:finish` 只有在
+`workflow:finish` 外，事件实时写入 NDJSON；浏览器端 `app/lib/chat-stream-ui-adapter.ts`
+把 `text:delta`、`tool:call`、`tool:result`、`workflow:*` 映射成 AI SDK UI message parts，
+同时原始 Wire Events 继续旁路进入 `RunDebugPanel`。`workflow:finish` 只有在
 `DebugRepository.completeRun()` 成功写回 assistant message、workflow run、conversation
 emotion 与 preview 后才发送。旧的 `POST /api/chat` 保留为 legacy 非流式调试入口，不承载
-V1.1 工作台主链路。
+V1.2 工作台主链路。
 
 V1.1 stage-07 已将持久化会话 Route 接入 `POST + fetch + ReadableStream + NDJSON`。
 `app/lib/chat-stream-transport.ts` 提供 NDJSON 编码、浏览器增量解析与 Wire Event runtime
 guard，覆盖半行、多行、非法 JSON、终止事件后额外事件等协议边界。
 
-V1.1 stage-07 的工作台可在会话页选择 `openai-compatible` 或 `ollama`。非敏感模型配置存入
+V1.2 stage-02 保留该后端协议，不改为 `streamText()` / `toUIMessageStreamResponse()`。
+主聊天消息状态由 `@ai-sdk/react` 的 `useChat` 管理；`DemoChatTransport` 把 AI SDK 的
+`AbortSignal` 传给 `fetch`，但当前 UI 不展示 Stop，因为本阶段不承诺服务端可恢复的 workflow
+cancellation 语义。
+
+聊天消息列表只在 assistant 消息处于 `streaming` 生成期间自动滚动到底部；发送提交阶段、生成完成后的持久化刷新、历史消息恢复都不会强制贴底。用户滚动、触摸或指针操作消息列表时，系统自动滚动会暂停；用户停止滚动 2 秒后仅在本轮仍处于生成中时恢复贴底滚动。
+
+V1.1 stage-07 的工作台可在调试抽屉里选择 `openai-compatible` 或 `ollama`。非敏感模型配置存入
 浏览器 `sessionStorage` 并随每次 POST body 发送；OpenAI-compatible 的 `apiKeyOverride`
 只保存在当前页面 React state 与单次 POST body 中，不写入数据库、Wire Event、trace 或 Debug
 Panel。模型创建仍在宿主侧 strategy registry 中完成，不修改 `ai-core` Workflow。
@@ -121,6 +144,7 @@ stream 不支持、步骤失败、output safety 拒绝、memory 写回降级与 
 
 ```bash
 pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
+pnpm --filter @ying-companion/model-runtime-demo verify:chat-ui-adapter
 ```
 
 - **Memory DB Panel**：展示 provider meta、DB / pgvector / 表状态、embedding 模型与向量维度、recall（含 score）。
@@ -129,41 +153,67 @@ pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
 - **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
 - **scope 隔离**：工作台固定使用 `ownerType=custom`、`ownerId=local-debug-owner`，长期记忆按 `owner + companion` 隔离；删除会话不会删除长期记忆。
 
-## 聊天状态（V1.1）
+## Web Search（V1.2）
+
+Web Search 的三项前置都满足时，composer switch 才可用：
+
+```txt
+WEB_SEARCH_ENABLED=true
+WEB_SEARCH_BACKEND=tavily 且 TAVILY_API_KEY 有效
+当前模型 capabilities.toolCalling=true
+```
+
+Switch 只表示“本轮允许 Planner 看到 web_search”；最终是否搜索仍由
+`ToolPlanningProvider` 决定。关闭 switch 时，本次请求不会注册 / 注入 `web_search`。
+成功搜索后的 Sources 来自 `tool:result` 里的结构化 `WebSearchResult`；失败、空结果或未搜索
+时不会伪造来源。完整检索参数与 fallback 记录在 Debug Workbench 的 Web Search Log。
+
+## 聊天状态（V1.2）
 
 会话页每条 assistant 回合可能处于：
 
-| 状态                 | 含义                                                        |
-| -------------------- | ----------------------------------------------------------- |
-| `success`            | 流式完成且持久化成功                                        |
-| `degraded`           | 主回复完成，后置 Memory / Emotion / Summary 等步骤降级      |
-| `partial-failed`     | 已有部分 `text:delta`，但未成功完成（无 `workflow:finish`） |
-| `failed`             | 首个 delta 前失败或无可展示文本                             |
-| `safety-rejected`    | 完整文本 output safety 拒绝                                 |
-| `persistence-failed` | 模型输出已生成，但 DB 持久化失败；刷新后可能丢失            |
+| 状态                     | 含义                                                        |
+| ------------------------ | ----------------------------------------------------------- |
+| `success`                | 流式完成且持久化成功                                        |
+| `degraded`               | 主回复完成，后置 Memory / Emotion / Summary 等步骤降级      |
+| `submitted`              | 请求已提交                                                  |
+| `planning_tool`          | 正在判断是否需要工具                                        |
+| `searching`              | Planner 已选择 `web_search`，正在搜索 Web                   |
+| `streaming`              | 正在接收 `text:delta`                                       |
+| `partial_failed`         | 已有部分 `text:delta`，但未成功完成（无 `workflow:finish`） |
+| `output_safety_rejected` | 完整文本 output safety 拒绝                                 |
+| `persistence_failed`     | 模型输出已生成，但 DB 持久化失败；刷新后可能丢失            |
+| `tool_failed`            | 搜索等工具失败，但后续模型仍可能给出降级回答                |
+| `failed`                 | 首个 delta 前失败或无可展示文本                             |
 
 `workflow:finish` 仅在 `DebugRepository.completeRun()` 成功后发送；持久化失败走 `workflow:error` + `details.reason=persistence_failed`。
 
-## V1.1 手工验收
+## V1.2 手工验收
 
 主链路（需有效 API key / 本地 Ollama + 可选 Postgres）：
 
 ```txt
 A. Persona：/companions/[id]/edit 配置 userAddress、hobbies、appearance → Prompt Preview 分区正确
-B. OpenAI 流式：/conversations/[id] 发送消息 → NDJSON text:delta 增量 → finish 后 debug 面板完整
+B. OpenAI 流式：/conversations/[id] 发送消息 → AI SDK UI 消息增量更新且仅在 assistant streaming 期间自动贴底滚动 → 点击 composer 调试按钮后 debug 面板完整
 C. Ollama 流式：会话页 provider=ollama → 流式回复；runtime 显示 ollama 模型名
 D. Ollama 记忆写回：启用 Postgres 记忆后发送明确长期事件 → Memory Events 显示 extract/save 成功
 E. 工具规划：注册工具 + 支持 toolCalling 的模型 → Timeline 区分 plan / call / result / delta
-F. Fallback：配置 fallback 模型 → runtime 显示实际使用模型与 capability skip
-G. Safety / partial：见 verify:stream-contract 契约场景；UI 需本地确认标注文案
-H. NDJSON：pnpm verify:stream-contract（chunk 边界、raw 剥离）
-I. 工程：pnpm typecheck && pnpm lint && pnpm build
+F. Web Search：配置 Tavily + toolCalling=true → 发送按钮左侧 switch 可用；联网问题展示搜索状态与 Sources
+G. Web Search 关闭：switch off → 本轮不注册 web_search，不展示伪造 Sources
+H. Fallback：配置 fallback 模型 → runtime 显示实际使用模型与 capability skip
+I. Safety / partial：见 verify:stream-contract 契约场景；UI 需本地确认标注文案
+J. NDJSON：pnpm verify:stream-contract（chunk 边界、raw 剥离）
+K. UI Adapter：pnpm verify:chat-ui-adapter（delta、Sources、错误与协议不一致）
+L. 工程：pnpm typecheck && pnpm lint && pnpm build
 ```
 
 自动化契约验证：
 
 ```bash
 pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
+pnpm --filter @ying-companion/model-runtime-demo verify:chat-ui-adapter
+pnpm --filter @ying-companion/tool-web-search verify:web-search-contract
+pnpm --filter @ying-companion/model-runtime-demo verify:web-search-workflow
 pnpm --filter @ying-companion/model-ollama verify:adapter
 ```
 

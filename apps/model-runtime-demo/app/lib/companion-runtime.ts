@@ -69,6 +69,7 @@ export async function createConversationRuntime(input: {
   repository?: DebugRepository;
   modelConfig?: DebugModelConfig;
   apiKeyOverride?: DebugModelRequestSecrets["apiKeyOverride"];
+  webSearchEnabled?: boolean;
 }): Promise<ConversationRuntime> {
   const observer = new CollectingObserver();
   const resolvedModel = resolveDebugModelConfig(
@@ -90,6 +91,7 @@ export async function createConversationRuntime(input: {
     fallbackEmotion: input.emotion ?? createNeutralDemoEmotion(),
     env: process.env,
     modelCapabilities: model.primaryProfile.capabilities,
+    webSearchEnabled: input.webSearchEnabled === true,
   });
   const systemPrompt = input.companion.customInstructions.trim();
   const core = createCompanionCore({
@@ -200,6 +202,7 @@ function createDemoTools(options: {
   fallbackEmotion: EmotionState;
   env: NodeJS.ProcessEnv;
   modelCapabilities: ModelCapabilities;
+  webSearchEnabled: boolean;
 }): LocalToolRegistry & { webSearchAvailability: WebSearchAvailability } {
   const tools = new LocalToolRegistry();
   const webSearch = createWebSearchToolIfAvailable({
@@ -311,7 +314,7 @@ function createDemoTools(options: {
     }),
   );
 
-  if (webSearch.tool !== undefined) {
+  if (options.webSearchEnabled && webSearch.tool !== undefined) {
     tools.register(webSearch.tool.definition, webSearch.tool.handler);
   }
 

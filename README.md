@@ -10,20 +10,21 @@ Enterprise AI companion monorepo — admin backend, user-facing frontend, and a 
 
 The goal is a **pluggable AI companion core** that product apps (admin API + user web) can embed. V1 focuses on the SDK itself — no auth, user accounts, or deployment yet. Scope details: [`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md).
 
-**Current milestone:** **V1.0 is frozen** (tag [`v1.0`](.code-reviews/v1.0/conclusion.md)). **V1.1 is complete** — Persona profile extensions, workflow-level streaming, model capability profiles, tool planning, Ollama adapter, and NDJSON debug workbench. Specs: [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/) · Reviews: [`.code-reviews/v1.1/`](.code-reviews/v1.1/conclusion.md).
+**Current milestone:** **V1.0 is frozen** (tag [`v1.0`](.code-reviews/v1.0/conclusion.md)). **V1.1 is complete** — Persona profile extensions, workflow-level streaming, model capability profiles, tool planning, Ollama adapter, and NDJSON debug workbench. **V1.2 is complete** — provider-neutral Web Search Tool + Tavily adapter, AI SDK UI chat surface, Sources display, and updated demo docs. Specs: [`.requirements/stages/v1.2/`](.requirements/stages/v1.2/) · Plan: [`.requirements/prompts/05-v1.2-plan.md`](.requirements/prompts/05-v1.2-plan.md).
 
 ---
 
 ## Architecture
 
-| Part                  | Path                                                    | Status                                                                   |
-| --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **AI Core SDK**       | [`packages/ai-core`](packages/ai-core/)                 | V1.1 — `executeWorkflow()` + `streamWorkflow()`, tool planning, profiles |
-| **Ollama adapter**    | [`packages/model-ollama`](packages/model-ollama/)       | V1.1 — local `ChatModel` adapter                                         |
-| **Memory (Postgres)** | [`packages/memory-postgres`](packages/memory-postgres/) | V1.0 — pgvector long-term memory                                         |
-| **Debug workbench**   | [`apps/model-runtime-demo`](apps/model-runtime-demo/)   | V1.1 — streaming chat, Persona config, NDJSON timeline                   |
-| **Product API**       | [`apps/api`](apps/api/)                                 | Scaffold — planned RBAC backend                                          |
-| **Product web**       | [`apps/web`](apps/web/)                                 | Scaffold — planned user frontend                                         |
+| Part                  | Path                                                                                                                            | Status                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **AI Core SDK**       | [`packages/ai-core`](packages/ai-core/)                                                                                         | V1.1 — `executeWorkflow()` + `streamWorkflow()`, tool planning, profiles |
+| **Ollama adapter**    | [`packages/model-ollama`](packages/model-ollama/)                                                                               | V1.1 — local `ChatModel` adapter                                         |
+| **Memory (Postgres)** | [`packages/memory-postgres`](packages/memory-postgres/)                                                                         | V1.0 — pgvector long-term memory                                         |
+| **Web Search Tool**   | [`packages/tool-web-search`](packages/tool-web-search/) + [`packages/tool-web-search-tavily`](packages/tool-web-search-tavily/) | V1.2 — provider-neutral search DTO/tool + Tavily adapter                 |
+| **Debug workbench**   | [`apps/model-runtime-demo`](apps/model-runtime-demo/)                                                                           | V1.2 — AI SDK UI chat, NDJSON adapter, Web Search Sources                |
+| **Product API**       | [`apps/api`](apps/api/)                                                                                                         | Scaffold — planned RBAC backend                                          |
+| **Product web**       | [`apps/web`](apps/web/)                                                                                                         | Scaffold — planned user frontend                                         |
 
 ```mermaid
 flowchart LR
@@ -91,6 +92,15 @@ Stage 8  Documentation & review
 
 Full plan: [`.requirements/prompts/04-v1.1-plan.md`](.requirements/prompts/04-v1.1-plan.md) · Stage specs: [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/)
 
+**V1.2** (complete):
+
+```txt
+Stage 1  Web Search Tool + Tavily adapter
+Stage 2  Demo AI SDK UI, Sources display, docs sync
+```
+
+Full plan: [`.requirements/prompts/05-v1.2-plan.md`](.requirements/prompts/05-v1.2-plan.md) · Stage specs: [`.requirements/stages/v1.2/`](.requirements/stages/v1.2/)
+
 ---
 
 ## Prerequisites
@@ -134,11 +144,12 @@ More commands: [docs/ai/core/project-context.md](docs/ai/core/project-context.md
 
 ## Run the Debug Workbench
 
-The fastest way to inspect V1.1 locally is the Next.js **Core Workflow Debug Workbench**. It creates companions and conversations, calls `@ying-companion/ai-core` via `streamWorkflow()`, streams NDJSON to the browser, and shows Persona, Timeline, runtime, memory, emotion, tools, and writeback results.
+The fastest way to inspect V1.2 locally is the Next.js **Core Workflow Debug Workbench**. It creates companions and conversations, calls `@ying-companion/ai-core` via `streamWorkflow()`, streams NDJSON to the browser, adapts that stream into AI SDK UI messages, and shows Persona, Timeline, runtime, memory, emotion, tools, Web Search, Sources, and writeback results in a debug/model drawer opened from the chat composer. The composer includes the per-turn Web Search switch plus Debug and Send actions.
 
 ```bash
 cp apps/model-runtime-demo/.env.example apps/model-runtime-demo/.env
 # Set OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, DATABASE_URL (see demo README)
+# Optional Web Search: WEB_SEARCH_ENABLED=true, WEB_SEARCH_BACKEND=tavily, TAVILY_API_KEY, toolCalling=true
 
 pnpm --filter @ying-companion/model-runtime-demo dev
 ```
@@ -146,7 +157,7 @@ pnpm --filter @ying-companion/model-runtime-demo dev
 Open the URL from the terminal:
 
 - `/` — conversation list; create companions and sessions
-- `/conversations/[id]` — **streaming chat** (left debug panel, right chat)
+- `/conversations/[id]` — **AI SDK UI streaming chat** (chat-first view, composer Web Search switch, composer Debug action, optional Web Search Sources)
 - `/companions/new` — Persona config (user address, hobbies, appearance, …)
 - `/debug/model-runtime` — legacy model runtime smoke test
 
@@ -163,7 +174,7 @@ Embedding for long-term memory remains a **separate** `EmbeddingProvider` (typic
 
 ---
 
-## V1.1 limitations (summary)
+## V1.2 limitations (summary)
 
 Not in this release:
 
@@ -171,6 +182,7 @@ Not in this release:
 - Stop generation, reconnect/resume, WebSocket/SSE as primary transport
 - Streaming multi-turn tool loop; token-level output safety
 - Ollama embedding provider
+- Tavily Extract/Crawl/Map/Research, deep browsing, search history, source persistence
 
 Details: [`.code-reviews/v1.1/conclusion.md`](.code-reviews/v1.1/conclusion.md).
 
@@ -183,7 +195,7 @@ Details: [`.code-reviews/v1.1/conclusion.md`](.code-reviews/v1.1/conclusion.md).
 | Workspace | pnpm 9, Turborepo, TypeScript                                    |
 | Quality   | ESLint 9 (flat config), Prettier, Husky, lint-staged, commitlint |
 | AI Core   | Vercel AI SDK (OpenAI-compatible); Ollama npm in `model-ollama`  |
-| Debug UI  | Next.js 15 (`apps/model-runtime-demo`), NDJSON over POST         |
+| Debug UI  | Next.js 15, AI SDK UI, NDJSON over POST                          |
 
 ---
 
