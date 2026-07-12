@@ -112,6 +112,8 @@ apps/model-runtime-demo/package.json
 - 不为 Legacy /api/chat + chat-panel.tsx 做完整双轨重写。
 - 不在缺少真实 abort 语义时伪造 Stop。
 - 不在缺少明确重跑语义时直接暴露 Regenerate。
+- 不实现会话级 Web Search Toggle UI；Stage 01 的 env `WEB_SEARCH_ENABLED` 仍是唯一开关（`debug_conversations.web_search_enabled` 列预留，本阶段不读写）。
+- 不引入 Tailwind 或完整主题系统；沿用现有 `page.css` 与 className 样式。
 ```
 
 ---
@@ -134,7 +136,8 @@ apps/model-runtime-demo/package.json
 - 成功搜索后展示 Sources；未搜索、失败或空结果时不展示伪造来源。
 - Web Search 不可用原因在 Chat Surface 可见。
 - 刷新后仍以数据库持久化消息为准，不将 UIMessage 当数据库事实源。
-- typecheck、lint、build 和新增确定性验证全部通过。
+- typecheck、lint、build、verify:stream-contract、verify:chat-ui-adapter 全部通过。
+- 配置真实 `.env` 后 verify:web-search-workflow 仍通过；浏览器场景 A～H 走查完成。
 - README 与 docs 只描述最终实际实现。
 ```
 
@@ -161,9 +164,10 @@ apps/model-runtime-demo/
 │       ├── demo-chat-transport.ts
 │       ├── demo-ui-message.ts
 │       ├── chat-turn-state.ts
-│       ├── web-search-ui-metadata.ts
+│       ├── web-search-ui-metadata.ts      # 可选；仅 UI 展示格式化，不重复 DTO 派生
 │       ├── chat-stream-transport.ts       # 现有 NDJSON parser，继续复用
 │       ├── chat-stream-wire.ts            # Wire 契约保持稳定
+│       ├── web-search-runtime.ts          # 阶段 1 已有；DemoWorkflowWebSearchMetadata、deriveWebSearchMetadataFromToolResult
 │       ├── web-search-availability.ts     # 继续复用
 │       └── web-search-debug-log.ts        # 继续供 Debug Panel 使用
 ├── scripts/
@@ -189,6 +193,12 @@ ConversationChatSurface
 
 RunDebugPanel
 → 继续负责完整调试，不依赖 AI SDK UI message parts 才能工作。
+
+web-search-runtime.ts（阶段 1）
+→ DTO 派生与 ToolResult 解析的唯一来源；UI Adapter 必须复用 deriveWebSearchMetadataFromToolResult()，不得在 adapter 内重写 normalize。
+
+web-search-ui-metadata.ts（可选）
+→ 若存在，只负责 Sources 卡片展示用的截断、去重、label；不得复制 DemoWorkflowWebSearchMetadata 定义。
 ```
 
 避免把所有状态、解析、视图和数据刷新继续堆在 `conversation-workspace.tsx`。
@@ -202,8 +212,8 @@ RunDebugPanel
 ```json
 {
   "dependencies": {
-    "ai": "与当前 AI SDK UI 主版本兼容的稳定版本",
-    "@ai-sdk/react": "与 ai 完全同代的稳定版本"
+    "ai": "^5.0.0",
+    "@ai-sdk/react": "^2.0.0"
   }
 }
 ```
@@ -211,10 +221,10 @@ RunDebugPanel
 约束：
 
 ```txt
-- ai 与 @ai-sdk/react 必须使用同一主版本。
-- 实施时以实际安装版本导出的 ChatTransport / UIMessage API 为准。
-- 不复制过时示例中的旧 useChat input API。
-- 使用 message.parts 渲染消息，不依赖废弃的 message.content。
+- 固定 AI SDK 5.x 主版本；ai 与 @ai-sdk/react 必须同代安装，并在 pnpm-lock.yaml 锁定。
+- 安装后第一步：阅读该版本导出的 ChatTransport、UIMessage、UIMessageChunk 类型，再写 adapter 与 Transport。
+- useChat 使用 transport 参数；不再使用 hook 级别的 headers/body 或内部 input 状态（AI SDK 5 已移除）。
+- 使用 sendMessage({ text }) 发送；使用 message.parts 渲染，不依赖废弃的 message.content。
 - 不引入 AI SDK Provider；模型调用仍由 Companion Core Model Adapter 完成。
 ```
 
@@ -230,6 +240,8 @@ RunDebugPanel
 
 ```ts
 import type { UIMessage } from "ai";
+
+import type { DemoWorkflowWebSearchMetadata } from "./web-search-runtime";
 
 export interface DemoMessageMetadata {
   workflowId?: string;
@@ -283,10 +295,11 @@ mapPersistedMessagesToUI(initialDetail.messages): DemoUIMessage[]
 - id 使用持久化 message id。
 - status / errorSummary / model 写入 Demo metadata。
 - 不从历史 message content 推断 Sources。
-- 历史 Sources 只有在持久化 run / toolSnapshot 中可可靠恢复时才展示；否则 V1.2 仅保证本轮 Sources。
+- Chat Surface 仅保证**当前流式回合**的 Sources 卡片；刷新后以 DB 文本消息为准。
+- 历史 run 的 Sources 仍可在 RunDebugPanel 通过 selectedRun.toolSnapshot.webSearch 查看；不要求 Chat Surface 恢复历史来源卡片。
 ```
 
-最后一条必须明确：V1.2 不新增 Sources 数据库表，不承诺刷新后永久恢复来源卡片。
+最后一条必须明确：V1.2 不新增 Sources 数据库表，不承诺刷新后 Chat Surface 永久恢复来源卡片。
 
 ---
 
@@ -343,7 +356,7 @@ Transport 读取 `parseNdjsonWireEvents(response.body)`，每个事件同时进�
 
 ```txt
 方向 A：chat-stream-ui-adapter
-→ 生成 useChat 可消费的 UIMessage 增量。
+→ 生成 useChat 可消费的 UIMessageChunk 流。
 
 方向 B：onWireEvent
 → append 到 ConversationWorkspace.streamEvents[]。
@@ -351,6 +364,29 @@ Transport 读取 `parseNdjsonWireEvents(response.body)`，每个事件同时进�
 ```
 
 禁止先转换成 UIMessage 后再反推 Debug Event。
+
+### 8.4 ChatTransport 接口约束（AI SDK 5）
+
+`DemoChatTransport` 必须实现 `ChatTransport` 接口，至少包含：
+
+```ts
+class DemoChatTransport implements ChatTransport<DemoUIMessage> {
+  sendMessages(options): Promise<ReadableStream<UIMessageChunk>>;
+  reconnectToStream(options): Promise<ReadableStream<UIMessageChunk> | null>;
+}
+```
+
+硬约束：
+
+```txt
+- sendMessages() 发起 POST /api/conversations/[id]/messages，读取 NDJSON，逐事件映射为 UIMessageChunk 流。
+- chat-stream-ui-adapter 负责 Wire Event → UIMessageChunk；Transport 负责 fetch、parse、旁路 onWireEvent、组装 ReadableStream。
+- reconnectToStream() 固定返回 null；本阶段不做断线续传（§3.2 已禁止）。
+- useChat 传入的 abortSignal 必须传给 fetch；即使 UI 不暴露 Stop 按钮，Transport 仍须正确中止请求。
+- 不得假设 DefaultChatTransport 或 TextStreamChatTransport 可直接消费 NDJSON；Companion Wire Protocol 与 AI SDK 标准 UI stream 不兼容。
+```
+
+实施顺序建议：先写 adapter 的 Wire Event → UIMessageChunk 纯函数与 verify 脚本，再实现 Transport 与 useChat 接入。
 
 ---
 
@@ -370,19 +406,20 @@ Transport 读取 `parseNdjsonWireEvents(response.body)`，每个事件同时进�
 
 ### 9.2 step:start / step:end
 
+Wire 中的 step 名来自 `WorkflowStepName`（如 `tool:plan`、`tool:execute`），不得使用概念别名。
+
 ```txt
-输入：ToolPlanning step:start
+输入：step:start，step === "tool:plan"
 输出：planning_tool
 
-输入：ToolExecute step:start，且已看到 web_search tool:call
-输出：searching
-
-输入：step:end degraded
+输入：step:end，status === "degraded"
 输出：记录 degraded 标记，但不提前结束 assistant message
 
-其他 step
-输出：只供 Debug State；不向用户展示内部步骤名
+其他 step（persona:load、memory:recall、tool:execute 等）
+输出：只供 Debug State；不向 Chat Surface 展示内部步骤名
 ```
+
+`searching` 状态**不由** `tool:execute` step:start 驱动，统一由 §9.4 的 `tool:call`（`name === "web_search"`）触发，避免重复或乱序。
 
 UI 不应向普通聊天用户暴露所有内部 Workflow Step。
 
@@ -425,7 +462,7 @@ UI 不应向普通聊天用户暴露所有内部 Workflow Step。
 当 `result.name === "web_search" && result.ok !== false`：
 
 ```txt
-- 使用阶段 1 已提供的安全解析函数提取 Web Search Metadata。
+- 调用 web-search-runtime.ts 的 deriveWebSearchMetadataFromToolResult() 提取 Host Metadata。
 - sources.length > 0 → web-search-status: completed。
 - sources.length === 0 → web-search-status: empty。
 - 推送 web-search-sources data part。
@@ -456,7 +493,7 @@ UI 不应向普通聊天用户暴露所有内部 Workflow Step。
 ```txt
 1. 校验 aggregatedText === event.output.text。
 2. 不一致时抛出 protocol_error，不显示 success。
-3. 从 event.output / toolResults 或已收集 ToolResult 派生最终 Host Metadata。
+3. 从 event.output.toolResults 或 adapter 已收集的 ToolResult 调用 deriveWebSearchMetadataFromToolResult() 派生 Host Metadata；写入 UIMessage metadata / data part，不回写 event.output。
 4. 完成当前 assistant message。
 5. 根据 trace 设置 success 或 degraded。
 6. 调用宿主回调刷新 conversation、runs 与 selectedRun。
@@ -493,7 +530,7 @@ workflow_failed + reason=persistence_failed
 
 AI SDK `useChat.status` 只表示请求生命周期，不能完全替代 Companion Workflow 状态。
 
-定义 Demo 状态：
+定义 Demo 状态（本阶段统一采用 snake_case；替换现有 `conversation-workspace.tsx` 中的 kebab-case `ChatTurnStatus`）：
 
 ```ts
 export type DemoTurnStatus =
@@ -511,13 +548,23 @@ export type DemoTurnStatus =
   | "failed";
 ```
 
+与现有实现的对应关系（迁移时一次性替换，不得长期并存两套枚举）：
+
+```txt
+preparing        → submitted
+completed        → success
+partial-failed   → partial_failed
+safety-rejected  → output_safety_rejected
+persistence-failed → persistence_failed
+```
+
 映射原则：
 
 ```txt
 useChat.status=submitted
 → submitted
 
-ToolPlanning start
+step:start，step === "tool:plan"
 → planning_tool
 
 web_search tool:call
@@ -611,6 +658,8 @@ Transport / Adapter 先完成 UI message
 
 目标是“可用、清晰、比当前 Demo 更像聊天界面”，不是商业化视觉系统。
 
+样式约束：沿用现有 `apps/model-runtime-demo/app/page.css` 与 className 约定；不引入 Tailwind、shadcn 或完整主题系统。
+
 ### 12.1 布局
 
 保留 Debug Workbench，但重新划分视觉层级：
@@ -647,9 +696,11 @@ Message List
 
 Composer
 ├── Textarea
-├── Web Search Toggle / availability
+├── Web Search availability 提示（只读；开关仍由 env WEB_SEARCH_ENABLED 控制）
 └── Send
 ```
+
+Web Search 开关不在本阶段实现 UI Toggle。Chat Header / Composer 附近展示 availability badge 与不可用原因即可；实际启用条件仍是 Stage 01 的三项前置（`WEB_SEARCH_ENABLED=true` + `TAVILY_API_KEY` + `toolCalling=true`）。
 
 模型详细配置可保留在折叠区或 Chat Header 下方，不应长期占据聊天主视觉的大块顶部空间。
 
@@ -681,7 +732,7 @@ data-workflow-error
 - 空白消息不发送。
 - submitted / streaming 时禁止重复发送。
 - 发送后清空输入框。
-- Web Search 不可用时 Toggle 禁用，并显示具体原因。
+- Web Search 不可用时在 Chat Header / availability 区域显示具体原因（不影响普通聊天发送）。
 - 不提供虚假的 Stop / Regenerate。
 ```
 
@@ -698,7 +749,7 @@ available
 → 显示“Web Search 可用”。
 
 disabled
-→ 显示“Web Search 已关闭”。
+→ 显示“Web Search 已关闭（WEB_SEARCH_ENABLED 未设为 true）”。
 
 missing_api_key
 → 显示“TAVILY_API_KEY 未配置”。
@@ -709,8 +760,10 @@ unsupported_backend
 tool_calling_unsupported
 → 显示“当前模型未声明 toolCalling 能力”。
 
-provider_not_ready / 其他安全原因
-→ 显示通用不可用说明，不泄漏服务端敏感信息。
+provider_initialization_failed
+→ 显示“Web Search Provider 初始化失败”。
+
+label 文案以 web-search-availability.ts 的 formatWebSearchAvailabilityLabel() 为准；不得自造 reason 枚举。
 ```
 
 ### 13.2 搜索过程
@@ -857,9 +910,17 @@ Debug 可展示：
 
 ---
 
-## 十六、确定性验证
+## 十六、验证策略
 
-新增无外部 Key、可进 CI 的验证。
+本阶段**不考虑 CI**；Stage 完成证据以本地真实 `.env` + 浏览器走查为准。验证分两层：
+
+```txt
+[离线 deterministic] verify:chat-ui-adapter
+→ 本地开发辅助；覆盖 adapter / transport 纯逻辑；无 API Key 可跑；不能单独作为 stage 完成依据。
+
+[真实 E2E] verify:web-search-contract + verify:web-search-workflow + 浏览器场景 A～H
+→ 配置 apps/model-runtime-demo/.env 后必须跑通；与 Stage 01 验收哲学一致。
+```
 
 ### 16.1 Adapter 单元验证
 
@@ -917,11 +978,11 @@ apps/model-runtime-demo/scripts/verify-chat-ui-adapter.mjs
 
 ```json
 {
-  "verify:chat-ui-adapter": "pnpm --filter @ying-companion/ai-core build && node scripts/verify-chat-ui-adapter.mjs"
+  "verify:chat-ui-adapter": "node scripts/verify-chat-ui-adapter.mjs"
 }
 ```
 
-如果采用仓库现有测试工具，可以改为对应测试命令；但无 Key 可复现门禁不可省略。
+如果采用仓库现有测试工具，可以改为对应测试命令；但 adapter 离线验证与真实 E2E 验证均不可省略（前者辅助开发，后者是完成证据）。
 
 ---
 
@@ -1053,7 +1114,7 @@ pnpm --filter @ying-companion/model-runtime-demo verify:web-search-workflow
 pnpm --filter @ying-companion/model-runtime-demo dev
 ```
 
-真实外部服务验证不作为无 Key CI 的默认必跑项，但必须作为 V1.2 完成证据。
+Stage 02 完成前，配置真实 `.env` 后必须跑通 `verify:web-search-contract`、`verify:web-search-workflow`，并完成浏览器场景 A～H 走查。
 
 ---
 
@@ -1129,6 +1190,7 @@ V1.2 → 05-v1.2-plan.md
 - useChat / DemoChatTransport / NDJSON Adapter 的关系
 - 为什么没有改成 AI SDK 标准后端流协议
 - Model Config / apiKeyOverride 行为
+- Web Search 由 env WEB_SEARCH_ENABLED 控制（本阶段无 UI Toggle）
 - Web Search availability 三项前置
 - 搜索与非搜索示例
 - Sources 只表示本轮参考来源
@@ -1142,6 +1204,7 @@ V1.2 → 05-v1.2-plan.md
 只列真实读取的变量，并写明用途：
 
 ```txt
+WEB_SEARCH_ENABLED=false
 WEB_SEARCH_BACKEND=tavily
 TAVILY_API_KEY=
 OPENAI_MODEL_SUPPORTS_TOOL_CALLING=true
@@ -1226,11 +1289,11 @@ OPENAI_MODEL_SUPPORTS_TOOL_CALLING=true
 严格按以下顺序执行：
 
 ```txt
-1. 安装 ai / @ai-sdk/react，确认实际 API。
-2. 定义 DemoUIMessage、metadata、data parts 与 DemoTurnStatus。
-3. 为 chat-stream-ui-adapter 编写确定性验证。
-4. 实现 Wire Event → UIMessage 增量映射。
-5. 实现 DemoChatTransport，复用现有 NDJSON parser。
+1. 安装 ai@5 / @ai-sdk/react，确认 ChatTransport / UIMessageChunk API。
+2. 定义 DemoUIMessage、metadata、data parts 与 DemoTurnStatus（复用 web-search-runtime.ts 的 DTO）。
+3. 为 chat-stream-ui-adapter 编写 verify:chat-ui-adapter 离线验证。
+4. 实现 Wire Event → UIMessageChunk 纯映射。
+5. 实现 DemoChatTransport（ChatTransport 接口 + NDJSON parser），reconnectToStream 返回 null。
 6. 用 useChat 替换 ConversationWorkspace 手写主消息状态。
 7. 保持 streamEvents[] 旁路接入 RunDebugPanel。
 8. 拆分 Chat Surface / Message / Composer / Sources 组件。
@@ -1274,9 +1337,9 @@ OPENAI_MODEL_SUPPORTS_TOOL_CALLING=true
 - 最新 run 与 Debug Panel 同步。
 
 [Quality]
-- typecheck / lint / build 通过。
-- Adapter / Transport 确定性验证通过。
-- 真实 Tavily + 模型流程可在浏览器复现。
+- typecheck / lint / build / verify:stream-contract / verify:chat-ui-adapter 通过。
+- 配置真实 .env 后 verify:web-search-contract 与 verify:web-search-workflow 仍通过（Stage 01 不回归）。
+- 浏览器场景 A～H 走查通过。
 
 [Documentation]
 - AGENTS.md、README、Demo README、package README 与 project-context 描述实际代码。
