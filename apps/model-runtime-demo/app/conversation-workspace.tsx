@@ -55,9 +55,7 @@ export function ConversationWorkspace({
   const [apiKeyOverride, setApiKeyOverride] = useState("");
   const [webSearchEnabled, setWebSearchEnabled] = useState(initialWebSearchAvailability.available);
   const [debugDrawerOpen, setDebugDrawerOpen] = useState(false);
-  const [webSearchAvailability, setWebSearchAvailability] = useState<WebSearchAvailability>(
-    initialWebSearchAvailability,
-  );
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const previousAvailabilityRef = useRef<boolean>(initialWebSearchAvailability.available);
   const modelConfigRef = useRef(modelConfig);
   const apiKeyOverrideRef = useRef(apiKeyOverride);
@@ -78,8 +76,8 @@ export function ConversationWorkspace({
       return { available: false, reason: "tool_calling_unsupported" };
     }
 
-    return webSearchAvailability;
-  }, [defaultModelConfig.capabilities, modelConfig.capabilities, webSearchAvailability]);
+    return initialWebSearchAvailability;
+  }, [defaultModelConfig.capabilities, initialWebSearchAvailability, modelConfig.capabilities]);
 
   const runByAssistantMessage = useMemo(() => buildRunMap(runs), [runs]);
   const initialMessages = useMemo(
@@ -101,6 +99,9 @@ export function ConversationWorkspace({
         },
         onWorkflowTerminal: async () => {
           await refreshConversationState();
+        },
+        onWorkflowTerminalError: (error) => {
+          setRefreshWarning(error instanceof Error ? error.message : "刷新持久化会话详情失败");
         },
       }),
     [displayedWebSearchAvailability.available, initialDetail.conversation.id],
@@ -172,20 +173,6 @@ export function ConversationWorkspace({
   }, [defaultModelConfig]);
 
   useEffect(() => {
-    const capabilities = {
-      ...defaultModelConfig.capabilities,
-      ...modelConfig.capabilities,
-    };
-
-    if (capabilities.toolCalling !== true) {
-      setWebSearchAvailability({ available: false, reason: "tool_calling_unsupported" });
-      return;
-    }
-
-    setWebSearchAvailability(initialWebSearchAvailability);
-  }, [modelConfig, defaultModelConfig, initialWebSearchAvailability]);
-
-  useEffect(() => {
     const wasAvailable = previousAvailabilityRef.current;
     previousAvailabilityRef.current = displayedWebSearchAvailability.available;
 
@@ -217,6 +204,7 @@ export function ConversationWorkspace({
     setInput("");
     setStreamEvents([]);
     setWorkflowId(null);
+    setRefreshWarning(null);
     await sendMessage({ text });
   }
 
@@ -336,6 +324,7 @@ export function ConversationWorkspace({
           </div>
 
           {error !== undefined ? <p className="form-error">{error.message}</p> : null}
+          {refreshWarning !== null ? <p className="form-error">{refreshWarning}</p> : null}
           <ConversationComposer
             input={input}
             status={status}

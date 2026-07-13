@@ -1,10 +1,10 @@
 import type { ChatTransport, UIMessageChunk } from "ai";
 
-import { ChatStreamProtocolError, parseNdjsonWireEvents } from "./chat-stream-transport";
-import type { ChatWorkflowStreamWireEvent } from "./chat-stream-wire";
-import { ChatStreamUIAdapter } from "./chat-stream-ui-adapter";
-import type { DemoUIMessage } from "./demo-ui-message";
-import type { DebugModelConfig } from "./model-config";
+import { ChatStreamProtocolError, parseNdjsonWireEvents } from "./chat-stream-transport.ts";
+import type { ChatWorkflowStreamWireEvent } from "./chat-stream-wire.ts";
+import { ChatStreamUIAdapter } from "./chat-stream-ui-adapter.ts";
+import type { DemoUIMessage } from "./demo-ui-message.ts";
+import type { DebugModelConfig } from "./model-config.ts";
 
 export interface DemoChatTransportContext {
   conversationId: string;
@@ -15,10 +15,18 @@ export interface DemoChatTransportContext {
   onWorkflowTerminal(
     event: Extract<ChatWorkflowStreamWireEvent, { type: "workflow:finish" | "workflow:error" }>,
   ): void | Promise<void>;
+  onWorkflowTerminalError?(
+    error: unknown,
+    event: Extract<ChatWorkflowStreamWireEvent, { type: "workflow:finish" | "workflow:error" }>,
+  ): void;
 }
 
 export class DemoChatTransport implements ChatTransport<DemoUIMessage> {
-  public constructor(private readonly context: DemoChatTransportContext) {}
+  private readonly context: DemoChatTransportContext;
+
+  public constructor(context: DemoChatTransportContext) {
+    this.context = context;
+  }
 
   public async sendMessages({
     messages,
@@ -88,7 +96,11 @@ export class DemoChatTransport implements ChatTransport<DemoUIMessage> {
             }
 
             if (event.type === "workflow:finish" || event.type === "workflow:error") {
-              await context.onWorkflowTerminal(event);
+              try {
+                await context.onWorkflowTerminal(event);
+              } catch (terminalError) {
+                context.onWorkflowTerminalError?.(terminalError, event);
+              }
             }
           }
         } catch (error) {
