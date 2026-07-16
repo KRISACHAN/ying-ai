@@ -55,18 +55,26 @@ story-core
 ### 2.1 必须完成
 
 ```txt
-1. 新建 packages/story-core
-2. 建立 Story Domain 核心类型与 Provider 接口
+1. 新建 packages/story-core，并接入 monorepo（workspace / turbo / 根文档索引）
+2. 建立 Story Domain 核心类型与 Provider 接口（含 item / clue / event 目录）
 3. 建立 Core StoryState + Story Attribute Schema 两层状态模型
 4. 建立确定性的 StateTransitionValidator
-5. 提供内存 Story / State / Lore Provider
-6. 提供 ModelStoryPlanner 与 ModelStoryRenderer
-7. 提供 DefaultStoryWorkflow.execute()
-8. 提供种子故事「雾港疑云」
-9. 提供第二套最小武侠 Attribute Schema 契约样例
-10. 提供无网络确定性验证脚本
-11. 提供可选真实模型冒烟脚本
+5. 提供内存 Story / State / Session / Lore Provider
+6. 提供 FakeStoryPlanner / FakeStoryRenderer（契约门禁路径）
+7. 提供 ModelStoryPlanner / ModelStoryRenderer（实现可有；非完成门禁）
+8. 提供 DefaultStoryWorkflow.execute()
+9. 提供种子故事「雾港疑云」
+10. 提供第二套最小武侠 Attribute Schema 契约样例
+11. 提供无网络确定性验证脚本 verify:story-contract
 12. 补齐 packages/story-core/README.md
+```
+
+**Stage 01 完成门禁（硬规则）：**
+
+```txt
+以 verify:story-contract（Fake Planner / Fake Renderer，完全离线）通过为准。
+ModelStoryPlanner / ModelStoryRenderer 与 verify:story-model-smoke 为可选加分；
+真实模型冒烟失败或不写，不挡本阶段 done。
 ```
 
 ### 2.2 本阶段不做
@@ -99,10 +107,14 @@ packages/story-core/
 ├── src/
 │   ├── abstractions/
 │   │   ├── story-definition.ts
+│   │   ├── story-catalog.ts          # Item / Clue / Event 目录
+│   │   ├── story-condition.ts
+│   │   ├── story-session.ts
 │   │   ├── story-state.ts
 │   │   ├── story-state-change.ts
 │   │   ├── story-provider.ts
 │   │   ├── story-state-provider.ts
+│   │   ├── story-session-provider.ts
 │   │   ├── lore-provider.ts
 │   │   ├── story-planner.ts
 │   │   ├── story-renderer.ts
@@ -111,12 +123,15 @@ packages/story-core/
 │   ├── providers/
 │   │   ├── in-memory-story-provider.ts
 │   │   ├── in-memory-story-state-provider.ts
+│   │   ├── in-memory-story-session-provider.ts
 │   │   └── keyword-lore-provider.ts
 │   ├── planner/
-│   │   ├── model-story-planner.ts
+│   │   ├── fake-story-planner.ts
+│   │   ├── model-story-planner.ts    # 可选实现
 │   │   └── story-turn-plan-schema.ts
 │   ├── renderer/
-│   │   └── model-story-renderer.ts
+│   │   ├── fake-story-renderer.ts
+│   │   └── model-story-renderer.ts   # 可选实现
 │   ├── state/
 │   │   ├── default-story-transition-validator.ts
 │   │   ├── apply-story-state-changes.ts
@@ -130,7 +145,7 @@ packages/story-core/
 │   └── index.ts
 ├── scripts/
 │   ├── verify-story-contract.ts
-│   └── verify-story-model-smoke.ts
+│   └── verify-story-model-smoke.ts   # 可选
 ├── README.md
 ├── package.json
 └── tsconfig.json
@@ -149,6 +164,19 @@ seeds
 ```
 
 职责清晰，禁止把全部实现堆进单一 `story-core.ts`。
+
+### 3.1 仓库接线（必须）
+
+新建包后至少完成：
+
+```txt
+1. pnpm-workspace 已包含 packages/*
+2. packages/story-core/package.json：name=@ying-companion/story-core；依赖 @ying-companion/ai-core
+3. build / typecheck / lint 可被 turbo filter
+4. package script：verify:story-contract
+5. 更新 AGENTS.md Project Snapshot（story-core Stage 01）
+6. 更新 .requirements/README.md 的 stages 列表（若仍缺 v1.3）
+```
 
 ---
 
@@ -177,6 +205,13 @@ export interface StoryDefinition {
   scenes: SceneDefinition[];
   lore: LoreEntry[];
 
+  /** 世界可拾取/可持有物目录；add/remove_inventory_item 必须命中此处 id */
+  items: StoryItemDefinition[];
+  /** 可发现线索目录；add_clue 必须命中此处 id */
+  clues: StoryClueDefinition[];
+  /** 可触发事件目录；add_event 必须命中此处 id */
+  events: StoryEventDefinition[];
+
   openingSceneId: string;
   openingText: string;
 
@@ -197,9 +232,10 @@ export interface StoryDefinition {
 - id 在种子范围内唯一
 - version 非空
 - openingSceneId 必须引用合法 scene
-- character / scene / lore id 分别唯一
+- character / scene / lore / item / clue / event id 分别唯一
 - attributes[].key 在同一 scope 语义下不可冲突
 - Definition 是静态事实，不承载回合运行状态
+- 未在目录中声明的 itemId / clueId / eventId，对应 add_* 一律拒绝
 ```
 
 ---
@@ -247,12 +283,7 @@ export interface StoryCharacterDefinition {
   knowledgeScope?: string[];
   forbiddenKnowledge?: string[];
 
-  narrativeRole:
-    | "protagonist"
-    | "companion"
-    | "antagonist"
-    | "supporting"
-    | "narrator";
+  narrativeRole: "protagonist" | "companion" | "antagonist" | "supporting" | "narrator";
 }
 ```
 
@@ -265,6 +296,17 @@ export interface StoryCharacterDefinition {
 - 她隐藏了什么
 - 她当前允许知道什么
 - 她不能提前知道什么
+```
+
+#### StorySecret（最小形状）
+
+```ts
+export interface StorySecret {
+  id: string;
+  summary: string;
+  /** 对应 lore id 或纯文本秘密；Stage 01 不做复杂揭示图 */
+  loreId?: string;
+}
 ```
 
 ---
@@ -289,9 +331,82 @@ export interface SceneDefinition {
 
 Stage 01 只要求支持最小、确定性的场景引用与切换条件。
 
+#### StoryCondition（Stage 01 封闭联合）
+
+不做通用表达式引擎。Stage 01 只允许以下条件；未列出的形式在 Definition 校验阶段直接失败。
+
+```ts
+export type StoryCondition =
+  | { type: "always" }
+  | { type: "has_clue"; clueId: string }
+  | { type: "has_event"; eventId: string }
+  | { type: "has_item"; itemId: string }
+  | { type: "in_scene"; sceneId: string }
+  | {
+      type: "attr_gte";
+      key: string;
+      scopeRef?: string;
+      value: number;
+    }
+  | {
+      type: "attr_eq";
+      key: string;
+      scopeRef?: string;
+      value: boolean | number | string;
+    };
+```
+
+求值规则：
+
+```txt
+- has_* / in_scene：对照当前 StoryState + Definition 目录
+- attr_*：用 createStoryAttributeStorageKey 生成键后读 StoryState.attrs
+- set_scene 时：目标场景的 entryConditions 必须全部为真（空数组 = 通过）
+- 当前场景若声明 exitConditions：离开前必须全部为真（空 = 通过）
+- Stage 01 不做 OR / NOT 组合；需要组合时拆成多个条件（隐式 AND）
+```
+
 ---
 
-## 4.5 LoreEntry
+## 4.5 Item / Clue / Event 目录
+
+```ts
+export interface StoryItemDefinition {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface StoryClueDefinition {
+  id: string;
+  title: string;
+  description?: string;
+}
+
+export interface StoryEventDefinition {
+  id: string;
+  title: string;
+  description?: string;
+  /** 默认 false：同一 eventId 不可重复 add_event */
+  allowRepeat?: boolean;
+}
+```
+
+规则：
+
+```txt
+- inventory / clues / events 运行态只存 id 字符串
+- add_inventory_item / add_clue / add_event 的 id 必须 ∈ 对应目录
+- remove_inventory_item 的 id 必须当前持有；不要求仍在目录外的幽灵 id
+- clue 默认不可移除（Stage 01 无 remove_clue）
+- event 默认不可重复；allowRepeat=true 时才允许再次 add_event
+- 重复 add 已持有 item：整批拒绝（或视为 no-op 二选一；Stage 01 固定为整批拒绝）
+- 重复 add 已有 clue：整批拒绝
+```
+
+---
+
+## 4.6 LoreEntry
 
 ```ts
 export interface LoreEntry {
@@ -322,6 +437,69 @@ secret 默认不注入
 ```
 
 完整 state condition 与 reveal 规则放到 Stage 02。
+
+---
+
+## 4.7 NarrativeRules
+
+```ts
+export interface NarrativeRules {
+  /** 给 Planner / Renderer 的硬约束摘要 */
+  mustFollow: string[];
+  /** 禁止出现的内容或元叙事 */
+  mustAvoid: string[];
+  /** 默认视角，如 second_person / limited_third */
+  pov?: string;
+  /** 单回合叙事长度提示，非硬限制 */
+  responseLengthHint?: "short" | "medium" | "long";
+}
+```
+
+---
+
+## 4.8 StorySession（内存开档；Stage 01 最小）
+
+开档时冻结 Definition，之后回合只读 snapshot，不热更新种子。
+
+```ts
+export interface StorySession {
+  id: string;
+  storyId: string;
+  /** 开档时深拷贝或等价不可变快照 */
+  definitionSnapshot: StoryDefinition;
+  /** 与 snapshot.version 一致，便于 State.definitionVersion 对齐 */
+  definitionVersion: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+```ts
+export interface StorySessionProvider {
+  createSession(input: { storyId: string }): Promise<StorySession>;
+  getSession(sessionId: string): Promise<StorySession | null>;
+}
+```
+
+Stage 01 提供 `InMemoryStorySessionProvider`：
+
+```txt
+createSession
+→ StoryProvider.getDefinition(storyId)
+→ 深拷贝为 definitionSnapshot
+→ 用 initializeStoryState(snapshot) 写入 InMemoryStoryStateProvider
+→ 返回 session
+
+后续 execute 只使用 session.definitionSnapshot，禁止再 getDefinition 覆盖运行中故事
+```
+
+明确不做（本阶段）：
+
+```txt
+- 进程重启后恢复 session
+- Definition 热更新合并进旧 session
+- 玩家开档填写属性
+```
 
 ---
 
@@ -360,11 +538,7 @@ money
 ## 5.2 StoryAttributeDefinition
 
 ```ts
-export type StoryAttrScope =
-  | "story"
-  | "player"
-  | "character"
-  | "scene";
+export type StoryAttrScope = "story" | "player" | "character" | "scene";
 
 export type StoryAttrValue = boolean | number | string;
 
@@ -631,12 +805,13 @@ export type StateTransitionValidationResult =
 ## 8.2 必须校验
 
 ```txt
-- StoryState 与 Definition 的 storyId / version 是否匹配
+- StoryState 与 Definition 的 storyId / definitionVersion 是否匹配
 - 核心 op 是否在允许列表内
-- scene / character / item / clue / event 引用是否存在
-- 场景切换条件是否满足
-- 重复 item / clue / event 的语义是否允许
-- relationshipsEnabled 是否开启
+- scene / character 引用是否存在于 Definition
+- item / clue / event 引用是否存在于对应目录
+- 场景切换：exitConditions（当前）与 entryConditions（目标）是否满足
+- 重复 item / clue / event 按 §4.5 语义拒绝
+- relationshipsEnabled 是否开启（未开启则拒绝 set_relationship）
 - relationship 是否落在 bounds
 - set_attr.key 是否已声明
 - set_attr.writable 是否不是 false
@@ -647,8 +822,9 @@ export type StateTransitionValidationResult =
 - enum 是否属于 enumValues
 - string 是否声明 maxLength
 - string 是否超过 maxLength
-- required default 是否存在且合法
+- required default 是否存在且合法（Definition 初始化阶段）
 - 死亡角色不得无规则 present=true
+- 同批冲突（见 §8.4）
 ```
 
 ---
@@ -675,6 +851,23 @@ change 3 未执行
 ```
 
 `applyStoryStateChanges()` 只能接收 Validator 已确认合法的 changes。
+
+---
+
+## 8.4 同批冲突
+
+同一 `changes[]` 内，下列情况视为冲突 → **整批拒绝**（不做 last-write-wins）：
+
+```txt
+- 两次及以上 set_scene
+- 同一 characterId 上两次及以上 set_character_alive / set_character_present（同类 op）
+- 同一 itemId 两次 add 或 add+remove 次序冲突（同一 batch 内对同一 item 多次变更）
+- 同一 clueId / eventId 两次 add_*
+- 同一 relationship characterId 两次 set_relationship
+- 同一 Attribute storage key 两次及以上 set_attr
+```
+
+storage key 必须用 `createStoryAttributeStorageKey` 计算后再比，禁止只比裸 `key` 字符串。
 
 ---
 
@@ -705,7 +898,33 @@ Planner 禁止：
 
 ---
 
-## 9.2 StoryTurnPlan
+## 9.2 辅助类型（最小形状）
+
+```ts
+export interface StoryAction {
+  raw: string;
+  summary: string;
+  kind: "dialogue" | "investigate" | "travel" | "use_item" | "other" | "rejected";
+}
+
+export interface StoryActionRejection {
+  reason: string;
+  /** 给 Renderer 的戏内拒绝指引 */
+  inWorldGuidance: string;
+}
+
+export interface NarrativeBeat {
+  summary: string;
+  /** 本回合张力：低/中/高等，供 Renderer 调语气 */
+  tension?: "low" | "medium" | "high";
+}
+```
+
+当 `rejection` 存在时：`stateChanges` 必须为空数组；`interpretedAction.kind` 应为 `"rejected"`。
+
+---
+
+## 9.3 StoryTurnPlan
 
 ```ts
 export interface StoryTurnPlan {
@@ -728,7 +947,9 @@ export interface StoryTurnPlan {
 }
 ```
 
-`ModelStoryPlanner` 应沿用现有 Tool Planning 的经验：
+`FakeStoryPlanner`：由契约脚本驱动，产出预置合法/非法 plan，用于离线门禁。
+
+`ModelStoryPlanner`（可选）应沿用现有 Tool Planning 的经验：
 
 ```txt
 ChatModel.generate
@@ -746,7 +967,7 @@ ChatModel.generate
 Renderer 输入：
 
 ```txt
-Story Definition 的必要子集
+Story Definition 的必要子集（使用 session.definitionSnapshot）
 当前场景
 当前 Story State
 本回合召回 Lore
@@ -775,6 +996,8 @@ Renderer 必须遵守：
 
 Stage 01 只做非流式 `render()`；流式放到 Stage 02。
 
+`FakeStoryRenderer`：返回可断言的固定文本，供契约脚本验证「Render 抛错 → 不保存」。
+
 ---
 
 ## 11. Provider 接口
@@ -792,6 +1015,8 @@ Stage 01 提供：
 ```txt
 InMemoryStoryProvider
 ```
+
+仅用于开档拉取权威种子；运行中回合以 session.definitionSnapshot 为准。
 
 ---
 
@@ -814,7 +1039,27 @@ InMemoryStoryStateProvider
 
 ---
 
-## 11.3 LoreProvider
+## 11.3 StorySessionProvider
+
+见 §4.8。Stage 01 提供 `InMemoryStorySessionProvider`。
+
+---
+
+## 11.4 LoreProvider
+
+```ts
+export interface LoreRecallInput {
+  userInput: string;
+  sceneId: string;
+  activeCharacterIds: string[];
+  definition: StoryDefinition;
+  state: StoryState;
+}
+
+export interface LoreRecallResult {
+  entries: LoreEntry[];
+}
+```
 
 ```ts
 export interface LoreProvider {
@@ -834,7 +1079,7 @@ KeywordLoreProvider
 用户输入
 当前 sceneId
 activeCharacterIds
-Story Definition
+Story Definition（snapshot）
 Story State
 ```
 
@@ -845,10 +1090,13 @@ Story State
 ## 12.1 接口
 
 ```ts
+export interface StoryWorkflowInput {
+  sessionId: string;
+  userInput: string;
+}
+
 export interface StoryWorkflow {
-  execute(
-    input: StoryWorkflowInput,
-  ): Promise<StoryWorkflowResult>;
+  execute(input: StoryWorkflowInput): Promise<StoryWorkflowResult>;
 }
 ```
 
@@ -863,26 +1111,28 @@ Stage 01 暂不要求 `stream()`。
 ↓
 Safety.guardInput（若注入）
 ↓
-StoryProvider.getDefinition
+StorySessionProvider.getSession → definitionSnapshot
 ↓
 StoryStateProvider.getState
 ↓
-LoreProvider.recall
+LoreProvider.recall（definition = snapshot）
 ↓
 StoryPlanner.plan
 ↓
-StateTransitionValidator.validate
+StateTransitionValidator.validate（definition = snapshot）
 ↓
-applyStoryStateChanges（仅内存）
+applyStoryStateChanges（仅内存 nextState）
 ↓
 StoryRenderer.render
 ↓
 Safety.guardOutput（若注入）
 ↓
-StoryStateProvider.saveState
+StoryStateProvider.saveState（仅全部成功）
 ↓
 返回 text + nextState + debug metadata
 ```
+
+禁止在回合中途调用 `StoryProvider.getDefinition` 覆盖 snapshot。
 
 ---
 
@@ -947,14 +1197,31 @@ export interface StoryWorkflowResult {
 - 莱昂：警探，对外乡人抱有戒心
 - 塞缪尔：医生，掌握旧港口秘密
 
-核心线索：
-- 蓝色月光酒单
+物品目录（items）：
+- 蓝色月光酒单（可拾取）
+- 旧港口通行证（可拾取）
+
+线索目录（clues）：
+- 蓝色月光酒单上的记号
 - 蓝色蜡迹
-- 旧港口通行证
+- 姐姐曾到过白鲸酒馆
+
+事件目录（events）：
+- 首次与伊芙琳谈及姐姐
+- 进入旧港口
 
 秘密：
 - 姐姐曾通过地下通道进入旧港口
 - 伊芙琳不能在初始回合直接说出该事实
+```
+
+**关系槽约定（二选一，雾港固定如下）：**
+
+```txt
+relationshipsEnabled = false
+不使用核心 relationships 槽
+角色信任只用 Attribute Schema：character scope 的 trust（伊芙琳）
+禁止对本种子发出 set_relationship
 ```
 
 Attribute Schema 至少包含：
@@ -995,7 +1262,7 @@ Attribute Schema 至少包含：
     writable: false,
     showInSidebar: true,
   },
-]
+];
 ```
 
 必须故意不声明：
@@ -1041,7 +1308,7 @@ magicPower
     enumValues: ["外门弟子", "内门弟子", "长老"],
     showInSidebar: true,
   },
-]
+];
 ```
 
 必须证明：
@@ -1057,7 +1324,7 @@ magicPower
 
 ## 15. 验证脚本
 
-## 15.1 确定性契约脚本
+## 15.1 确定性契约脚本（完成门禁）
 
 新增：
 
@@ -1074,7 +1341,7 @@ packages/story-core/scripts/verify-story-contract.ts
 环境变量
 ```
 
-可以使用 Fake Planner / Fake Renderer 验证 Runtime。
+必须使用 Fake Planner / Fake Renderer 验证 Runtime。
 
 至少覆盖：
 
@@ -1093,15 +1360,18 @@ packages/story-core/scripts/verify-story-contract.ts
 12. character scopeRef 不存在 → 拒绝
 13. characterIds 不允许该角色 → 拒绝
 14. scene 切换引用不存在 → 拒绝
-15. relationships 未启用却修改 → 拒绝
-16. 一批 changes 中任一非法 → 全部不应用
-17. Renderer 抛错 → nextState 不保存
-18. Safety 输出拒绝 → nextState 不保存
-19. 雾港 Schema 初始化成功
-20. 武侠 Schema 初始化成功
-21. 两套 Schema 使用同一 Runtime 与 Validator
-22. 雾港拒绝 combatPower
-23. 武侠拒绝 clueHeat
+15. 未声明 itemId / clueId / eventId 的 add_* → 拒绝
+16. 同批两次 set_attr 同一 storage key → 整批拒绝
+17. relationships 未启用却 set_relationship → 拒绝
+18. 一批 changes 中任一非法 → 全部不应用
+19. Renderer 抛错 → nextState 不保存
+20. Safety 输出拒绝 → nextState 不保存
+21. 雾港 Schema 初始化成功；relationshipsEnabled=false
+22. 武侠 Schema 初始化成功
+23. 两套 Schema 使用同一 Runtime 与 Validator
+24. 雾港拒绝 combatPower
+25. 武侠拒绝 clueHeat
+26. createSession 后回合只读 definitionSnapshot
 ```
 
 建议 package script：
@@ -1114,9 +1384,11 @@ packages/story-core/scripts/verify-story-contract.ts
 }
 ```
 
+**本阶段 done = 本脚本离线通过 + §19 其余构建/边界条件。**
+
 ---
 
-## 15.2 真实模型冒烟脚本
+## 15.2 真实模型冒烟脚本（可选，非门禁）
 
 可新增：
 
@@ -1135,7 +1407,7 @@ packages/story-core/scripts/verify-story-model-smoke.ts
 - 模型尝试写入未声明属性时会被 Validator 拒绝
 ```
 
-真实模型脚本不替代确定性契约脚本。
+真实模型脚本**不替代**确定性契约脚本；失败或不实现不挡 Stage 01 done。
 
 ---
 
@@ -1152,8 +1424,10 @@ packages/story-core/README.md
 ```txt
 - story-core 的职责
 - 与 ai-core 的依赖方向
-- StoryDefinition / StoryState / Attribute Schema 的区别
+- StoryDefinition（含 item/clue/event 目录）/ StoryState / Attribute Schema 的区别
+- 开档 definitionSnapshot 冻结语义
 - Planner / Validator / Renderer 的边界
+- Stage 01 完成门禁是 Fake 契约脚本，不是真实模型
 - Story State 不等于 Companion Memory
 - 如何运行 verify:story-contract
 - 如何运行可选真实模型 smoke
@@ -1165,23 +1439,22 @@ packages/story-core/README.md
 ## 17. 推荐实施顺序
 
 ```txt
-1. 创建 package 骨架与导出边界
-2. 定义 StoryDefinition / StoryState / StoryStateChange
-3. 实现 Attribute Schema 校验与初始化
-4. 实现属性存储键生成器
-5. 实现 StateTransitionValidator
-6. 实现 applyStoryStateChanges
-7. 实现 InMemory Providers
-8. 实现 KeywordLoreProvider
-9. 实现 Planner / Renderer 接口
-10. 实现 Fake Planner / Renderer 契约路径
-11. 实现 DefaultStoryWorkflow.execute
-12. 加入雾港疑云种子
+1. 创建 package 骨架、workspace / turbo 接线与导出边界
+2. 定义 StoryDefinition（含 items/clues/events）/ StoryState / StoryStateChange
+3. 定义 StoryCondition / NarrativeRules / StorySession 最小形状
+4. 实现 Attribute Schema 校验与初始化
+5. 实现属性存储键生成器
+6. 实现 StateTransitionValidator（含目录引用与同批冲突）
+7. 实现 applyStoryStateChanges
+8. 实现 InMemory Story / Session / State Providers
+9. 实现 KeywordLoreProvider
+10. 实现 Fake Planner / Fake Renderer
+11. 实现 DefaultStoryWorkflow.execute（只读 definitionSnapshot）
+12. 加入雾港疑云种子（含目录；relationshipsEnabled=false）
 13. 加入最小武侠 Schema
-14. 完成 verify:story-contract
-15. 实现 ModelStoryPlanner / ModelStoryRenderer
-16. 完成可选真实模型 smoke
-17. 补 README 与根级文档索引
+14. 完成 verify:story-contract（门禁）
+15. （可选）实现 ModelStoryPlanner / ModelStoryRenderer + smoke
+16. 补 README 与 AGENTS / .requirements 索引
 ```
 
 不要一开始先写完整 Prompt；先把 Definition、State、Validator 与契约测试跑通。
@@ -1213,24 +1486,28 @@ docs(story-core): add stage 01 documentation
 
 ```txt
 - packages/story-core 可独立 build / typecheck
+- monorepo 接线完成（workspace / turbo / 根文档索引）
 - ai-core 不依赖 story-core
 - SimpleChatWorkflow 未加入 Story 分支
 - 雾港疑云可以通过内存 Runtime 连续执行多回合
-- Planner 与 Renderer 职责分离
+- 开档冻结 definitionSnapshot；回合不热更新 Definition
+- Planner 与 Renderer 职责分离（门禁路径为 Fake）
 - State 只能由通过 Validator 的 Change 修改
-- 非法 changes 整批拒绝
+- item / clue / event 必须命中 Definition 目录
+- 非法 changes 与同批冲突整批拒绝
 - Renderer / Safety 失败时状态不提交
+- 雾港 relationshipsEnabled=false，信任只用 trust attr
 - required 属性初始化规则有自动化验证
 - string maxLength 有自动化验证
 - 未声明属性写入有自动化验证
 - 雾港与武侠两套 Schema 使用同一 Runtime
-- verify:story-contract 完全离线通过
+- verify:story-contract 完全离线通过（唯一完成门禁脚本）
 - README 说明当前边界与使用方式
 ```
 
 最终验收语句：
 
-> 不依赖数据库和正式 UI，通过脚本即可连续游玩若干回合；场景、秘密、物品、关系值、事件与动态属性不会随意失控；未在 Story Attribute Schema 中声明的字段无法进入世界状态；同一套 Runtime 能运行字段完全不同的故事。
+> 不依赖数据库和正式 UI，通过脚本即可连续游玩若干回合；场景、秘密、物品、关系值、事件与动态属性不会随意失控；未在 Story Attribute Schema 与 item/clue/event 目录中声明的字段/id 无法进入世界状态；同一套 Runtime 能运行字段完全不同的故事。
 
 ---
 
@@ -1239,11 +1516,14 @@ docs(story-core): add stage 01 documentation
 Stage 01 输出给 Stage 02 的稳定边界：
 
 ```txt
-StoryDefinition
+StoryDefinition（含 items / clues / events）
+StoryCondition（Stage 01 封闭联合；Stage 02 可扩展但需兼容）
+StorySession / definitionSnapshot
 StoryState
 StoryStateChange
 StoryTurnPlan
 StoryProvider
+StorySessionProvider
 StoryStateProvider
 LoreProvider
 StoryPlanner
