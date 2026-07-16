@@ -49,9 +49,11 @@
 | Full V1.0 roadmap              | `prompts/03-v1.0-plan.md`                                           |
 | Full V1.1 roadmap              | `prompts/04-v1.1-plan.md`                                           |
 | Full V1.2 roadmap              | `prompts/05-v1.2-plan.md`                                           |
+| Full V1.3 roadmap (Story Mode) | `prompts/06-v1.3-story-mode-plan.md`                                |
 | Implement / inspect V1.0 stage | `stages/v1.0/stage-{NN}/{NN}-{topic}.md` (patches only for history) |
 | Implement / inspect V1.1 stage | `stages/v1.1/stage-{NN}/{NN}-{topic}.md`                            |
 | Implement / inspect V1.2 stage | `stages/v1.2/stage-{NN}/{NN}-{topic}.md`                            |
+| Implement / inspect V1.3 stage | `stages/v1.3/stage-{NN}/{NN}-{topic}.md`（实施前撰写）              |
 
 - **`prompts/`** — planning context (why and overall shape); not the live task checklist.
 - **`stages/`** — executable specs with acceptance criteria; read the main `{NN}-{topic}.md` before coding.
