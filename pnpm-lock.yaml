@@ -39,6 +39,9 @@ catalogs:
     typescript-eslint:
       specifier: ^8.0.0
       version: 8.60.0
+    zod:
+      specifier: ^4.0.0
+      version: 4.4.3
 
 importers:
 
@@ -161,6 +164,15 @@ importers:
       ollama:
         specifier: ^0.6.3
         version: 0.6.3
+
+  packages/story-core:
+    dependencies:
+      '@ying-companion/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
   packages/tool-web-search:
     dependencies:

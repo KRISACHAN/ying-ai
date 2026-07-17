@@ -116,6 +116,14 @@ stages/v1.1/stage-08/  08-documentation-and-review.md
 
 Reviews: [`.code-reviews/v1.1/`](../.code-reviews/v1.1/conclusion.md). Do not rewrite frozen stage docs to fake history; new work builds on the V1.1 baseline.
 
+**V1.3 topic:** Story Mode introduces `packages/story-core` first, then persistence and Demo workbench integration. Stage 01 is an offline in-memory domain/runtime foundation.
+
+```txt
+stages/v1.3/stage-01/  01-story-domain-and-runtime-foundation.md
+stages/v1.3/stage-02/  02-narrative-workflow-lore-and-persistence.md
+stages/v1.3/stage-03/  03-story-workbench-and-release-closure.md
+```
+
 ---
 
 ## Typical Agent Workflow

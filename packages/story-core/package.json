@@ -1,0 +1,24 @@
+{
+  "name": "@ying-companion/story-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "verify:story-contract": "tsc -p tsconfig.verify.json && node .turbo/verify/scripts/verify-story-contract.js",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@ying-companion/ai-core": "workspace:*",
+    "zod": "catalog:"
+  }
+}
