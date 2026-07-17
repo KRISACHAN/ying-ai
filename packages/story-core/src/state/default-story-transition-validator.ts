@@ -53,11 +53,15 @@ export function validateStoryStateChanges(input: {
   const clueIds = new Set(definition.clues.map((clue) => clue.id));
   const eventIds = new Set(definition.events.map((event) => event.id));
 
+  const targetSceneId = changes.find((change) => change.type === "set_scene")?.sceneId;
+
   for (const [index, change] of changes.entries()) {
     const path = `changes.${index}`;
     switch (change.type) {
       case "set_scene":
-        validateSetScene(definition, currentState, change.sceneId, sceneIds, add, path);
+        if (!sceneIds.has(change.sceneId)) {
+          add("change.scene.invalid", `Unknown scene ${change.sceneId}`, path);
+        }
         break;
       case "set_character_alive":
         if (!characterIds.has(change.characterId)) {
@@ -65,7 +69,7 @@ export function validateStoryStateChanges(input: {
         }
         break;
       case "set_character_present":
-        validateSetCharacterPresent(definition, currentState, change, characterIds, add, path);
+        validateSetCharacterPresentReference(change, characterIds, add, path);
         break;
       case "add_inventory_item":
         validateAddId(itemIds, currentState.inventory, change.itemId, "item", add, path);
@@ -97,40 +101,61 @@ export function validateStoryStateChanges(input: {
   }
 
   const nextState = applyStoryStateChanges({ definition, currentState, changes });
+  const stateBeforeSceneChange = applyStoryStateChanges({
+    definition,
+    currentState,
+    changes: changes.filter((change) => change.type !== "set_scene"),
+  });
+  if (targetSceneId) {
+    validateSetScene(
+      definition,
+      currentState,
+      stateBeforeSceneChange,
+      nextState,
+      targetSceneId,
+      add,
+    );
+  }
+  validateFinalCharacterPresentChanges(definition, nextState, changes, add);
   validateFinalScenePresence(definition, nextState, add);
   return errors;
 }
 
 function validateSetScene(
   definition: StoryDefinition,
-  state: StoryState,
+  currentState: StoryState,
+  stateBeforeSceneChange: StoryState,
+  nextState: StoryState,
   sceneId: string,
-  sceneIds: Set<string>,
   add: (code: string, message: string, path?: string) => void,
-  path: string,
 ): void {
-  if (!sceneIds.has(sceneId)) {
-    add("change.scene.invalid", `Unknown scene ${sceneId}`, path);
-    return;
-  }
-
-  const currentScene = definition.scenes.find((scene) => scene.id === state.currentSceneId);
+  const currentScene = definition.scenes.find((scene) => scene.id === currentState.currentSceneId);
   const targetScene = definition.scenes.find((scene) => scene.id === sceneId);
   if (!currentScene || !targetScene) {
-    add("change.scene.invalid", "Current or target scene does not exist", path);
+    add("change.scene.invalid", "Current or target scene does not exist");
     return;
   }
-  if (!evaluateStoryConditions({ definition, state, conditions: currentScene.exitConditions })) {
-    add("change.scene.exit", `Exit conditions failed for ${currentScene.id}`, path);
+  if (
+    !evaluateStoryConditions({
+      definition,
+      state: stateBeforeSceneChange,
+      conditions: currentScene.exitConditions,
+    })
+  ) {
+    add("change.scene.exit", `Exit conditions failed for ${currentScene.id}`);
   }
-  if (!evaluateStoryConditions({ definition, state, conditions: targetScene.entryConditions })) {
-    add("change.scene.entry", `Entry conditions failed for ${targetScene.id}`, path);
+  if (
+    !evaluateStoryConditions({
+      definition,
+      state: nextState,
+      conditions: targetScene.entryConditions,
+    })
+  ) {
+    add("change.scene.entry", `Entry conditions failed for ${targetScene.id}`);
   }
 }
 
-function validateSetCharacterPresent(
-  definition: StoryDefinition,
-  state: StoryState,
+function validateSetCharacterPresentReference(
   change: Extract<StoryStateChange, { type: "set_character_present" }>,
   characterIds: Set<string>,
   add: (code: string, message: string, path?: string) => void,
@@ -139,22 +164,6 @@ function validateSetCharacterPresent(
   if (!characterIds.has(change.characterId)) {
     add("change.character.invalid", `Unknown character ${change.characterId}`, path);
     return;
-  }
-  const characterState = state.characters[change.characterId];
-  if (change.present && characterState?.alive !== true) {
-    add(
-      "change.character.dead_present",
-      `Dead character ${change.characterId} cannot be present`,
-      path,
-    );
-  }
-  const currentScene = definition.scenes.find((scene) => scene.id === state.currentSceneId);
-  if (change.present && !currentScene?.availableCharacterIds.includes(change.characterId)) {
-    add(
-      "change.character.unavailable",
-      `Character ${change.characterId} is not available in current scene`,
-      path,
-    );
   }
 }
 
@@ -280,6 +289,39 @@ function validateFinalScenePresence(
       add(
         "state.character.scene_mismatch",
         `Present character ${characterId} is unavailable in ${scene.id}`,
+      );
+    }
+  }
+}
+
+function validateFinalCharacterPresentChanges(
+  definition: StoryDefinition,
+  nextState: StoryState,
+  changes: StoryStateChange[],
+  add: (code: string, message: string, path?: string) => void,
+): void {
+  const finalScene = definition.scenes.find((scene) => scene.id === nextState.currentSceneId);
+  if (!finalScene) {
+    return;
+  }
+
+  for (const [index, change] of changes.entries()) {
+    if (change.type !== "set_character_present" || !change.present) {
+      continue;
+    }
+    const characterState = nextState.characters[change.characterId];
+    if (characterState?.alive !== true) {
+      add(
+        "change.character.dead_present",
+        `Dead character ${change.characterId} cannot be present`,
+        `changes.${index}`,
+      );
+    }
+    if (!finalScene.availableCharacterIds.includes(change.characterId)) {
+      add(
+        "change.character.unavailable",
+        `Character ${change.characterId} is not available in final scene`,
+        `changes.${index}`,
       );
     }
   }

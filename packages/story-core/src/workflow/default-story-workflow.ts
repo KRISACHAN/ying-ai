@@ -1,4 +1,5 @@
 import type { SafetyProvider } from "@ying-companion/ai-core";
+import type { LoreEntry } from "../abstractions/story-definition";
 import type { LoreProvider } from "../abstractions/lore-provider";
 import type { StoryPlanner } from "../abstractions/story-planner";
 import type { StoryRenderer } from "../abstractions/story-renderer";
@@ -79,6 +80,11 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
     if (plan.rejection && plan.stateChanges.length > 0) {
       throw new Error("Story planner rejection must not include stateChanges");
     }
+    const loreForRender = resolveLoreForRender(
+      loreResult.entries,
+      plan.revealedLoreIds,
+      session.definitionSnapshot.lore,
+    );
 
     const validation = await this.validator.validate({
       definition: session.definitionSnapshot,
@@ -104,7 +110,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
       currentState,
       nextState,
       plan,
-      recalledLore: loreResult.entries,
+      recalledLore: loreForRender,
     });
 
     await this.guardOutput(input, renderResult.text);
@@ -114,7 +120,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
       text: renderResult.text,
       state: nextState,
       plan,
-      recalledLoreIds: loreResult.entries.map((entry) => entry.id),
+      recalledLoreIds: loreForRender.map((entry) => entry.id),
       appliedChanges: validation.changes,
     };
   }
@@ -150,4 +156,23 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
       );
     }
   }
+}
+
+function resolveLoreForRender(
+  recalledLore: LoreEntry[],
+  revealedLoreIds: string[],
+  definitionLore: LoreEntry[],
+): LoreEntry[] {
+  const entriesById = new Map(definitionLore.map((entry) => [entry.id, entry]));
+  const result = new Map(recalledLore.map((entry) => [entry.id, entry]));
+
+  for (const loreId of revealedLoreIds) {
+    const entry = entriesById.get(loreId);
+    if (!entry) {
+      throw new Error(`Story planner revealed unknown lore ${loreId}`);
+    }
+    result.set(entry.id, entry);
+  }
+
+  return [...result.values()].sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0));
 }

@@ -48,7 +48,13 @@ async function main(): Promise<void> {
     ["dead or unavailable character cannot become present", testSetPresentGuards],
     ["set_scene rejects lingering present characters", testSetSceneLingeringPresentReject],
     ["set_scene with legal present adjustment passes", testSetSceneWithPresentAdjustment],
+    [
+      "set_scene uses same-batch item and final scene presence",
+      testSetSceneWithSameBatchItemAndTargetPresence,
+    ],
     ["event ids are one-shot", testEventOneShot],
+    ["revealed secret lore enters renderer", testRevealedSecretLoreEntersRenderer],
+    ["unknown revealed lore rejects without saving", testUnknownRevealedLoreRejects],
   ];
 
   for (const [name, test] of tests) {
@@ -435,6 +441,20 @@ async function testSetSceneWithPresentAdjustment(): Promise<void> {
   assert(result.valid, "scene transition with legal present adjustment should pass");
 }
 
+async function testSetSceneWithSameBatchItemAndTargetPresence(): Promise<void> {
+  const result = await validator.validate({
+    definition: fogHarborMystery,
+    currentState: initializeStoryState(fogHarborMystery),
+    changes: [
+      { type: "add_inventory_item", itemId: "old-harbor-pass" },
+      { type: "set_scene", sceneId: "old-harbor" },
+      { type: "set_character_present", characterId: "evelyn", present: false },
+      { type: "set_character_present", characterId: "samuel", present: true },
+    ],
+  });
+  assert(result.valid, "same-batch item pickup, scene transition, and target presence should pass");
+}
+
 async function testEventOneShot(): Promise<void> {
   const state = applyStoryStateChanges({
     definition: fogHarborMystery,
@@ -446,6 +466,49 @@ async function testEventOneShot(): Promise<void> {
     state,
     [{ type: "add_event", eventId: "first-ask-evelyn-about-sister" }],
     "change.event.duplicate",
+  );
+}
+
+async function testRevealedSecretLoreEntersRenderer(): Promise<void> {
+  const runtime = await createRuntime(
+    fogHarborMystery,
+    new FakeStoryPlanner({ plans: [planWith([], ["hidden-smuggler-route"])] }),
+    new FakeStoryRenderer({
+      handler: (input) => {
+        assert(
+          input.recalledLore.some((entry) => entry.id === "hidden-smuggler-route"),
+          "revealed secret lore should enter renderer context",
+        );
+        return { text: "秘密路线被揭示" };
+      },
+    }),
+  );
+  const result = await runtime.workflow.execute({
+    sessionId: runtime.sessionId,
+    userInput: "逼问旧港口路线",
+  });
+  assert(
+    result.recalledLoreIds.includes("hidden-smuggler-route"),
+    "workflow result should include revealed lore id",
+  );
+}
+
+async function testUnknownRevealedLoreRejects(): Promise<void> {
+  const runtime = await createRuntime(
+    fogHarborMystery,
+    new FakeStoryPlanner({
+      plans: [planWith([{ type: "add_clue", clueId: "menu-mark" }], ["missing-lore"])],
+    }),
+    new FakeStoryRenderer({ text: "should not render" }),
+  );
+  await assertRejects(
+    () => runtime.workflow.execute({ sessionId: runtime.sessionId, userInput: "揭示不存在的秘密" }),
+    "unknown lore",
+  );
+  const state = await runtime.stateProvider.getState(runtime.sessionId);
+  assert(
+    state !== null && !state.clues.includes("menu-mark"),
+    "unknown lore failure must not save",
   );
 }
 
@@ -475,7 +538,7 @@ async function createRuntime(
   return { workflow, stateProvider, sessionId: session.id };
 }
 
-function planWith(stateChanges: StoryStateChange[]): StoryTurnPlan {
+function planWith(stateChanges: StoryStateChange[], revealedLoreIds: string[] = []): StoryTurnPlan {
   return {
     interpretedAction: {
       raw: "action",
@@ -489,7 +552,7 @@ function planWith(stateChanges: StoryStateChange[]): StoryTurnPlan {
     },
     stateChanges,
     triggeredEventIds: [],
-    revealedLoreIds: [],
+    revealedLoreIds,
     responseGuidance: {
       narratorFocus: "validated state",
       emotionalTone: "neutral",
