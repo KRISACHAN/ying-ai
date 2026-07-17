@@ -608,6 +608,10 @@ export interface StateTransitionValidator {
     changes: StoryStateChange[];
   }): Promise<StateTransitionValidationResult>;
 }
+
+export type StateTransitionValidationResult =
+  | { valid: true; changes: StoryStateChange[] }
+  | { valid: false; errors: StoryStateValidationError[] };
 ```
 
 必须校验：
@@ -662,6 +666,22 @@ export interface StateTransitionValidator {
 Planner 只负责结构化规划：识别玩家行为、选择参与角色与叙事节拍、产生候选 State Changes、指定可揭示 Lore，以及约束 Renderer。
 
 ```ts
+export interface StoryAction {
+  raw: string;
+  summary: string;
+  kind: "dialogue" | "investigate" | "travel" | "use_item" | "other" | "rejected";
+}
+
+export interface StoryActionRejection {
+  reason: string;
+  inWorldGuidance: string;
+}
+
+export interface NarrativeBeat {
+  summary: string;
+  tension?: "low" | "medium" | "high";
+}
+
 export interface StoryTurnPlan {
   interpretedAction: StoryAction;
   activeCharacterIds: string[];
@@ -684,7 +704,7 @@ export interface StoryTurnPlan {
 
 Planner 禁止直接输出完整故事、直接修改状态、绕过 Validator、发明未声明属性或默认暴露隐藏 Lore。
 
-当 `rejection` 存在时，`stateChanges` 必须为空，行为类型必须为 rejected。
+当 `rejection` 存在时，`stateChanges` 必须为空，`interpretedAction.kind` 必须为 `"rejected"`。
 
 `FakeStoryPlanner` 用于离线门禁；`ModelStoryPlanner` 可使用 `ChatModel.generate + Zod`，解析失败必须显式报错。
 
@@ -726,12 +746,24 @@ export interface StoryStateProvider {
   saveState(sessionId: string, state: StoryState): Promise<void>;
 }
 
+export interface LoreRecallInput {
+  userInput: string;
+  sceneId: string;
+  activeCharacterIds: string[];
+  definition: StoryDefinition;
+  state: StoryState;
+}
+
+export interface LoreRecallResult {
+  entries: LoreEntry[];
+}
+
 export interface LoreProvider {
   recall(input: LoreRecallInput): Promise<LoreRecallResult>;
 }
 ```
 
-Stage 01 提供对应内存实现。运行中回合必须使用 `StorySession.definitionSnapshot`。
+`StorySessionProvider` 见 §4.9。Stage 01 提供对应内存实现。运行中回合必须使用 `StorySession.definitionSnapshot`。
 
 ---
 
@@ -863,7 +895,7 @@ Attribute Schema 至少包含：
     writable: false,
     showInSidebar: true,
   },
-]
+];
 ```
 
 必须故意不声明 `combatPower`、`sanity`、`magicPower`。
@@ -895,7 +927,7 @@ Attribute Schema 至少包含：
     default: "外门弟子",
     enumValues: ["外门弟子", "内门弟子", "长老"],
   },
-]
+];
 ```
 
 必须证明：武侠可初始化 combatPower；雾港拒绝 combatPower；武侠拒绝 clueHeat；同一 Runtime 和 Validator 无需修改。
