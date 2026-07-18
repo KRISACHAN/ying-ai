@@ -48,16 +48,16 @@ packages/story-core
 ### 2.1 必须完成
 
 ```txt
-1. 完整实现 DefaultStoryWorkflow.stream()
-2. 定义 Story Core Event 与完整回合 Timeline
+1. 完整实现 DefaultStoryWorkflow.stream()（与 execute 共享 step runner）
+2. 定义 Story Core Event 与完整回合 Timeline（含 story:context-ready）
 3. 将 Lore 升级为 always / keyword / state condition / scene / character 组合召回
-4. 建立 secret Lore 的可见性与揭示规则
-5. 新增 Narrative Summary 契约与更新策略
+4. 建立 secret Lore 的可见性与揭示规则；revealedLoreIds 写入 Core State（add_revealed_lore）
+5. 新增 Narrative Summary 与 StoryMessageProvider（recent messages）契约
 6. 新建 packages/story-postgres
 7. 持久化 StorySession / Definition Snapshot / StoryState / StoryTurn / StoryMessage / StorySummary
-8. 实现单回合事务提交
-9. 实现 clientTurnId 幂等语义
-10. 明确流式断连、Planner 失败、Renderer 失败、Safety 拒绝时的状态语义
+8. 实现 StoryTurnCommitter 单回合事务提交（移除成功路径上的 saveState）
+9. 实现 clientTurnId 幂等语义（failed 可同 id 重试；不预写 processing）
+10. 明确流式断连、Planner / Validator / Renderer / Safety / Persistence 失败时的状态语义
 11. 提供 PostgreSQL Migration / 初始化脚本
 12. 提供离线 Workflow 契约验证与 PostgreSQL 集成验证
 13. 提供多轮、重启恢复与重复提交证据
@@ -83,6 +83,7 @@ packages/story-core
 - 复杂战斗引擎
 - 可重复事件实例时间线
 - Companion Memory 与 Story Memory 互通
+- 预写 processing turn / 同 Session 请求队列
 - 用户鉴权、多租户与生产部署
 ```
 
@@ -98,7 +99,9 @@ packages/story-core/
 │   ├── abstractions/
 │   │   ├── story-event.ts
 │   │   ├── story-message.ts
+│   │   ├── story-message-provider.ts
 │   │   ├── story-turn.ts
+│   │   ├── story-turn-committer.ts
 │   │   ├── story-summary.ts
 │   │   ├── story-summary-provider.ts
 │   │   ├── story-turn-repository.ts
@@ -128,6 +131,7 @@ packages/story-postgres/
 │   ├── postgres-story-session-provider.ts
 │   ├── postgres-story-state-provider.ts
 │   ├── postgres-story-turn-repository.ts
+│   ├── postgres-story-turn-committer.ts
 │   ├── postgres-story-summary-provider.ts
 │   ├── postgres-story-transaction-runner.ts
 │   ├── serializers/
@@ -137,15 +141,37 @@ packages/story-postgres/
 │   └── index.ts
 ├── scripts/
 │   ├── migrate.ts
-│   └── verify-story-postgres.ts
+│   ├── verify-story-postgres.ts
+│   └── verify-story-recovery.ts
 ├── README.md
 ├── package.json
 └── tsconfig.json
 ```
 
-若现有仓库已经有统一 PostgreSQL Client、Migration Runner 或数据库配置入口，应复用现有宿主层基础设施，不再创建第二套环境变量约定。
+若现有仓库已经有统一 PostgreSQL Client、Migration Runner 或数据库配置入口，应复用现有宿主层基础设施，不再创建第二套环境变量约定。Demo 侧已有 `DATABASE_URL` + `pg.Pool` 模式（见 `memory-postgres` / `model-runtime-demo`）；`story-postgres` 应沿用同一约定，由 Host 注入 pool，不另造 env 名。
 
 `story-postgres` 可以读取由 Host 传入的数据库连接或 client，但不能让 `story-core` 感知 PostgreSQL。
+
+### 3.1 相对 Stage 01 的命名约定
+
+Stage 01 已落地的 public API 字段名：
+
+```txt
+StoryWorkflowInput.userInput
+StoryWorkflowResult.text
+```
+
+Stage 02 扩展时 **保留 `userInput`**，新增字段用新名；结果侧可同时暴露别名，但契约测试与类型以以下为准：
+
+```txt
+input.userInput          （沿用 Stage 01，不用 userText）
+result.assistantText     （Stage 02 新增；可从 Stage 01 的 text 迁移）
+result.previousState / nextState
+```
+
+禁止在 Workflow / Provider / Postgres 层同时维护 `userText` 与 `userInput` 两套字段。文档其余处若出现 `userText`，均视为笔误，实现以 `userInput` 为准。
+
+持久化表名以本文件 §8.2 为准：`story_states`（不用 `06` roadmap 中的 `story_session_states`）。
 
 ---
 
@@ -153,13 +179,13 @@ packages/story-postgres/
 
 ## 4.1 单回合输入输出
 
-建议将 Stage 01 的工作流契约扩展为：
+将 Stage 01 的工作流契约扩展为：
 
 ```ts
 export interface StoryWorkflowInput {
   sessionId: string;
   clientTurnId: string;
-  userText: string;
+  userInput: string;
   now?: Date;
   signal?: AbortSignal;
 }
@@ -195,17 +221,19 @@ export interface StoryWorkflowResult {
 3. load StorySession + definitionSnapshot
 4. load current StoryState
 5. check clientTurnId idempotency
-6. load Narrative Summary + recent messages
-7. recall Lore
+6. load Narrative Summary + recent messages（StoryMessageProvider）
+7. recall Lore（输入含 state.revealedLoreIds）
+7b. 对已满足 revealConditions 且未揭示的 secret Lore，注入待校验的 add_revealed_lore
 8. story:context-ready
 9. Planner.plan
 10. story:plan-completed
-11. StateTransitionValidator.validate
-12. apply changes in memory → nextState
+10b. 将 plan.revealedLoreIds 规范化为 add_revealed_lore，并入 candidate changes
+11. StateTransitionValidator.validate（整批；含 add_revealed_lore）
+12. apply changes in memory → nextState（含更新后的 revealedLoreIds）
 13. story:state-prepared
 14. Renderer.stream / Renderer.render
 15. guardOutput
-16. transaction commit:
+16. transaction commit via StoryTurnCommitter:
       StoryTurn
       User StoryMessage
       Assistant StoryMessage
@@ -215,7 +243,7 @@ export interface StoryWorkflowResult {
 19. story:finish
 ```
 
-工作流内部不得在 Renderer 结束前写入新的 Story State。
+工作流内部不得在 Renderer 结束前写入新的 Story State。成功路径禁止再调用 `StoryStateProvider.saveState`。
 
 ## 4.3 状态提交边界
 
@@ -248,37 +276,54 @@ plan 完成后先更新 state
 
 ## 4.4 Planner 拒绝与非法变更
 
-区分两类情况：
+区分两类情况，Workflow step runner 必须走不同分支：
 
-### 戏内拒绝
+### 戏内拒绝（成功回合）
 
 例如玩家尝试穿过尚未解锁的密门：
 
 ```txt
 Planner.rejection 有值
+interpretedAction.kind = rejected（与 Stage 01 一致）
 stateChanges = []
+（可选）revealedLoreIds 仍可为空或仅含合法揭示
 Renderer 以戏内方式描写失败
-回合仍可成功提交
+回合仍可成功提交（世界状态 revision 可不变，但 Turn / Messages 仍写入）
 ```
 
-### Planner 产出非法 StateChange
+### Planner 产出非法 StateChange（失败回合）
 
 例如模型试图写入未声明的 `combatPower`：
 
 ```txt
 Validator 拒绝整批 change
 默认不自动保留合法子集
-记录 story:validation-failed
+发出 story:validation-failed
 不得持久化 nextState
+不创建 committed messages
+返回 STORY_STATE_CHANGE_REJECTED（可重试；通常需新 clientTurnId 或修正 plan）
 ```
 
-本阶段默认策略：
+本阶段**固定**策略（不再「建议」模糊）：
 
 ```txt
-- 若 Planner 已提供 rejection，可降级为无状态变化的戏内回复
-- 若 Planner 没有可用 rejection，则本回合失败，返回可重试错误
-- 不允许 Validator 自己猜测替代 change
+1. plan.rejection 有值 且 stateChanges 为空
+   → 戏内拒绝路径：继续 render + commit（无状态变化）
+
+2. plan.rejection 有值 但 stateChanges 非空
+   → STORY_PLAN_INVALID；不 render、不 commit
+   （与 Stage 01「rejection 不得带 changes」一致）
+
+3. 无 rejection，Validator 失败
+   → 发 story:validation-failed → 回合失败
+   → 不允许降级为「自动清空 changes 再 render」
+   → 不允许 Validator 猜测替代 change
+
+4. 无 rejection，Validator 通过
+   → 正常 apply（内存）→ render → guard → commit
 ```
+
+Stage 01 的 `DefaultStoryWorkflow` 在 Validator 失败时直接 `throw`；Stage 02 改为发出 `story:validation-failed` 后以稳定错误码收口，语义不变（不污染 State）。
 
 ---
 
@@ -286,7 +331,7 @@ Validator 拒绝整批 change
 
 Story Event 属于 `story-core`，不塞进 `ai-core` 的 Companion Event 联合类型。
 
-建议定义：
+定义：
 
 ```ts
 export type StoryWorkflowEvent =
@@ -295,6 +340,7 @@ export type StoryWorkflowEvent =
   | StoryStateLoadedEvent
   | StorySummaryLoadedEvent
   | StoryLoreRecalledEvent
+  | StoryContextReadyEvent
   | StoryPlanStartedEvent
   | StoryPlanCompletedEvent
   | StoryValidationFailedEvent
@@ -308,7 +354,7 @@ export type StoryWorkflowEvent =
   | StoryErrorEvent;
 ```
 
-事件 type 建议：
+事件 type：
 
 ```txt
 story:start
@@ -316,6 +362,7 @@ story:session-loaded
 story:state-loaded
 story:summary-loaded
 story:lore-recalled
+story:context-ready
 story:plan-started
 story:plan-completed
 story:validation-failed
@@ -327,6 +374,14 @@ story:committed
 story:summary-updated
 story:finish
 story:error
+```
+
+`story:context-ready` 在 Lore 召回与 Summary / recent messages 加载完成后、Planner 调用前发出，载荷至少包含：
+
+```txt
+summaryPresent: boolean
+recentMessageCount: number
+recalledLoreIds: string[]
 ```
 
 公共字段：
@@ -398,7 +453,7 @@ export interface LoreEntry {
 export interface LoreRecallInput {
   definition: StoryDefinition;
   state: StoryState;
-  userText: string;
+  userInput: string;
   currentSceneId: string;
   activeCharacterIds: string[];
   revealedLoreIds: string[];
@@ -481,13 +536,47 @@ export interface RecalledLoreEntry {
 - revealedLoreIds 只能来自经过校验的 StoryTurnPlan 或满足 revealConditions 的确定性推导
 ```
 
-若 Stage 01 的 `StoryState` 尚未保存 `revealedLoreIds`，本阶段应新增固定 Core State 字段：
+### 6.5.1 `revealedLoreIds` 持久化（相对 Stage 01 的硬缺口）
+
+Stage 01 的 `StoryState` **没有** `revealedLoreIds`；Workflow 只在当回合把 `plan.revealedLoreIds` 合并进 Renderer 上下文，**不写入 State**。进程重启后「已揭示」会丢失。
+
+本阶段必须：
+
+1. 在 Core `StoryState` 增加固定字段（不放进 `attrs`）：
 
 ```ts
 revealedLoreIds: string[];
 ```
 
-该字段属于故事引擎通用状态，不放进 `attrs`。
+`initializeStoryState` 默认 `[]`；开档 / 反序列化后必须存在该数组。
+
+2. 增加核心 StateChange op（与其它变更一样走 Validator，禁止 Committer 静默合并）：
+
+```ts
+| { type: "add_revealed_lore"; loreId: string }
+```
+
+校验规则：
+
+```txt
+- loreId 必须存在于 definitionSnapshot.lore
+- 重复 add 已存在的 id → 整批拒绝（与 add_clue / add_event 一致）
+- 不允许用 set_attr 伪造 revealed 状态
+```
+
+3. Workflow 在 validate 之前，把 `plan.revealedLoreIds` **规范化**进本回合 candidate changes：
+
+```txt
+对 plan.revealedLoreIds 中每个尚未在 currentState.revealedLoreIds 的 id
+→ 追加 { type: "add_revealed_lore", loreId }
+再与 plan.stateChanges 合并为待校验批次
+```
+
+若 Planner 已在 `stateChanges` 里显式给出 `add_revealed_lore`，不得重复追加同一 loreId（重复 → 整批拒绝）。
+
+4. 满足 `revealConditions` 的确定性推导：仅用于**本回合召回可见性**；若要把揭示写入持久 State，仍须产生校验通过的 `add_revealed_lore`（可由 Workflow 在 recall 后、plan 前根据条件自动注入，或由 Planner 输出；二者择一，实现与 README 必须一致）。
+
+**V1.3 默认：** Workflow 在 recall 之后、plan 之前，对「`secret: true` 且 `revealConditions` 全部满足且尚未在 `state.revealedLoreIds`」的条目自动注入 `add_revealed_lore`；Planner 的 `revealedLoreIds` 仅表示本回合额外主动揭示。两路最终都进入同一批 Validator。
 
 ## 6.6 Lore Debug 信息
 
@@ -765,48 +854,44 @@ V1.3 不支持同一 Story Session 并行推进多个回合。
 → 不再次调用 Planner / Renderer
 → 不再次推进 State
 
-若已有 processing turn 且未超时
-→ 返回 in-progress / conflict
-
 若已有 failed turn
-→ 允许使用同一 clientTurnId 重试还是必须新 id，应固定一种语义
+→ 允许使用同一 clientTurnId 重试
+→ 必须更新同一 turn record（覆盖失败信息或增加 attemptCount）
+→ failed 不占用永久幂等成功结果
 ```
 
-V1.3 建议：
+本阶段**固定**采用上述语义；不再保留「failed 后必须新 clientTurnId」的备选。文档与实现必须一致。
 
-```txt
-failed turn 不占用永久幂等结果；重试同一 clientTurnId 可重新执行，
-但必须更新同一 turn record 的 attemptCount 或清晰覆盖失败信息。
-```
-
-若实现复杂度过高，可以采用更保守规则：failed 后必须新 clientTurnId；但 Stage 02 文档与实现必须一致，不能模糊。
+> 注：因 V1.3 默认不预写 `processing` 行（见 §9.4），「processing 且未超时」分支在默认实现中不出现。若未来改用 processing 预写，再补 in-progress / conflict 语义。
 
 ## 9.4 processing 记录
 
-可选方案：在调用模型前先插入 `processing` turn，用于防止重复请求同时进入模型。
-
-若采用：
+**V1.3 默认选定：不预写 `processing` turn。**
 
 ```txt
-- processing 写入应是短事务
-- committed 仍在最终事务完成
-- 需要 stale processing 清理 / 超时语义
+- 依赖最终 unique(session_id, client_turn_id) + 成功回合单一事务
+- 可能发生重复模型调用（两个请求同时进入 Planner/Renderer）
+- 但只能有一次 commit 成功；失败者得 STORY_STATE_CONFLICT 或唯一约束冲突
+- 优先保证「只提交一次」，不强求「模型只调用一次」
 ```
 
-若不采用：
+不做：
 
 ```txt
-- 依赖最终 unique(session_id, client_turn_id)
-- 可能发生重复模型调用，但只能有一次提交成功
+- 调用模型前插入 processing 行
+- stale processing 超时清理
+- 同 Session 请求队列 / 自动串行重放
 ```
 
-V1.3 优先保证“只提交一次”，不强求“模型只调用一次”。实现方案须在 README 记录。
+该策略必须写入 `packages/story-postgres/README.md`。
+
+（备选「预写 processing」不在本阶段范围；若日后需要，另开 stage，不要在 Stage 02 实现中途切换。）
 
 ---
 
 ## 10. 失败与恢复语义
 
-错误建议采用稳定 code：
+错误采用稳定 code：
 
 ```txt
 STORY_SESSION_NOT_FOUND
@@ -829,17 +914,19 @@ STORY_ABORTED
 ```txt
 - 不修改 StoryState
 - 不创建 committed messages
-- 可记录 failed turn
-- 返回可重试错误
+- 可记录 failed turn（可选；默认可不写 failed 行，仅抛错）
+- 返回 STORY_PLANNING_FAILED / STORY_PLAN_INVALID，可重试
 ```
 
 ### Validator 失败
 
 ```txt
 - 整批 stateChanges 拒绝
+- 发出 story:validation-failed
 - 不提交 nextState
-- 若存在合法 rejection guidance，可生成无状态变化的戏内回复
-- 否则失败
+- 不自动降级为「清空 changes 后继续 render」
+- 返回 STORY_STATE_CHANGE_REJECTED
+- 戏内拒绝仅适用于 §4.4 路径 1（plan 已带合法 rejection 且 changes 为空）
 ```
 
 ### Renderer 流式失败
@@ -886,6 +973,45 @@ V1.3 建议：输出 Safety 拒绝时整回合失败，不推进状态；暂不�
 
 Planner Context 与 Renderer Context 必须分开组装。
 
+### 11.1 Recent Messages 读取契约
+
+步骤 6 需要明确读取接口（Stage 01 无 Message 持久化）。在 `story-core` 定义：
+
+```ts
+export interface StoryMessage {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  role: "user" | "assistant";
+  content: string;
+  sequence: number;
+  createdAt: string;
+}
+
+export interface StoryMessageProvider {
+  getRecentMessages(
+    sessionId: string,
+    options?: {
+      /** 默认由 Host 注入的 workflow 配置决定，建议 8～20 条消息 */
+      limit?: number;
+      /** 不含该 turnNumber 及之后（用于摘要边界） */
+      beforeTurnNumber?: number;
+    },
+  ): Promise<StoryMessage[]>;
+}
+```
+
+规则：
+
+```txt
+- 按 turn_number ASC、同 turn 内 user 先于 assistant（sequence ASC）
+- Planner 与 Renderer 可共用同一批 recent messages，或 Renderer 略少；具体 limit 由 Host 配置注入
+- 不得把未提交 / failed turn 的消息当作 recent context
+- InMemory 与 Postgres 实现必须行为一致，并由 verify:story-workflow 覆盖
+```
+
+`StoryTurnRepository` 负责 turn 级查询与幂等查找；`StoryMessageProvider` 负责消息窗口。成功写入仍只走 `StoryTurnCommitter`，禁止 MessageProvider 单独 `save`。
+
 ### Planner 可见
 
 ```txt
@@ -893,7 +1019,7 @@ Planner Context 与 Renderer Context 必须分开组装。
 - 当前 StoryState
 - Attribute Schema 与当前 attrs
 - Narrative Summary
-- 最近消息
+- 最近消息（StoryMessageProvider.getRecentMessages）
 - planner_only Lore
 - planner_and_renderer Lore
 - 角色秘密与 forbidden knowledge 约束
@@ -902,7 +1028,7 @@ Planner Context 与 Renderer Context 必须分开组装。
 ### Renderer 可见
 
 ```txt
-- 玩家输入
+- 玩家输入（userInput）
 - 当前场景
 - active characters
 - 经过校验的 TurnPlan
@@ -947,11 +1073,17 @@ Stage 01 中可能存在分散的 Provider：
 ```txt
 StorySessionProvider
 StoryStateProvider
-StoryTurnRepository
-StorySummaryProvider
 ```
 
-但成功回合需要一个原子提交入口。建议在 `story-core` 定义领域级 Unit of Work：
+Stage 02 新增读取侧：
+
+```txt
+StoryTurnRepository          # 按 clientTurnId / turnNumber 查 turn
+StoryMessageProvider         # recent messages 窗口
+StorySummaryProvider         # Narrative Summary
+```
+
+但成功回合需要一个原子提交入口。在 `story-core` 定义领域级 Unit of Work：
 
 ```ts
 export interface StoryTurnCommitter {
@@ -966,7 +1098,7 @@ sessionId
 clientTurnId
 expectedStateRevision
 previousState
-nextState
+nextState                    # 已含本回合校验通过的 revealedLoreIds 等变更
 userMessage
 assistantMessage
 plan
@@ -981,6 +1113,8 @@ PostgresStoryTurnCommitter
 ```
 
 这样 `DefaultStoryWorkflow` 不需要知道 SQL transaction，也不会尝试跨多个 Provider 自己拼“伪事务”。
+
+Stage 01 的 `stateProvider.saveState(nextState)` **必须在本阶段从成功路径移除**；读取仍可用 `StoryStateProvider.getState`，写入成功回合只走 Committer。
 
 读取接口仍可保持拆分；写入成功回合必须走单一 Committer。
 
@@ -1061,11 +1195,13 @@ pnpm --filter @ying-companion/story-postgres verify:story-postgres
 
 ## 13.3 多轮恢复脚本
 
-建议：
+必须提供：
 
 ```txt
-scripts/verify-story-recovery.ts
+packages/story-postgres/scripts/verify-story-recovery.ts
 ```
+
+（或等价路径；package.json 脚本名建议 `verify:story-recovery`）
 
 流程：
 
@@ -1125,13 +1261,13 @@ AGENTS.md
 `story-postgres/README.md` 至少说明：
 
 ```txt
-- Host 如何注入数据库 client
+- Host 如何注入数据库 client（复用 DATABASE_URL + pg.Pool，不另造 env）
 - migration 命令
-- 表结构职责
+- 表结构职责（表名 story_states，非 story_session_states）
 - Definition Snapshot 冻结策略
-- revision 与 clientTurnId 语义
-- processing / failed turn 采用的最终策略
-- 本地验证方式
+- revision CAS 与 clientTurnId 幂等语义
+- 最终策略：不预写 processing；failed turn 可用同一 clientTurnId 重试
+- 本地验证方式（verify:story-postgres / verify:story-recovery）
 ```
 
 ---
@@ -1139,17 +1275,17 @@ AGENTS.md
 ## 15. 实施顺序
 
 ```txt
-1. 补齐 StoryTurn / StoryMessage / StorySummary / Story Event 契约
-2. 引入 StoryTurnCommitter，重构 execute() 使用原子提交抽象
-3. 让 execute() / stream() 共享 step runner
-4. 实现 Lore 状态条件、秘密可见性和预算
-5. 实现 Narrative Summary 契约与 Fake Provider
-6. 完成 verify:story-workflow
-7. 新建 story-postgres 与 migrations
-8. 实现 Session / State / Turn / Message / Summary Repository
-9. 实现 PostgresStoryTurnCommitter
-10. 完成 verify:story-postgres
-11. 完成多轮重启恢复脚本
+1. 补齐 StoryTurn / StoryMessage / StoryMessageProvider / StorySummary / Story Event 契约
+2. StoryState 增加 revealedLoreIds；StateChange 增加 add_revealed_lore；更新 Validator / apply / initialize
+3. 引入 StoryTurnCommitter，重构 execute()：移除成功路径 saveState，改为原子提交
+4. 让 execute() / stream() 共享 step runner；固定 §4.4 四条分支
+5. 实现 Lore 状态条件、秘密可见性、预算与 reveal 自动注入
+6. 实现 Narrative Summary 契约与 Fake Provider + recent messages
+7. 完成 verify:story-workflow
+8. 新建 story-postgres 与 migrations
+9. 实现 Session / State / Turn / Message / Summary 读取适配
+10. 实现 PostgresStoryTurnCommitter
+11. 完成 verify:story-postgres + verify:story-recovery
 12. 可选接真实模型 smoke
 13. 更新 README / AGENTS / requirements 索引
 ```
@@ -1164,18 +1300,22 @@ Stage 02 Done 必须同时满足：
 
 ```txt
 [ ] DefaultStoryWorkflow.execute() 与 stream() 使用同一业务步骤
-[ ] Story Core Event 顺序有确定性测试
+[ ] Story Core Event 顺序有确定性测试（含 story:context-ready）
 [ ] Lore 支持 always / keyword / state / keyword_and_state
 [ ] Secret Lore 的 planner_only / renderer 可见性有测试
-[ ] revealedLoreIds 成为确定性 Core State
+[ ] revealedLoreIds 成为确定性 Core State，经 add_revealed_lore 校验写入
+[ ] 重启后 revealedLoreIds 仍约束 Lore 可见性
 [ ] Narrative Summary 与 Story State 明确分离
+[ ] StoryMessageProvider.getRecentMessages 有契约测试
 [ ] Summary 失败不会回滚成功 Turn
 [ ] packages/story-postgres 已建立
 [ ] Session 开档冻结 Definition Snapshot
-[ ] 成功 Turn 原子提交 State / Turn / Messages
-[ ] clientTurnId 幂等有数据库约束与测试
+[ ] 成功 Turn 原子提交 State / Turn / Messages（无分散 saveState）
+[ ] clientTurnId 幂等有数据库约束与测试；failed 可同 id 重试
+[ ] 不预写 processing turn（README 已记录）
 [ ] StoryState revision 冲突有测试
 [ ] Planner / Validator / Renderer / Safety / Persistence 失败均不污染 State
+[ ] Validator 失败不自动降级为空 changes render
 [ ] 流式中断未提交时世界不推进
 [ ] PostgreSQL 重启恢复脚本通过
 [ ] 旧 Session 不受种子 Definition 后续修改影响
