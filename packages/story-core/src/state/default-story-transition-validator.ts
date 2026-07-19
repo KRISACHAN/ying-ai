@@ -52,6 +52,7 @@ export function validateStoryStateChanges(input: {
   const itemIds = new Set(definition.items.map((item) => item.id));
   const clueIds = new Set(definition.clues.map((clue) => clue.id));
   const eventIds = new Set(definition.events.map((event) => event.id));
+  const loreIds = new Set(definition.lore.map((entry) => entry.id));
 
   const targetSceneId = changes.find((change) => change.type === "set_scene")?.sceneId;
 
@@ -86,6 +87,16 @@ export function validateStoryStateChanges(input: {
         break;
       case "add_event":
         validateAddId(eventIds, currentState.events, change.eventId, "event", add, path);
+        break;
+      case "add_revealed_lore":
+        validateAddId(
+          loreIds,
+          currentState.revealedLoreIds ?? [],
+          change.loreId,
+          "lore",
+          add,
+          path,
+        );
         break;
       case "set_relationship":
         validateRelationship(definition, change.characterId, change.value, characterIds, add, path);
@@ -370,6 +381,8 @@ function conflictKey(definition: StoryDefinition, change: StoryStateChange): str
       return `clue:${change.clueId}`;
     case "add_event":
       return `event:${change.eventId}`;
+    case "add_revealed_lore":
+      return `lore:${change.loreId}`;
     case "set_relationship":
       return `relationship:${change.characterId}`;
     case "set_attr": {

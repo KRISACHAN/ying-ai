@@ -41,6 +41,9 @@ export function applyStoryStateChanges(input: {
       case "add_event":
         nextState.events = [...nextState.events, change.eventId];
         break;
+      case "add_revealed_lore":
+        nextState.revealedLoreIds = [...(nextState.revealedLoreIds ?? []), change.loreId];
+        break;
       case "set_relationship":
         nextState.relationships = {
           ...(nextState.relationships ?? {}),
@@ -82,6 +85,7 @@ function cloneState(state: StoryState): StoryState {
     inventory: [...state.inventory],
     clues: [...state.clues],
     events: [...state.events],
+    revealedLoreIds: [...(state.revealedLoreIds ?? [])],
     attrs: { ...state.attrs },
   };
 

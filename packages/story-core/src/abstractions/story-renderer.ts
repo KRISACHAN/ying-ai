@@ -1,4 +1,5 @@
-import type { LoreEntry, StoryDefinition } from "./story-definition";
+import type { RecalledLoreEntry } from "./lore-provider";
+import type { StoryDefinition } from "./story-definition";
 import type { StoryTurnPlan } from "./story-planner";
 import type { StoryState } from "./story-state";
 
@@ -9,7 +10,7 @@ export interface StoryRenderInput {
   currentState: StoryState;
   nextState: StoryState;
   plan: StoryTurnPlan;
-  recalledLore: LoreEntry[];
+  recalledLore: RecalledLoreEntry[];
 }
 
 export interface StoryRenderResult {
@@ -18,4 +19,5 @@ export interface StoryRenderResult {
 
 export interface StoryRenderer {
   render(input: StoryRenderInput): Promise<StoryRenderResult>;
+  stream?(input: StoryRenderInput): AsyncIterable<string>;
 }

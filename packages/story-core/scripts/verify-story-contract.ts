@@ -287,8 +287,13 @@ async function testRendererFailureDoesNotSave(): Promise<void> {
     new FakeStoryRenderer({ shouldThrow: true }),
   );
   await assertRejects(
-    () => runtime.workflow.execute({ sessionId: runtime.sessionId, userInput: "检查酒单" }),
-    "FakeStoryRenderer",
+    () =>
+      runtime.workflow.execute({
+        sessionId: runtime.sessionId,
+        clientTurnId: "renderer-failure",
+        userInput: "检查酒单",
+      }),
+    "Story renderer failed",
   );
   const state = await runtime.stateProvider.getState(runtime.sessionId);
   assert(
@@ -305,8 +310,13 @@ async function testOutputSafetyDoesNotSave(): Promise<void> {
     new RejectingOutputSafety(),
   );
   await assertRejects(
-    () => runtime.workflow.execute({ sessionId: runtime.sessionId, userInput: "检查酒单" }),
-    "safety",
+    () =>
+      runtime.workflow.execute({
+        sessionId: runtime.sessionId,
+        clientTurnId: "output-safety",
+        userInput: "检查酒单",
+      }),
+    "Story output rejected",
   );
   const state = await runtime.stateProvider.getState(runtime.sessionId);
   assert(
@@ -348,8 +358,16 @@ async function testSameRuntimeSupportsTwoSchemas(): Promise<void> {
     validator,
     renderer: new FakeStoryRenderer(),
   });
-  await workflow.execute({ sessionId: fogSession.id, userInput: "继续调查" });
-  await workflow.execute({ sessionId: wuxiaSession.id, userInput: "提剑" });
+  await workflow.execute({
+    sessionId: fogSession.id,
+    clientTurnId: "fog-turn",
+    userInput: "继续调查",
+  });
+  await workflow.execute({
+    sessionId: wuxiaSession.id,
+    clientTurnId: "wuxia-turn",
+    userInput: "提剑",
+  });
   const fog = await stateProvider.getState(fogSession.id);
   const wuxia = await stateProvider.getState(wuxiaSession.id);
   assert(fog?.attrs.clueHeat === 1, "fog runtime should update clueHeat");
@@ -476,7 +494,7 @@ async function testRevealedSecretLoreEntersRenderer(): Promise<void> {
     new FakeStoryRenderer({
       handler: (input) => {
         assert(
-          input.recalledLore.some((entry) => entry.id === "hidden-smuggler-route"),
+          input.recalledLore.some((entry) => entry.entry.id === "hidden-smuggler-route"),
           "revealed secret lore should enter renderer context",
         );
         return { text: "秘密路线被揭示" };
@@ -485,11 +503,17 @@ async function testRevealedSecretLoreEntersRenderer(): Promise<void> {
   );
   const result = await runtime.workflow.execute({
     sessionId: runtime.sessionId,
+    clientTurnId: "reveal-secret",
     userInput: "逼问旧港口路线",
   });
   assert(
     result.recalledLoreIds.includes("hidden-smuggler-route"),
     "workflow result should include revealed lore id",
+  );
+  const state = await runtime.stateProvider.getState(runtime.sessionId);
+  assert(
+    state?.revealedLoreIds.includes("hidden-smuggler-route") === true,
+    "revealed lore should persist in StoryState",
   );
 }
 
@@ -502,8 +526,13 @@ async function testUnknownRevealedLoreRejects(): Promise<void> {
     new FakeStoryRenderer({ text: "should not render" }),
   );
   await assertRejects(
-    () => runtime.workflow.execute({ sessionId: runtime.sessionId, userInput: "揭示不存在的秘密" }),
-    "unknown lore",
+    () =>
+      runtime.workflow.execute({
+        sessionId: runtime.sessionId,
+        clientTurnId: "unknown-reveal",
+        userInput: "揭示不存在的秘密",
+      }),
+    "Unknown lore",
   );
   const state = await runtime.stateProvider.getState(runtime.sessionId);
   assert(

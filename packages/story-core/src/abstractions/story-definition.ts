@@ -93,8 +93,15 @@ export interface LoreEntry {
   keywords?: string[];
   sceneIds?: string[];
   characterIds?: string[];
-  activation: "always" | "keyword";
+  activation:
+    | "always"
+    | "keyword"
+    | { type: "always" }
+    | { type: "keyword"; keywords?: string[] }
+    | { type: "state"; conditions: StoryCondition[] }
+    | { type: "keyword_and_state"; keywords?: string[]; conditions: StoryCondition[] };
   secret?: boolean;
+  revealConditions?: StoryCondition[];
   priority?: number;
   tokenBudget?: number;
 }

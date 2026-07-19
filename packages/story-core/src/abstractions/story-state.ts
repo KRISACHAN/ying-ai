@@ -10,11 +10,13 @@ export interface StoryState {
   schemaVersion: 1;
   storyId: string;
   definitionVersion: string;
+  revision: number;
   currentSceneId: string;
   characters: Record<string, StoryCharacterState>;
   inventory: string[];
   clues: string[];
   events: string[];
+  revealedLoreIds: string[];
   relationships?: Record<string, number>;
   attrs: Record<string, StoryAttrValue>;
   updatedAt: string;

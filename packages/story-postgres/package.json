@@ -1,0 +1,29 @@
+{
+  "name": "@ying-companion/story-postgres",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "migrate": "tsc -p tsconfig.verify.json && node .turbo/verify/scripts/migrate.js",
+    "verify:story-postgres": "tsc -p tsconfig.verify.json && node .turbo/verify/scripts/verify-story-postgres.js",
+    "verify:story-recovery": "tsc -p tsconfig.verify.json && node .turbo/verify/scripts/verify-story-recovery.js",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@ying-companion/story-core": "workspace:*",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
+  }
+}

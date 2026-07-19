@@ -43,6 +43,7 @@ export function initializeStoryState(definition: StoryDefinition, now = new Date
     schemaVersion: 1,
     storyId: definition.id,
     definitionVersion: definition.version,
+    revision: 0,
     currentSceneId: definition.openingSceneId,
     characters: Object.fromEntries(
       definition.characters.map((character) => [
@@ -56,6 +57,7 @@ export function initializeStoryState(definition: StoryDefinition, now = new Date
     inventory: [],
     clues: [],
     events: [],
+    revealedLoreIds: [],
     attrs,
     updatedAt: now.toISOString(),
   };

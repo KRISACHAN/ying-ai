@@ -12,6 +12,7 @@ const storyStateChangeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("remove_inventory_item"), itemId: z.string() }),
   z.object({ type: z.literal("add_clue"), clueId: z.string() }),
   z.object({ type: z.literal("add_event"), eventId: z.string() }),
+  z.object({ type: z.literal("add_revealed_lore"), loreId: z.string() }),
   z.object({ type: z.literal("set_relationship"), characterId: z.string(), value: z.number() }),
   z.object({
     type: z.literal("set_attr"),

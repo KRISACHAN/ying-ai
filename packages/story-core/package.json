@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "verify:story-contract": "tsc -p tsconfig.verify.json && node .turbo/verify/scripts/verify-story-contract.js",
+    "verify:story-workflow": "tsc -p tsconfig.verify.json && node .turbo/verify/scripts/verify-story-workflow.js",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {

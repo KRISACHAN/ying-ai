@@ -8,6 +8,7 @@ export type StoryStateChange =
   | { type: "remove_inventory_item"; itemId: string }
   | { type: "add_clue"; clueId: string }
   | { type: "add_event"; eventId: string }
+  | { type: "add_revealed_lore"; loreId: string }
   | { type: "set_relationship"; characterId: string; value: number }
   | {
       type: "set_attr";
