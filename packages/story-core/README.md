@@ -21,6 +21,7 @@ guardInput
 → check clientTurnId committed idempotency
 → load Summary + recent messages
 → recall Lore
+→ inject automatic add_revealed_lore candidates
 → story:context-ready
 → Planner.plan
 → validate candidate changes
@@ -32,6 +33,10 @@ guardInput
 ```
 
 成功路径不再调用 `StoryStateProvider.saveState()`；状态、Turn、Messages 只能通过 `StoryTurnCommitter` 一次提交。所有 successful committed turn 都推进 `StoryState.revision + 1`，包括无 `stateChanges` 的戏内拒绝。是否真的改了世界业务状态用 `stateChanged` 区分，不用 revision 推断。
+
+`DefaultStoryWorkflow` 只会为 `InMemoryStoryStateProvider` 自动创建 in-memory Turn / Message / Committer。Host 注入持久化 state provider 时，必须同时注入 `turnRepository`、`messageProvider` 与 `committer`，避免 State 与 Turn/Message 分别落到不同存储。
+
+重复 `clientTurnId` 命中已 committed turn 时不会再次推进 revision，也不会再次调用 Planner / Renderer。V1.3 Stage 02 不持久化 turn 级 state snapshot，因此 replay 结果的 `previousState` / `nextState` 是当前最新 state，并通过 `stateSnapshotStatus: "current_latest"` 标记；正常新提交为 `stateSnapshotStatus: "turn_snapshot"`。
 
 ## Events
 

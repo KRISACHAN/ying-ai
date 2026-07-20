@@ -23,6 +23,7 @@ import type {
   StoryWorkflowResult,
 } from "../abstractions/story-workflow";
 import { InMemoryStoryMessageProvider } from "../providers/in-memory-story-message-provider";
+import { InMemoryStoryStateProvider } from "../providers/in-memory-story-state-provider";
 import { InMemoryStoryTurnCommitter } from "../providers/in-memory-story-turn-committer";
 import { InMemoryStoryTurnRepository } from "../providers/in-memory-story-turn-repository";
 import { InMemoryStoryTurnStore } from "../providers/in-memory-story-turn-store";
@@ -75,16 +76,39 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
     this.recentMessageLimit = options.recentMessageLimit ?? 12;
     this.runIdFactory = options.runIdFactory ?? (() => crypto.randomUUID());
 
-    const defaultStore = new InMemoryStoryTurnStore();
-    this.turnRepository = options.turnRepository ?? new InMemoryStoryTurnRepository(defaultStore);
-    this.messageProvider =
-      options.messageProvider ?? new InMemoryStoryMessageProvider(defaultStore);
-    this.committer =
-      options.committer ??
-      new InMemoryStoryTurnCommitter({
+    const hasTurnPersistenceGroup =
+      Boolean(options.turnRepository) ||
+      Boolean(options.messageProvider) ||
+      Boolean(options.committer);
+    const hasCompleteTurnPersistenceGroup =
+      Boolean(options.turnRepository) &&
+      Boolean(options.messageProvider) &&
+      Boolean(options.committer);
+
+    if (hasTurnPersistenceGroup && !hasCompleteTurnPersistenceGroup) {
+      throw new Error(
+        "DefaultStoryWorkflow requires turnRepository, messageProvider, and committer to be provided together",
+      );
+    }
+
+    if (hasCompleteTurnPersistenceGroup) {
+      this.turnRepository = options.turnRepository!;
+      this.messageProvider = options.messageProvider!;
+      this.committer = options.committer!;
+    } else {
+      if (!(options.stateProvider instanceof InMemoryStoryStateProvider)) {
+        throw new Error(
+          "DefaultStoryWorkflow only creates default turn persistence for InMemoryStoryStateProvider; provide turnRepository, messageProvider, and committer for persistent state providers",
+        );
+      }
+      const defaultStore = new InMemoryStoryTurnStore();
+      this.turnRepository = new InMemoryStoryTurnRepository(defaultStore);
+      this.messageProvider = new InMemoryStoryMessageProvider(defaultStore);
+      this.committer = new InMemoryStoryTurnCommitter({
         store: defaultStore,
         stateProvider: this.stateProvider,
       });
+    }
     this.summaryProvider = options.summaryProvider ?? new FakeStorySummaryProvider();
   }
 
@@ -194,6 +218,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
           committed: true,
           summaryStatus: "unchanged",
           stateChanged: committed.stateChanged,
+          stateSnapshotStatus: "current_latest",
           events: context.events,
           text: committed.assistantText,
           state: currentState,
@@ -219,6 +244,39 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         state: currentState,
         revealedLoreIds: currentState.revealedLoreIds,
       });
+      const automaticRevealChanges = getAutomaticRevealChanges({
+        state: currentState,
+        recalledLore: loreResult.entries,
+      });
+      const automaticRevealValidation =
+        automaticRevealChanges.length > 0
+          ? await this.validator.validate({
+              definition: session.definitionSnapshot,
+              currentState,
+              changes: automaticRevealChanges,
+            })
+          : undefined;
+      if (automaticRevealValidation && !automaticRevealValidation.valid) {
+        await context.emit({
+          type: "story:validation-failed",
+          errors: automaticRevealValidation.errors,
+        });
+        throw new StoryWorkflowError(
+          "STORY_STATE_CHANGE_REJECTED",
+          `Automatic lore reveal rejected: ${automaticRevealValidation.errors
+            .map((error) => error.message)
+            .join("; ")}`,
+        );
+      }
+      const plannerState =
+        automaticRevealValidation && automaticRevealValidation.changes.length > 0
+          ? applyStoryStateChanges({
+              definition: session.definitionSnapshot,
+              currentState,
+              changes: automaticRevealValidation.changes,
+              ...(input.now ? { now: input.now } : {}),
+            })
+          : currentState;
       await context.emit({ type: "story:lore-recalled", recalledLore: loreResult.entries });
       await context.emit({
         type: "story:context-ready",
@@ -227,22 +285,19 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         recalledLoreIds: loreResult.entries.map((entry) => entry.entry.id),
       });
 
+      context.throwIfAborted(input.signal);
       await context.emit({ type: "story:plan-started" });
       const plan = await this.planTurn(
         input,
         session.definitionSnapshot,
-        currentState,
+        plannerState,
         loreResult.entries,
       );
       await context.emit({ type: "story:plan-completed", plan });
 
       assertPlanShape(plan);
-      const automaticRevealChanges = getAutomaticRevealChanges({
-        state: currentState,
-        recalledLore: loreResult.entries,
-      });
       const candidateChanges = mergeCandidateChanges(
-        automaticRevealChanges,
+        automaticRevealValidation?.changes ?? [],
         plan.stateChanges,
         plan.revealedLoreIds,
         currentState,
@@ -283,6 +338,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         definitionLore: session.definitionSnapshot.lore,
       });
       await context.emit({ type: "story:render-started" });
+      context.throwIfAborted(input.signal);
       const assistantText = await this.renderTurn({
         input,
         previousState: currentState,
@@ -295,6 +351,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
       });
       await context.emit({ type: "story:render-completed", assistantText });
       await this.guardOutput(input, assistantText);
+      context.throwIfAborted(input.signal);
 
       const committedTurn = await this.committer.commitSuccessfulTurn({
         sessionId: input.sessionId,
@@ -342,6 +399,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         committed: true,
         summaryStatus,
         stateChanged,
+        stateSnapshotStatus: "turn_snapshot",
         events: context.events,
         text: assistantText,
         state: nextState,

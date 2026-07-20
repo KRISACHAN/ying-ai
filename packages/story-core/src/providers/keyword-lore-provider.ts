@@ -26,11 +26,6 @@ export class KeywordLoreProvider implements LoreProvider {
       }
 
       const isRevealed = revealedLoreIds.includes(entry.id);
-      if (entry.secret && !isRevealed && !entry.revealConditions?.length) {
-        filtered.push({ loreId: entry.id, reason: "secret" });
-        continue;
-      }
-
       const activation = evaluateActivation(entry, input);
       if (!activation.active) {
         filtered.push({ loreId: entry.id, reason: "activation" });

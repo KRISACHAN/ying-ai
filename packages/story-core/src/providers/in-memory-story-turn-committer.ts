@@ -48,7 +48,9 @@ export class InMemoryStoryTurnCommitter implements StoryTurnCommitter {
       revision: input.expectedStateRevision + 1,
       updatedAt: now,
     };
-    await this.options.stateProvider.saveState(input.sessionId, nextState);
+    await this.options.stateProvider.saveState(input.sessionId, nextState, {
+      expectedRevision: input.expectedStateRevision,
+    });
 
     const turnId = this.idFactory();
     const turn: CommittedStoryTurn = {

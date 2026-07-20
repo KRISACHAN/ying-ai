@@ -19,6 +19,12 @@ await runStoryPostgresMigrations(pool);
 
 沿用 Demo / memory-postgres 的 `DATABASE_URL + pg.Pool` 模式，不新增 env 名。
 
+业务回合提交应走 `PostgresStoryTurnCommitter`。`PostgresStoryStateProvider.saveState()` 仅用于开档初始化或宿主维护工具；需要直接保存时应传入 `expectedRevision`，以启用 revision CAS：
+
+```ts
+await stateProvider.saveState(sessionId, nextState, { expectedRevision: current.revision });
+```
+
 ## 表职责
 
 - `story_sessions`：session 元数据与冻结的 `definition_snapshot`
@@ -60,4 +66,4 @@ pnpm --filter @ying-companion/story-postgres verify:story-postgres
 pnpm --filter @ying-companion/story-postgres verify:story-recovery
 ```
 
-验证脚本使用 `DATABASE_URL`，未设置时默认连接 `postgresql://localhost:5432/ying_companion_dev`。覆盖 migration、Definition Snapshot、原子提交、clientTurnId 幂等、revision CAS、Summary version conflict 与多轮重启恢复。
+验证脚本使用 `DATABASE_URL`，未设置时默认连接 `postgresql://localhost:5432/ying_companion_dev`。覆盖 migration、Definition Snapshot、原子提交、clientTurnId 幂等、failed turn 同 id 重试、revision CAS、Summary version conflict 与多轮重启恢复。

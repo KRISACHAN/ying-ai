@@ -6,6 +6,7 @@ import {
   FakeStoryRenderer,
   InMemoryStoryProvider,
   KeywordLoreProvider,
+  applyStoryStateChanges,
   type StoryStateChange,
   type StoryTurnPlan,
 } from "@ying-companion/story-core";
@@ -34,6 +35,8 @@ async function main(): Promise<void> {
     await runStoryPostgresMigrations(pool);
     await cleanup(pool, prefix);
     await testCreateCommitIdempotencyAndSnapshot(pool, prefix);
+    await testStateRevisionConflict(pool, prefix);
+    await testFailedTurnRetryCommits(pool, prefix);
     await testSummaryVersionConflict(pool, prefix);
     await cleanup(pool, prefix);
   } finally {
@@ -94,6 +97,83 @@ async function testCreateCommitIdempotencyAndSnapshot(pool: Pool, prefix: string
   console.log("ok - postgres create, commit, idempotency, snapshot");
 
   void storyProvider;
+}
+
+async function testStateRevisionConflict(pool: Pool, prefix: string): Promise<void> {
+  const sessionProvider = new PostgresStorySessionProvider({
+    client: pool,
+    storyProvider: new InMemoryStoryProvider([fogHarborMystery]),
+    idFactory: sequenceIds(`${prefix}-conflict-session`),
+  });
+  const stateProvider = new PostgresStoryStateProvider(pool);
+  const session = await sessionProvider.createSession({ storyId: fogHarborMystery.id });
+  const state = await stateProvider.getState(session.id);
+  assert(state !== null, "state should exist");
+  const nextState = applyStoryStateChanges({
+    definition: fogHarborMystery,
+    currentState: state,
+    changes: [{ type: "add_clue", clueId: "menu-mark" }],
+  });
+  await assertRejects(
+    () =>
+      stateProvider.saveState(session.id, { ...nextState, revision: 1 }, { expectedRevision: 99 }),
+    "revision conflict",
+  );
+  assert(
+    (await stateProvider.getState(session.id))?.revision === 0,
+    "stale saveState must not advance revision",
+  );
+  console.log("ok - postgres state save revision conflict");
+}
+
+async function testFailedTurnRetryCommits(pool: Pool, prefix: string): Promise<void> {
+  const sessionProvider = new PostgresStorySessionProvider({
+    client: pool,
+    storyProvider: new InMemoryStoryProvider([fogHarborMystery]),
+    idFactory: sequenceIds(`${prefix}-failed-retry-session`),
+  });
+  const stateProvider = new PostgresStoryStateProvider(pool);
+  const session = await sessionProvider.createSession({ storyId: fogHarborMystery.id });
+  const state = await stateProvider.getState(session.id);
+  assert(state !== null, "state should exist");
+  const failedTurnId = `${prefix}-failed-turn`;
+  const now = new Date();
+  await pool.query(
+    `INSERT INTO story_turns
+      (id, session_id, turn_number, client_turn_id, status, user_text, previous_state_revision,
+       state_changed, error_json, created_at)
+     VALUES ($1, $2, 1, 'retry-after-failed', 'failed', '失败输入', 0, false, $3, $4)`,
+    [failedTurnId, session.id, JSON.stringify({ code: "TEST", message: "failed once" }), now],
+  );
+  const nextState = applyStoryStateChanges({
+    definition: fogHarborMystery,
+    currentState: state,
+    changes: [{ type: "add_clue", clueId: "menu-mark" }],
+  });
+  const committed = await new PostgresStoryTurnCommitter({
+    client: pool,
+    idFactory: sequenceIds(`${prefix}-failed-retry-id`),
+  }).commitSuccessfulTurn({
+    sessionId: session.id,
+    clientTurnId: "retry-after-failed",
+    expectedStateRevision: 0,
+    previousState: state,
+    nextState,
+    userInput: "重试输入",
+    assistantText: "重试成功",
+    plan: planWith([{ type: "add_clue", clueId: "menu-mark" }]),
+    recalledLore: [],
+    stateChanged: true,
+  });
+  assert(committed.id === failedTurnId, "failed retry should reuse existing turn id");
+  assert(committed.status === "committed", "failed retry should commit");
+  assert(
+    (await stateProvider.getState(session.id))?.revision === 1,
+    "failed retry commit should advance revision once",
+  );
+  const messages = await new PostgresStoryMessageProvider(pool).getRecentMessages(session.id);
+  assert(messages.length === 2, "failed retry commit should persist user and assistant messages");
+  console.log("ok - postgres failed turn retry commits");
 }
 
 async function testSummaryVersionConflict(pool: Pool, prefix: string): Promise<void> {

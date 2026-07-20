@@ -37,12 +37,26 @@ export class PostgresStoryStateProvider implements StoryStateProvider {
     );
   }
 
-  async saveState(sessionId: string, state: StoryState): Promise<void> {
-    await this.client.query(
+  async saveState(
+    sessionId: string,
+    state: StoryState,
+    options?: { expectedRevision?: number },
+  ): Promise<void> {
+    const result = await this.client.query(
       `UPDATE story_states
        SET state_json = $2, revision = $3, updated_at = $4
-       WHERE session_id = $1`,
-      [sessionId, JSON.stringify(serializeStoryState(state)), state.revision, state.updatedAt],
+       WHERE session_id = $1
+         AND ($5::bigint IS NULL OR revision = $5::bigint)`,
+      [
+        sessionId,
+        JSON.stringify(serializeStoryState(state)),
+        state.revision,
+        state.updatedAt,
+        options?.expectedRevision ?? null,
+      ],
     );
+    if (options?.expectedRevision !== undefined && result.rowCount !== 1) {
+      throw new Error(`Story state revision conflict for session ${sessionId}`);
+    }
   }
 }

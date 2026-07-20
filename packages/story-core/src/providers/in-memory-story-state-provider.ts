@@ -9,7 +9,18 @@ export class InMemoryStoryStateProvider implements StoryStateProvider {
     return state ? cloneState(state) : null;
   }
 
-  async saveState(sessionId: string, state: StoryState): Promise<void> {
+  async saveState(
+    sessionId: string,
+    state: StoryState,
+    options?: { expectedRevision?: number },
+  ): Promise<void> {
+    const current = this.states.get(sessionId);
+    if (
+      options?.expectedRevision !== undefined &&
+      (!current || current.revision !== options.expectedRevision)
+    ) {
+      throw new Error(`Story state revision conflict for session ${sessionId}`);
+    }
     this.states.set(sessionId, cloneState(state));
   }
 }

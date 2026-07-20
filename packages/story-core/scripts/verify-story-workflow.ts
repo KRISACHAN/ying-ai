@@ -2,6 +2,7 @@ import type { SafetyCheckResult, SafetyProvider, CoreProviderMeta } from "@ying-
 import type { StoryDefinition } from "../src/abstractions/story-definition";
 import type { StoryState } from "../src/abstractions/story-state";
 import type { StoryStateChange } from "../src/abstractions/story-state-change";
+import type { StoryStateProvider } from "../src/abstractions/story-state-provider";
 import type { StoryTurnPlan } from "../src/abstractions/story-planner";
 import { DefaultStoryWorkflow } from "../src/workflow/default-story-workflow";
 import { FakeStoryPlanner } from "../src/planner/fake-story-planner";
@@ -31,7 +32,9 @@ async function main(): Promise<void> {
     ["summary failure does not roll back committed turn", testSummaryFailure],
     ["recent messages only include committed turns", testRecentMessages],
     ["secret lore stays out of renderer until revealed", testSecretLoreVisibility],
+    ["auto reveal is visible to planner before planning", testAutoRevealBeforePlanner],
     ["reveal condition persists revealedLoreIds", testRevealConditionPersistence],
+    ["persistent state requires explicit turn persistence group", testPersistentStateRequiresGroup],
     ["session state isolation is preserved", testSessionIsolation],
   ];
 
@@ -227,8 +230,21 @@ async function testRecentMessages(): Promise<void> {
 }
 
 async function testSecretLoreVisibility(): Promise<void> {
+  let plannerSawSecret = false;
   const runtime = await createRuntime({
-    planner: new FakeStoryPlanner({ plans: [planWith([])] }),
+    planner: new FakeStoryPlanner({
+      handler: (input) => {
+        const hidden = input.recalledLore.find(
+          (entry) => entry.entry.id === "hidden-smuggler-route",
+        );
+        assert(
+          hidden?.visibility === "planner_only",
+          "unrevealed secret lore should reach planner only",
+        );
+        plannerSawSecret = true;
+        return planWith([]);
+      },
+    }),
     renderer: new FakeStoryRenderer({
       handler: (input) => {
         assert(
@@ -242,6 +258,45 @@ async function testSecretLoreVisibility(): Promise<void> {
   await runtime.workflow.execute({
     sessionId: runtime.sessionId,
     clientTurnId: "secret-hidden",
+    userInput: "询问秘密路线",
+  });
+  assert(plannerSawSecret, "planner should receive planner_only secret lore");
+}
+
+async function testAutoRevealBeforePlanner(): Promise<void> {
+  const definition = clone(fogHarborMystery);
+  definition.lore = definition.lore.map((entry) =>
+    entry.id === "hidden-smuggler-route"
+      ? {
+          ...entry,
+          revealConditions: [{ type: "has_clue", clueId: "menu-mark" }],
+        }
+      : entry,
+  );
+  let turn = 0;
+  const runtime = await createRuntime({
+    definition,
+    planner: new FakeStoryPlanner({
+      handler: (input) => {
+        turn += 1;
+        if (turn === 2) {
+          assert(
+            input.state.revealedLoreIds.includes("hidden-smuggler-route"),
+            "auto reveal should be present in planner state before planning",
+          );
+        }
+        return turn === 1 ? planWith([{ type: "add_clue", clueId: "menu-mark" }]) : planWith([]);
+      },
+    }),
+  });
+  await runtime.workflow.execute({
+    sessionId: runtime.sessionId,
+    clientTurnId: "auto-reveal-before-plan-1",
+    userInput: "检查酒单",
+  });
+  await runtime.workflow.execute({
+    sessionId: runtime.sessionId,
+    clientTurnId: "auto-reveal-before-plan-2",
     userInput: "询问秘密路线",
   });
 }
@@ -295,6 +350,28 @@ async function testSessionIsolation(): Promise<void> {
   });
   const otherState = await runtime.stateProvider.getState(otherSession.id);
   assert(otherState?.revision === 0, "other session state must remain isolated");
+}
+
+async function testPersistentStateRequiresGroup(): Promise<void> {
+  const storyProvider = new InMemoryStoryProvider([fogHarborMystery]);
+  const stateProvider = new ExternalStoryStateProvider();
+  const sessionProvider = new InMemoryStorySessionProvider({
+    storyProvider,
+    stateProvider: new InMemoryStoryStateProvider(),
+    idFactory: predictableIds(),
+  });
+  assertRejectsSync(
+    () =>
+      new DefaultStoryWorkflow({
+        sessionProvider,
+        stateProvider,
+        loreProvider: new KeywordLoreProvider(),
+        planner: new FakeStoryPlanner(),
+        validator: new DefaultStoryTransitionValidator(),
+        renderer: new FakeStoryRenderer(),
+      }),
+    "provide turnRepository, messageProvider, and committer",
+  );
 }
 
 async function createRuntime(input: {
@@ -367,6 +444,14 @@ class RejectingOutputSafety implements SafetyProvider {
   }
 }
 
+class ExternalStoryStateProvider implements StoryStateProvider {
+  async getState(): Promise<StoryState | null> {
+    return null;
+  }
+
+  async saveState(): Promise<void> {}
+}
+
 function planWith(changes: StoryStateChange[], revealedLoreIds: string[] = []): StoryTurnPlan {
   return {
     interpretedAction: { raw: "action", summary: "action", kind: "other" },
@@ -421,6 +506,19 @@ function assert(condition: boolean, message: string): void {
 async function assertRejects(fn: () => Promise<unknown>, expectedMessage: string): Promise<void> {
   try {
     await fn();
+  } catch (error) {
+    assert(
+      error instanceof Error && error.message.includes(expectedMessage),
+      `expected rejection including ${expectedMessage}`,
+    );
+    return;
+  }
+  throw new Error(`expected rejection including ${expectedMessage}`);
+}
+
+function assertRejectsSync(fn: () => unknown, expectedMessage: string): void {
+  try {
+    fn();
   } catch (error) {
     assert(
       error instanceof Error && error.message.includes(expectedMessage),
