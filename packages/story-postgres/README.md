@@ -18,6 +18,8 @@ await runStoryPostgresMigrations(pool);
 ```
 
 沿用 Demo / memory-postgres 的 `DATABASE_URL + pg.Pool` 模式，不新增 env 名。
+`apps/model-runtime-demo` 的 Story Runtime Factory 会持有同一个 pool，并一次性注入
+Session / State / TurnRepository / Message / Committer / Summary Provider；不要在 route 内只临时创建部分 provider 后回退到 in-memory。
 
 业务回合提交应走 `PostgresStoryTurnCommitter`。`PostgresStoryStateProvider.saveState()` 仅用于开档初始化或宿主维护工具；需要直接保存时应传入 `expectedRevision`，以启用 revision CAS：
 

@@ -25,16 +25,16 @@
 
 ## Project Snapshot
 
-| Layer              | Location                                                      | Status                                                                                  |
-| ------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| **AI Core SDK**    | `packages/ai-core`                                            | **V1.1 complete** — `streamWorkflow`, tool planning, model profiles, shared step runner |
-| **Ollama adapter** | `packages/model-ollama`                                       | **V1.1 complete** — `createOllamaChatModel()`                                           |
-| **Web Search**     | `packages/tool-web-search`, `packages/tool-web-search-tavily` | **V1.2 complete** — provider-neutral `web_search` tool + Tavily adapter                 |
-| **Story Core SDK** | `packages/story-core`                                         | **V1.3 stage 02** — Streamable Story Workflow, controlled Lore, committed turn timeline |
-| **Story Postgres** | `packages/story-postgres`                                     | **V1.3 stage 02** — Story Session / State / Turn / Message / Summary persistence        |
-| **Debug app**      | `apps/model-runtime-demo`                                     | **V1.2 complete** — AI SDK UI chat surface, NDJSON adapter, Web Search Sources          |
-| **Product API**    | `apps/api`                                                    | Scaffold — planned RBAC backend                                                         |
-| **Product web**    | `apps/web`                                                    | Scaffold — planned user frontend                                                        |
+| Layer              | Location                                                      | Status                                                                                        |
+| ------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **AI Core SDK**    | `packages/ai-core`                                            | **V1.1 complete** — `streamWorkflow`, tool planning, model profiles, shared step runner       |
+| **Ollama adapter** | `packages/model-ollama`                                       | **V1.1 complete** — `createOllamaChatModel()`                                                 |
+| **Web Search**     | `packages/tool-web-search`, `packages/tool-web-search-tavily` | **V1.2 complete** — provider-neutral `web_search` tool + Tavily adapter                       |
+| **Story Core SDK** | `packages/story-core`                                         | **V1.3 stage 03** — Model Planner/Renderer, streamed Story Workflow, validated state timeline |
+| **Story Postgres** | `packages/story-postgres`                                     | **V1.3 stage 02** — Story Session / State / Turn / Message / Summary persistence              |
+| **Debug app**      | `apps/model-runtime-demo`                                     | **V1.3 stage 03** — Model-backed Story Workbench, Story NDJSON adapter/debug UI               |
+| **Product API**    | `apps/api`                                                    | Scaffold — planned RBAC backend                                                               |
+| **Product web**    | `apps/web`                                                    | Scaffold — planned user frontend                                                              |
 
 **V1 boundary** ([`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in. **Core Event** (`ChatWorkflowStreamEvent`) stays in Core; **Wire Event** (`ChatWorkflowStreamWireEvent`) is mapped in the demo — do not serialize `Date` / `raw` / `Error` to the network.
 
@@ -113,7 +113,7 @@ When editing under `apps/` or `packages/`, read that package's `README.md`:
 - [packages/memory-postgres/README.md](packages/memory-postgres/README.md) — Postgres memory + embedding (independent of chat provider)
 - [packages/story-core/README.md](packages/story-core/README.md) — Story Mode workflow, dynamic Attribute Schema, deterministic state transitions
 - [packages/story-postgres/README.md](packages/story-postgres/README.md) — Story persistence, committed turn transaction, recovery verification
-- [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — AI SDK UI workbench, NDJSON adapter, Web Search env vars, local run
+- [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — AI SDK UI workbench, Story Workbench, NDJSON adapters, Web Search env vars, local run
 - [apps/web/README.md](apps/web/README.md) · [apps/api/README.md](apps/api/README.md) — product scaffolds
 
 ---

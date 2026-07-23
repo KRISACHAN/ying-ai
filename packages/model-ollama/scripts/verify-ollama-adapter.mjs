@@ -181,6 +181,31 @@ record("jsonResponseFormat", {
   structuredOutput: jsonModeOutput.structuredOutput,
 });
 
+const fencedJsonModel = new OllamaChatModel(
+  { model: "fenced-json-local" },
+  {
+    async chat(request) {
+      return createChatResponse(request.model, '```json\n{"ok":true}\n```');
+    },
+  },
+);
+const fencedJsonOutput = await fencedJsonModel.generate({
+  messages: [{ role: "user", content: "json please" }],
+  structuredOutput: {
+    type: "object",
+    schema: {
+      parse(value) {
+        if (value?.ok !== true) {
+          throw new Error("invalid fenced structured output");
+        }
+        return value;
+      },
+    },
+  },
+});
+assert(fencedJsonOutput.structuredOutput?.ok === true, "fenced JSON output mismatch");
+record("fencedJsonOutput", fencedJsonOutput.structuredOutput);
+
 const midStreamCalls = [];
 const midStreamModel = new OllamaChatModel(
   {

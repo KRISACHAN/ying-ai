@@ -116,7 +116,7 @@ stages/v1.1/stage-08/  08-documentation-and-review.md
 
 Reviews: [`.code-reviews/v1.1/`](../.code-reviews/v1.1/conclusion.md). Do not rewrite frozen stage docs to fake history; new work builds on the V1.1 baseline.
 
-**V1.3 topic:** Story Mode introduces `packages/story-core` first, then persistence and Demo workbench integration. Stage 01 is an offline in-memory domain/runtime foundation. Stage 02 adds streamable workflow events, controlled Lore visibility, committed turn/message/summary contracts, and `packages/story-postgres` persistence with restart recovery.
+**V1.3 topic:** Story Mode introduces `packages/story-core` first, then persistence and Demo workbench integration. Stage 01 is an offline in-memory domain/runtime foundation. Stage 02 adds streamable workflow events, controlled Lore visibility, committed turn/message/summary contracts, and `packages/story-postgres` persistence with restart recovery. Stage 03 adds the model-backed `apps/model-runtime-demo` Story Workbench, Story Wire/NDJSON adapter, schema-driven state sidebar, Debug Timeline, and release-closure verification scripts; Fake Planner / Renderer remain test-only.
 
 ```txt
 stages/v1.3/stage-01/  01-story-domain-and-runtime-foundation.md

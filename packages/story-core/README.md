@@ -38,6 +38,17 @@ guardInput
 
 重复 `clientTurnId` 命中已 committed turn 时不会再次推进 revision，也不会再次调用 Planner / Renderer。V1.3 Stage 02 不持久化 turn 级 state snapshot，因此 replay 结果的 `previousState` / `nextState` 是当前最新 state，并通过 `stateSnapshotStatus: "current_latest"` 标记；正常新提交为 `stateSnapshotStatus: "turn_snapshot"`。
 
+### 模型 Planner / Renderer
+
+`ModelStoryPlanner` 使用模型结构化输出生成 `StoryTurnPlan`。输入包含原始玩家输入、Session 冻结的
+Story Definition、当前 State、Narrative Summary、近期消息和召回 Lore；返回前会再次用
+`storyTurnPlanSchema` 校验，并强制把 `interpretedAction.raw` 恢复为真实玩家输入。
+
+`ModelStoryRenderer` 只消费通过校验的 Plan、currentState / nextState 和可见上下文。模型声明支持
+streaming 时走 `ChatModel.stream()`；否则回退到 `generate()` 并输出单个文本块。Host 负责创建和
+注入模型，Core 不读取环境变量。`FakeStoryPlanner` / `FakeStoryRenderer` 用于离线契约验证，不代表
+交互式宿主的默认叙事实现。
+
 ## Events
 
 Story Core Event 属于本包，不塞进 Companion stream event：
@@ -63,6 +74,16 @@ story:error
 ```
 
 事件保留 Core 语义：`Date`、富对象和错误对象允许存在。Stage 03 的 Demo Wire 层再做网络安全映射。`story:state-prepared` 只代表内存候选状态，只有 `story:committed` 后世界才算推进。
+
+## Seeds
+
+公共种子定义从包根导出：
+
+```ts
+import { fogHarborMystery, minimalWuxiaContract } from "@ying-companion/story-core";
+```
+
+Demo Story Workbench 与契约验证共用这些定义，证明同一套 Runtime / Attribute Renderer 可以消费「雾港疑云」与最小武侠契约两套不同 `StoryDefinition.attributes`。
 
 ## Lore
 

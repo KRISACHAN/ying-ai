@@ -1,7 +1,9 @@
 import type { RecalledLoreEntry } from "./lore-provider";
 import type { StoryDefinition } from "./story-definition";
+import type { StoryMessage } from "./story-message";
 import type { StoryState } from "./story-state";
 import type { StoryStateChange } from "./story-state-change";
+import type { StoryNarrativeSummary } from "./story-summary";
 
 export interface StoryAction {
   raw: string;
@@ -41,6 +43,8 @@ export interface StoryPlannerInput {
   definition: StoryDefinition;
   state: StoryState;
   recalledLore: RecalledLoreEntry[];
+  summary?: StoryNarrativeSummary | null;
+  recentMessages?: StoryMessage[];
 }
 
 export interface StoryPlanner {

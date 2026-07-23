@@ -292,6 +292,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         session.definitionSnapshot,
         plannerState,
         loreResult.entries,
+        summary,
+        recentMessages,
       );
       await context.emit({ type: "story:plan-completed", plan });
 
@@ -346,6 +348,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         definition: session.definitionSnapshot,
         plan,
         recalledLore: rendererLore,
+        summary,
+        recentMessages,
         context,
         preferStreamingRenderer: options.preferStreamingRenderer,
       });
@@ -422,6 +426,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
     definition: Parameters<StoryPlanner["plan"]>[0]["definition"],
     state: StoryState,
     recalledLore: RecalledLoreEntry[],
+    summary: Awaited<ReturnType<StorySummaryProvider["getSummary"]>>,
+    recentMessages: Awaited<ReturnType<StoryMessageProvider["getRecentMessages"]>>,
   ): Promise<StoryTurnPlan> {
     try {
       return await this.planner.plan({
@@ -430,6 +436,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         definition,
         state,
         recalledLore,
+        summary,
+        recentMessages,
       });
     } catch (error) {
       throw new StoryWorkflowError("STORY_PLANNING_FAILED", "Story planner failed", {
@@ -445,6 +453,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
     definition: Parameters<StoryRenderer["render"]>[0]["definition"];
     plan: StoryTurnPlan;
     recalledLore: RecalledLoreEntry[];
+    summary: Awaited<ReturnType<StorySummaryProvider["getSummary"]>>;
+    recentMessages: Awaited<ReturnType<StoryMessageProvider["getRecentMessages"]>>;
     context: StoryRunContext;
     preferStreamingRenderer: boolean;
   }): Promise<string> {
@@ -459,6 +469,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
           nextState: input.nextState,
           plan: input.plan,
           recalledLore: input.recalledLore,
+          summary: input.summary,
+          recentMessages: input.recentMessages,
         })) {
           input.context.throwIfAborted(input.input.signal);
           text += delta;
@@ -475,6 +487,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         nextState: input.nextState,
         plan: input.plan,
         recalledLore: input.recalledLore,
+        summary: input.summary,
+        recentMessages: input.recentMessages,
       });
       await input.context.emit({ type: "story:text-delta", delta: result.text });
       return result.text;

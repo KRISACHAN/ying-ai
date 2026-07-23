@@ -22,6 +22,9 @@ export default async function Page() {
               <h1>会话历史</h1>
             </div>
             <div className="toolbar-actions">
+              <Link className="secondary-button" href="/stories">
+                Story Workbench
+              </Link>
               <Link className="secondary-button" href="/debug/model-runtime">
                 Model Runtime
               </Link>

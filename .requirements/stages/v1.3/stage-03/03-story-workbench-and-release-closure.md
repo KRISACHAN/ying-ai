@@ -57,6 +57,7 @@ packages/story-postgres
 7. 提供最小 Story Definition 预览与 JSON 导入入口
 8. 提供 Story Workbench 手工验收与自动化契约验证
 9. 更新 AGENTS.md / README / package README / requirements 索引
+10. Story Workbench 默认接入真实 ModelStoryPlanner + ModelStoryRenderer，不以固定关键词脚本代替叙事
 ```
 
 ### 2.2 本阶段不做
@@ -339,6 +340,10 @@ Demo 应：
 - 注入 story-postgres Session / State / Turn / Message / Summary Provider
 - 构造 story runtime factory，不让 route 自己拼装所有 Provider
 - 按 session.definitionSnapshot 加载故事，而不是重新读取最新种子定义
+- 由宿主读取模型环境变量并注入 ChatModel；列表/恢复读取与模型初始化解耦
+- 允许 Story 使用独立的 provider 覆盖，但未配置时继承 Demo 全局模型 provider
+- 每个新回合默认执行 Planner 结构化生成与 Renderer 文本生成两次模型调用
+- 向 Planner / Renderer 传入 Narrative Summary 与 recent messages，保证多轮叙事连续
 ```
 
 禁止：
@@ -347,6 +352,7 @@ Demo 应：
 - 在 route 里直接读取 process.env 后临时 new Provider
 - Story Session 恢复时忽略 definitionSnapshot
 - 只注入部分 Postgres Provider，剩余默认回退到 InMemory
+- 在交互式 Story Workbench 中用 Fake Planner / 固定关键词分支代替真实模型
 ```
 
 ---
@@ -576,7 +582,8 @@ pnpm --filter @ying-companion/model-runtime-demo verify:story-ui-adapter
 ```txt
 - `verify:story-stream-contract` 对标现有 verify:stream-contract，覆盖 NDJSON / wire guard / finish 后额外事件等边界
 - `verify:story-ui-adapter` 对标现有 chat UI adapter 验证，覆盖 delta / committed / validation-failed / error
-- 真模型手工验收仍可保留，但不是唯一完成门禁
+- Fake Model / Planner / Renderer 只用于离线契约验证，验证输入上下文、结构化 Plan 与 streaming 边界
+- 真模型手工验收用于证明自由输入能驱动连续叙事，但不是唯一完成门禁
 ```
 
 ### 11.3 手工验收
@@ -586,12 +593,12 @@ pnpm --filter @ying-companion/model-runtime-demo verify:story-ui-adapter
 ```txt
 A. /stories 显示种子故事列表；可进入某故事 Session 列表
 B. 新建雾港 Session → 开场文本正确 → state 初始 attrs 正确
-C. 连续发送多轮 → AI SDK UI 增量显示 → state / clues / attrs 变化可见
+C. 连续发送多轮自由行动或对白 → 回复承接实际输入与前文 → AI SDK UI 增量显示 → 合理的 state / clues / attrs 变化可见
 D. trust / clueHeat 在侧栏按 Schema 显示；publicTitle 只读显示
 E. 新建武侠 Session → 不出现雾港字段；出现 combatPower / sectStanding
 F. 刷新 Story Runtime 页 → messages / state / revision 恢复
 G. Debug 面板可看到 Lore / Plan / Timeline / committed revision
-H. 非法 attr 更新或 validator 失败时，UI 有可见错误态，世界不推进
+H. validator-failure 自动化场景中，UI Adapter 有可见错误态，世界不推进
 I. 工程：pnpm typecheck && pnpm lint && pnpm build
 ```
 

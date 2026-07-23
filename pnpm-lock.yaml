@@ -97,6 +97,12 @@ importers:
       '@ying-companion/model-ollama':
         specifier: workspace:*
         version: link:../../packages/model-ollama
+      '@ying-companion/story-core':
+        specifier: workspace:*
+        version: link:../../packages/story-core
+      '@ying-companion/story-postgres':
+        specifier: workspace:*
+        version: link:../../packages/story-postgres
       '@ying-companion/tool-web-search':
         specifier: workspace:*
         version: link:../../packages/tool-web-search

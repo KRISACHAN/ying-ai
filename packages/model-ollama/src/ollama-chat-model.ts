@@ -184,7 +184,9 @@ export class OllamaChatModel implements ChatModel {
     }
 
     if (input.structuredOutput !== undefined) {
-      output.structuredOutput = input.structuredOutput.schema.parse(JSON.parse(output.text));
+      output.structuredOutput = input.structuredOutput.schema.parse(
+        parseStructuredJson(output.text),
+      );
     }
 
     return output;
@@ -256,6 +258,18 @@ export class OllamaChatModel implements ChatModel {
     await new Promise((resolve) => {
       setTimeout(resolve, this.options.retryDelayMs);
     });
+  }
+}
+
+function parseStructuredJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    const fencedJson = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text.trim());
+    if (fencedJson?.[1] === undefined) {
+      throw error;
+    }
+    return JSON.parse(fencedJson[1]) as unknown;
   }
 }
 

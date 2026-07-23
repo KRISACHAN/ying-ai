@@ -861,3 +861,146 @@ body {
   text-align: right;
   word-break: break-all;
 }
+
+.story-import-panel {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.story-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.story-preview-block {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #d9dee7;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.story-preview-block strong,
+.story-state-group strong,
+.story-attr-row span {
+  color: #1c2430;
+  font-size: 13px;
+}
+
+.story-preview-block span,
+.story-state-group span,
+.story-attr-row small {
+  color: #5b6472;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.story-runtime-shell {
+  --conversation-topbar-height: 86px;
+}
+
+.story-runtime-grid {
+  display: grid;
+  height: calc(100vh - var(--conversation-topbar-height));
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 320px 420px;
+  overflow: hidden;
+}
+
+.story-chat-pane {
+  border-right: 1px solid #d9dee7;
+}
+
+.story-composer {
+  padding: 12px;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.story-composer .chat-input {
+  margin-bottom: 8px;
+}
+
+.story-sidebar,
+.story-debug-pane {
+  min-width: 0;
+  overflow: auto;
+  padding: 18px;
+  background: #ffffff;
+}
+
+.story-sidebar {
+  border-right: 1px solid #d9dee7;
+}
+
+.story-debug-pane {
+  background: #fbfcfd;
+}
+
+.story-state-list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.story-state-list dt {
+  color: #5b6472;
+}
+
+.story-state-list dd {
+  margin: 0;
+  color: #1c2430;
+  word-break: break-word;
+}
+
+.story-state-group {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px dashed #e6e9ef;
+}
+
+.story-attr-list {
+  display: grid;
+  gap: 8px;
+}
+
+.story-attr-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #d9dee7;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.story-attr-row strong {
+  color: #1f6feb;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+@media (max-width: 1180px) {
+  .story-runtime-grid {
+    height: auto;
+    min-height: calc(100vh - var(--conversation-topbar-height));
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .story-sidebar,
+  .story-debug-pane,
+  .story-chat-pane {
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid #d9dee7;
+  }
+
+  .story-preview-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -71,7 +71,9 @@ Workflow branches on `ModelProfile.capabilities`, never on `provider === "ollama
 
 `OllamaChatModel.generate()` supports Core `GenerateInput.structuredOutput` for object output.
 The adapter maps it to Ollama chat `format: "json"` and then validates the parsed JSON with the
-schema supplied by `ai-core`.
+schema supplied by `ai-core`. Some local models still wrap JSON mode output in a complete
+`json` Markdown fence; the adapter accepts that single wrapper, then performs the same JSON parse
+and schema validation. It does not repair truncated or otherwise invalid JSON.
 
 This is used by `ModelMemoryExtractor`, so Ollama chat models can write long-term memories through
 the same Core workflow as OpenAI-compatible models. The adapter does **not** implement memory

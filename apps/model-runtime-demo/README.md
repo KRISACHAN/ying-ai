@@ -1,6 +1,6 @@
 # @ying-companion/model-runtime-demo
 
-V1.0 持久化调试工作台 + **V1.2 Core Workflow Debug Workbench**。不是正式用户产品，而是本地 AI Companion Core 调试宿主：创建伴侣、配置 Persona、OpenAI-compatible / Ollama 聊天、AI SDK UI 聊天表面、NDJSON 流式输出、Web Search Sources、Workflow Timeline，以及长期记忆管理。
+V1.0 持久化调试工作台 + **V1.2 Core Workflow Debug Workbench** + **V1.3 Story Workbench**。不是正式用户产品，而是本地 AI Companion / Story Core 调试宿主：创建伴侣、配置 Persona、OpenAI-compatible / Ollama 聊天、AI SDK UI 聊天表面、NDJSON 流式输出、Web Search Sources、Story Mode 游玩、Workflow Timeline，以及长期记忆管理。
 
 ## 环境变量
 
@@ -28,6 +28,10 @@ TAVILY_API_KEY=
 `OPENAI_FALLBACK_MODEL` 为空时不启用降级。重试次数为空或非法时按 `0` 处理。能力覆盖变量为空时使用
 OpenAI-compatible adapter 默认值：`streaming=true`、`toolCalling=false`、`usage=false`。只有确认当前
 模型和网关支持工具调用或稳定 usage 后，才把对应能力显式设为 `true`。
+
+`OLLAMA_KEEP_ALIVE` 直接传给 Ollama，必须使用合法 duration（例如 `10m`、`1h`），不能只写 `10`。
+`STORY_MODEL_PROVIDER` 可单独覆盖 Story Workbench 的 provider（`openai-compatible` 或 `ollama`），
+不改变 Companion Workbench 的 `MODEL_PROVIDER`；未设置时 Story 继续继承全局 provider。
 
 V1.1 Persona Profile 字段保存在 `debug_companions`：
 
@@ -73,6 +77,14 @@ psql -d ying_companion_dev -f apps/model-runtime-demo/migrations/0003_add_web_se
 ```
 
 `0003_add_web_search_settings.sql` 还包含 `debug_workflow_runs` 的 assistant message 唯一索引。
+Story Workbench 复用同一个 `DATABASE_URL` 和 demo 持有的 `pg.Pool`；进入 `/stories`
+时会通过 `runStoryPostgresMigrations()` 自动确保 `story_sessions` / `story_states` /
+`story_turns` / `story_messages` / `story_summaries` 存在。若需要显式执行，也可运行：
+
+```bash
+pnpm --filter @ying-companion/story-postgres migrate
+```
+
 `debug_conversations.web_search_enabled` 暂不作为持久化用户设置读取；V1.2 的 composer Web Search switch 只存在于当前浏览器页面状态，刷新后按宿主可用性恢复默认。
 
 然后填写 `apps/model-runtime-demo/.env` 中的 `OPENAI_API_KEY`、`OPENAI_MODEL` 与
@@ -97,6 +109,9 @@ CI 仍建议显式执行上面的 migration，确保 schema 版本可审计。
 打开 Next.js 输出的本地地址：
 
 - `/`：会话历史列表。选择已有伴侣创建新会话，或进入伴侣创建页。
+- `/stories`：Story Workbench 入口。显示种子故事列表，提供 Story Definition JSON 校验预览入口。
+- `/stories/[storyId]/sessions`：Story Session 列表与新建存档入口。Session 创建时冻结 `definitionSnapshot`，后续恢复不读取更新后的种子定义。
+- `/stories/[storyId]/sessions/[sessionId]`：Story Runtime。可发送自由文本行动，观察流式叙事、Core State、按 Attribute Schema 渲染的动态 attrs、Narrative Summary、Lore / Plan / State / Timeline Debug 信息。
 - `/companions/new`、`/companions/[id]/edit`：配置 Persona，包含用户显示名、建议称呼、兴趣、外貌与补充指令；服务端会在每轮聊天时将最新配置注入 `DefaultPersonaProvider`。
 - `/conversations/[id]`：AI SDK UI 聊天表面为默认主视图；composer 内的“调试”按钮打开抽屉，抽屉内展示模型配置与 `RunDebugPanel`。Web Search switch 位于发送按钮左侧，调试按钮位于发送按钮旁；刷新后消息、情绪、摘要和历史 run 仍可恢复；当前流式回合的 Sources 卡片来自结构化 `web_search` ToolResult，不从模型自然语言解析 URL。
 - `/companions/[id]/memories`：长期记忆 CRUD。新增/修改 content 会重新 embedding；列表不展示 score，score 只在对话页本轮 recalled memories 中出现。
@@ -152,6 +167,73 @@ pnpm --filter @ying-companion/model-runtime-demo verify:chat-ui-adapter
 - **Prompt / Context Debug Panel**：来自 `ChatWorkflowOutput.metadata.debugContext`，展示 Effective Persona、Persona Prompt Preview、最终 system prompt、Conversation Summary、长期记忆块、Recent History 与当前用户输入。滚动摘要开启后重点查看 `summaryContext`、`recentHistory`、`summarizedMessages`、Conversation Summary、Updated Summary 与 Summary Events。
 - **Tools Panel**：demo 宿主显式注入 `LocalToolRegistry`，默认注册 `get_current_time`、`search_memory`、`get_emotion_state` 三个本地工具；`get_current_time` 固定返回 `Asia/Shanghai` 北京时间与对应 UTC ISO，面板展示已注册工具、模型请求的 tool call、工具执行结果、是否发生二次生成与 tool observer events。
 - **scope 隔离**：工作台固定使用 `ownerType=custom`、`ownerId=local-debug-owner`，长期记忆按 `owner + companion` 隔离；删除会话不会删除长期记忆。
+
+## Story Workbench（V1.3）
+
+Story 发送经 `POST /api/story-sessions/[id]/messages`，响应为
+`application/x-ndjson; charset=utf-8`。服务端通过 `app/lib/story-runtime-factory.ts`
+集中构造 runtime：读取 `DATABASE_URL` 创建 / 复用 demo pool，执行 story-postgres migration，
+注入 `PostgresStorySessionProvider`、`PostgresStoryStateProvider`、`PostgresStoryTurnRepository`、
+`PostgresStoryMessageProvider`、`PostgresStoryTurnCommitter` 与 `PostgresStorySummaryProvider`。
+Route 不直接拼装 provider，也不会让持久化 state provider 与 in-memory turn/message provider 混用。
+
+故事列表、存档列表和恢复页面只初始化数据库 Host，不要求模型可用。发送回合时才按
+`STORY_MODEL_PROVIDER`（未设置则继承 `MODEL_PROVIDER`）及对应的 OpenAI-compatible / Ollama
+环境变量按需创建模型工作流。每个新回合默认
+执行两次模型调用：`ModelStoryPlanner` 先生成结构化 `StoryTurnPlan`，校验通过后
+`ModelStoryRenderer` 再流式生成玩家可见正文。Runtime Debug 的 `model` 字段显示当前
+provider、model 与能力声明，不包含 API Key。
+
+流式链路：
+
+```txt
+DefaultStoryWorkflow.stream()
+→ Story Core Event
+→ app/lib/story-stream-wire.ts
+→ Story Wire Event
+→ app/lib/story-stream-transport.ts NDJSON
+→ app/lib/story-stream-ui-adapter.ts + Runtime Debug 面板
+```
+
+Wire 层负责把 `Date` 转成 ISO string，并把 error / raw / unknown payload 显式转成
+JSON-safe 数据；浏览器端 runtime guard 会拒绝 terminal event 之后的额外事件。`story:finish`
+只在 workflow 已发出 finish 后发送，UI 完成后会重新读取 `GET /api/story-sessions/[id]`
+恢复最新 `messages / latestState / summary / definitionVersion`。
+
+状态侧栏分为固定 Core State 与 Dynamic Attributes。attrs 渲染完全来自
+`StoryDefinition.attributes[]`，并通过 `createStoryAttributeStorageKey()` 读取：
+`story`、`player`、`character`、`scene` scope 使用同一套 renderer；`showInSidebar=false`
+的字段不进默认侧栏，但 Debug 中可查看完整 attrs。`relationships` 仅在 Definition 启用时展示。
+
+Planner 同时接收原始玩家输入、冻结的 Story Definition、当前 State、Narrative Summary、近期消息与
+本轮召回 Lore；Renderer 接收已校验 Plan 和 nextState，并延续近期动作与对白。普通叙述或对话允许
+`stateChanges=[]`，但仍必须生成自然的戏内反馈，不能改写成预设调查行为。离线 Fake Model / Planner /
+Renderer 只用于契约验证脚本，不进入 Story Workbench 生产路径。
+
+自动化契约验证：
+
+```bash
+pnpm --filter @ying-companion/story-core verify:story-contract
+pnpm --filter @ying-companion/story-core verify:story-workflow
+pnpm --filter @ying-companion/story-postgres verify:story-postgres
+pnpm --filter @ying-companion/story-postgres verify:story-recovery
+pnpm --filter @ying-companion/model-runtime-demo verify:story-stream-contract
+pnpm --filter @ying-companion/model-runtime-demo verify:story-ui-adapter
+pnpm --filter @ying-companion/model-runtime-demo verify:story-workbench-planner
+```
+
+最小手工验收：
+
+```txt
+A. /stories 显示雾港疑云与青崖试剑；JSON 导入校验入口可返回 preview / errors
+B. 新建雾港 Session → Runtime 显示 openingText、当前场景与初始 attrs
+C. 连续发送自由行动或对白 → 回复承接实际输入与上一轮内容，文本增量显示，Debug 中可见 Lore / Plan / Timeline / model / committed revision
+D. 明确调查、交谈或移动 → 仅有 Definition 与上下文支持的物品、事件、场景或 attrs 通过 StateChange 推进
+E. 新建青崖试剑 Session → 侧栏显示 combatPower / sectStanding，不显示雾港字段
+F. 刷新 Runtime 页 → messages / state / revision / definitionVersion 从 Postgres 恢复
+G. 自动化 validator-failure 契约 → UI Adapter 显示 validation failed，世界状态不被污染
+H. 无有效模型配置 → 发送时显示明确错误；故事列表与已有存档仍可浏览
+```
 
 ## Web Search（V1.2）
 
