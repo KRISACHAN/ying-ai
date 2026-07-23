@@ -7,6 +7,7 @@ import type {
   StorySession,
   StoryState,
 } from "@ying-companion/story-core";
+import { deserializeStoryDefinition } from "@ying-companion/story-postgres";
 
 import {
   getStoryModelRuntimeInfo,
@@ -44,7 +45,7 @@ interface StorySessionRow {
     revision?: number;
     currentSceneId?: string;
   };
-  definition_snapshot: StoryDefinition;
+  definition_snapshot: unknown;
 }
 
 export class StoryDebugRepository {
@@ -80,18 +81,19 @@ export class StoryDebugRepository {
       [storyId],
     );
 
-    return result.rows.map((row) =>
-      createStorySessionListItem({
+    return result.rows.map((row) => {
+      const definition = deserializeStoryDefinition(row.definition_snapshot);
+      return createStorySessionListItem({
         id: row.id,
         storyId: row.story_id,
         definitionVersion: row.definition_version,
-        definition: row.definition_snapshot,
+        definition,
         stateRevision: Number(row.state_json.revision ?? 0),
         currentSceneId: row.state_json.currentSceneId ?? "",
         createdAt: row.created_at.toISOString(),
         updatedAt: row.updated_at.toISOString(),
-      }),
-    );
+      });
+    });
   }
 
   async getSessionDetail(sessionId: string): Promise<StorySessionDetail | null> {

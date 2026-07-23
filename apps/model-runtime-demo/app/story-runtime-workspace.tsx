@@ -15,6 +15,7 @@ import { createStoryAttributeStorageKey } from "./lib/story-attribute-key";
 import { parseStoryNdjsonWireEvents, StoryStreamProtocolError } from "./lib/story-stream-transport";
 import type { StoryWorkflowStreamWireEvent } from "./lib/story-stream-wire";
 import { StoryStreamUIAdapter, type StoryTurnStatus } from "./lib/story-stream-ui-adapter";
+import { resolveStoryDebugTurnSource } from "./lib/story-workbench-data";
 import type { StoryModelRuntimeInfo } from "./lib/story-runtime-factory";
 import type { StoryPersistedDebugSnapshot } from "./lib/story-debug-repository";
 
@@ -246,6 +247,7 @@ export function StoryRuntimeWorkspace({
           recentMessages={persistedMessages}
           wireEvents={wireEvents}
           persistedDebug={persistedDebug}
+          idempotentReplay={idempotentReplay}
           modelRuntime={initialDetail.modelRuntime}
         />
       </section>
@@ -313,6 +315,7 @@ function StoryDebugPanel({
   recentMessages,
   wireEvents,
   persistedDebug,
+  idempotentReplay,
   modelRuntime,
 }: {
   definition: StoryDefinition;
@@ -322,25 +325,35 @@ function StoryDebugPanel({
   recentMessages: StoryMessage[];
   wireEvents: StoryWorkflowStreamWireEvent[];
   persistedDebug: StoryPersistedDebugSnapshot;
+  idempotentReplay: boolean;
   modelRuntime: StoryModelRuntimeInfo;
 }) {
-  const isLive = wireEvents.length > 0;
+  const artifactSource = resolveStoryDebugTurnSource({
+    wireEventCount: wireEvents.length,
+    idempotentReplay,
+  });
+  const useLiveArtifacts = artifactSource === "live";
+  const hasLiveTimeline = wireEvents.length > 0;
   const latestPlanPayload = payloadFor(wireEvents, "story:plan-completed");
   const latestLorePayload = payloadFor(wireEvents, "story:lore-recalled");
   const latestContext = payloadFor(wireEvents, "story:context-ready");
   const latestPrepared = payloadFor(wireEvents, "story:state-prepared");
   const latestRejected = payloadFor(wireEvents, "story:validation-failed");
-  const latestPlan = isLive ? (latestPlanPayload?.plan ?? null) : persistedDebug.latestTurn?.plan;
-  const latestLore: unknown[] = isLive
+  const latestPlan = useLiveArtifacts
+    ? (latestPlanPayload?.plan ?? null)
+    : persistedDebug.latestTurn?.plan;
+  const latestLore: unknown[] = useLiveArtifacts
     ? Array.isArray(latestLorePayload?.recalledLore)
       ? latestLorePayload.recalledLore
       : []
     : (persistedDebug.latestTurn?.recalledLore ?? []);
-  const acceptedChanges = isLive
+  const acceptedChanges = useLiveArtifacts
     ? (latestPrepared?.appliedChanges ?? [])
     : persistedDebug.acceptedChanges;
-  const rejectedChanges = isLive ? (latestRejected?.errors ?? []) : persistedDebug.rejectedChanges;
-  const timeline = isLive
+  const rejectedChanges = useLiveArtifacts
+    ? (latestRejected?.errors ?? [])
+    : persistedDebug.rejectedChanges;
+  const timeline = hasLiveTimeline
     ? wireEvents.map((event) => ({
         type: event.type,
         sequence: event.sequence,
@@ -363,8 +376,9 @@ function StoryDebugPanel({
         <pre className="output">
           {JSON.stringify(
             {
-              source: isLive ? "live" : persistedDebug.source,
-              contextScope: isLive ? "live_turn_context" : "current_session_context",
+              source: artifactSource,
+              contextScope:
+                artifactSource === "live" ? "live_turn_context" : "current_session_context",
               summaryPresent: latestContext?.summaryPresent ?? summary !== null,
               recentMessageCount: latestContext?.recentMessageCount ?? recentMessages.length,
               recalledLoreIds:
@@ -409,7 +423,7 @@ function StoryDebugPanel({
               accepted: acceptedChanges,
               rejected: rejectedChanges,
               preparedState:
-                isLive && latestPrepared
+                useLiveArtifacts && latestPrepared
                   ? {
                       previousRevision: latestPrepared.previousRevision,
                       nextRevision: latestPrepared.nextRevision,

@@ -58,7 +58,8 @@ export default async function StorySessionsPage({
               <article className="conversation-card" key={session.id}>
                 <Link href={`/stories/${story.id}/sessions/${session.id}`}>
                   <span>
-                    revision {session.stateRevision} · definition {session.definitionVersion}
+                    {session.storyTitle} · revision {session.stateRevision} · definition{" "}
+                    {session.definitionVersion}
                   </span>
                   <h2>{session.currentSceneTitle}</h2>
                   <p>{session.id}</p>

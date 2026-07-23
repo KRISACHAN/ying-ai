@@ -50,6 +50,13 @@ export class StoryDefinitionConflictError extends Error {
   }
 }
 
+export function resolveStoryDebugTurnSource(input: {
+  wireEventCount: number;
+  idempotentReplay: boolean;
+}): "live" | "persisted" {
+  return input.wireEventCount > 0 && !input.idempotentReplay ? "live" : "persisted";
+}
+
 export async function registerRuntimeStoryDefinition(
   storyProvider: InMemoryStoryProvider,
   definition: StoryDefinition,

@@ -16,6 +16,7 @@ import {
   createPersistedStoryDebugSnapshot,
   createStorySessionListItem,
   registerRuntimeStoryDefinition,
+  resolveStoryDebugTurnSource,
   StoryDefinitionConflictError,
 } from "../app/lib/story-workbench-data.ts";
 
@@ -58,6 +59,21 @@ await assert.rejects(
   "conflicting import must not replace the active definition",
 );
 assert.equal((await provider.listDefinitions()).length, 2);
+assert.equal(
+  resolveStoryDebugTurnSource({ wireEventCount: 5, idempotentReplay: false }),
+  "live",
+  "a normal streamed turn should use live debug artifacts",
+);
+assert.equal(
+  resolveStoryDebugTurnSource({ wireEventCount: 5, idempotentReplay: true }),
+  "persisted",
+  "an idempotent replay should preserve canonical persisted debug artifacts",
+);
+assert.equal(
+  resolveStoryDebugTurnSource({ wireEventCount: 0, idempotentReplay: false }),
+  "persisted",
+  "a restored session should use persisted debug artifacts",
+);
 
 const state = { ...initializeStoryState(fogHarborMystery), revision: 1 };
 const messages: StoryMessage[] = [
