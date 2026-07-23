@@ -24,6 +24,10 @@ export class InMemoryStoryProvider implements StoryProvider, StoryCatalog {
       description: definition.description,
     }));
   }
+
+  registerDefinition(definition: StoryDefinition): void {
+    this.definitions.set(definition.id, cloneDefinition(definition));
+  }
 }
 
 export function cloneDefinition(definition: StoryDefinition): StoryDefinition {

@@ -10,7 +10,7 @@ Enterprise AI companion monorepo — admin backend, user-facing frontend, and a 
 
 The goal is a **pluggable AI companion core** that product apps (admin API + user web) can embed. V1 focuses on the SDK itself — no auth, user accounts, or deployment yet. Scope details: [`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md).
 
-**Current milestone:** **V1.0 is frozen** (tag [`v1.0`](.code-reviews/v1.0/conclusion.md)). **V1.1 is complete** — Persona profile extensions, workflow-level streaming, model capability profiles, tool planning, Ollama adapter, and NDJSON debug workbench. **V1.2 is complete** — provider-neutral Web Search Tool + Tavily adapter, AI SDK UI chat surface, Sources display, and updated demo docs. Specs: [`.requirements/stages/v1.2/`](.requirements/stages/v1.2/) · Plan: [`.requirements/prompts/05-v1.2-plan.md`](.requirements/prompts/05-v1.2-plan.md).
+**Current milestone:** **V1.3 is complete** — the V1.0–V1.2 Companion SDK remains compatible, and Story Mode now provides a separate story domain/runtime, PostgreSQL recovery, model-backed planning/rendering, schema-driven state, NDJSON streaming, and a playable/debuggable Story Workbench. Specs: [`.requirements/stages/v1.3/`](.requirements/stages/v1.3/) · Plan: [`.requirements/prompts/06-v1.3-story-mode-plan.md`](.requirements/prompts/06-v1.3-story-mode-plan.md).
 
 ---
 
@@ -22,7 +22,9 @@ The goal is a **pluggable AI companion core** that product apps (admin API + use
 | **Ollama adapter**    | [`packages/model-ollama`](packages/model-ollama/)                                                                               | V1.1 — local `ChatModel` adapter                                         |
 | **Memory (Postgres)** | [`packages/memory-postgres`](packages/memory-postgres/)                                                                         | V1.0 — pgvector long-term memory                                         |
 | **Web Search Tool**   | [`packages/tool-web-search`](packages/tool-web-search/) + [`packages/tool-web-search-tavily`](packages/tool-web-search-tavily/) | V1.2 — provider-neutral search DTO/tool + Tavily adapter                 |
-| **Debug workbench**   | [`apps/model-runtime-demo`](apps/model-runtime-demo/)                                                                           | V1.2 — AI SDK UI chat, NDJSON adapter, Web Search Sources                |
+| **Story Core SDK**    | [`packages/story-core`](packages/story-core/)                                                                                   | V1.3 — Story workflow, Lore, planner/renderer, state validation          |
+| **Story Postgres**    | [`packages/story-postgres`](packages/story-postgres/)                                                                           | V1.3 — snapshot sessions and atomic turn persistence                     |
+| **Debug workbench**   | [`apps/model-runtime-demo`](apps/model-runtime-demo/)                                                                           | V1.3 — Companion chat + playable Story Workbench                         |
 | **Product API**       | [`apps/api`](apps/api/)                                                                                                         | Scaffold — planned RBAC backend                                          |
 | **Product web**       | [`apps/web`](apps/web/)                                                                                                         | Scaffold — planned user frontend                                         |
 
@@ -34,6 +36,7 @@ flowchart LR
   end
   subgraph core [Core SDK]
     AiCore[packages/ai-core]
+    StoryCore[packages/story-core]
     Ollama[packages/model-ollama]
   end
   subgraph debug [Debug host]
@@ -44,6 +47,8 @@ flowchart LR
   Demo --> AiCore
   Demo --> Ollama
   Demo --> MemoryPostgres[packages/memory-postgres]
+  Demo --> StoryCore
+  Demo --> StoryPostgres[packages/story-postgres]
 ```
 
 **Boundary:** `ai-core` is a pure SDK — no env vars, HTTP, NDJSON, or database. The demo app owns provider config, Wire Event mapping, persistence, and UI.
@@ -61,7 +66,9 @@ ying-companion/
 ├── packages/
 │   ├── ai-core/              @ying-companion/ai-core
 │   ├── model-ollama/         @ying-companion/model-ollama
-│   └── memory-postgres/      @ying-companion/memory-postgres
+│   ├── memory-postgres/      @ying-companion/memory-postgres
+│   ├── story-core/           @ying-companion/story-core
+│   └── story-postgres/       @ying-companion/story-postgres
 ├── docs/ai/                  Agent operating rules (see AGENTS.md)
 ├── .requirements/            Requirements & stage task specs
 ├── .code-reviews/            Code review archive
@@ -69,7 +76,7 @@ ying-companion/
 └── turbo.json
 ```
 
-Package READMEs: [ai-core](packages/ai-core/README.md) · [model-ollama](packages/model-ollama/README.md) · [memory-postgres](packages/memory-postgres/README.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [web](apps/web/README.md) · [api](apps/api/README.md)
+Package READMEs: [ai-core](packages/ai-core/README.md) · [model-ollama](packages/model-ollama/README.md) · [memory-postgres](packages/memory-postgres/README.md) · [story-core](packages/story-core/README.md) · [story-postgres](packages/story-postgres/README.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [web](apps/web/README.md) · [api](apps/api/README.md)
 
 ---
 
@@ -100,6 +107,16 @@ Stage 2  Demo AI SDK UI, Sources display, docs sync
 ```
 
 Full plan: [`.requirements/prompts/05-v1.2-plan.md`](.requirements/prompts/05-v1.2-plan.md) · Stage specs: [`.requirements/stages/v1.2/`](.requirements/stages/v1.2/)
+
+**V1.3** (complete):
+
+```txt
+Stage 1  Story domain and runtime foundation
+Stage 2  Narrative workflow, Lore, and PostgreSQL persistence
+Stage 3  Story Workbench and release closure
+```
+
+Full plan: [`.requirements/prompts/06-v1.3-story-mode-plan.md`](.requirements/prompts/06-v1.3-story-mode-plan.md) · Stage specs: [`.requirements/stages/v1.3/`](.requirements/stages/v1.3/)
 
 ---
 
@@ -144,7 +161,7 @@ More commands: [docs/ai/core/project-context.md](docs/ai/core/project-context.md
 
 ## Run the Debug Workbench
 
-The fastest way to inspect V1.2 locally is the Next.js **Core Workflow Debug Workbench**. It creates companions and conversations, calls `@ying-companion/ai-core` via `streamWorkflow()`, streams NDJSON to the browser, adapts that stream into AI SDK UI messages, and shows Persona, Timeline, runtime, memory, emotion, tools, Web Search, Sources, and writeback results in a debug/model drawer opened from the chat composer. The composer includes the per-turn Web Search switch plus Debug and Send actions.
+The Next.js demo hosts both the **Core Workflow Debug Workbench** and the V1.3 **Story Workbench**. The Companion surface covers Persona, memory, emotion, tools, Web Search and Sources; Story Mode adds story selection/import, persistent sessions, streamed narrative, dynamic state, and live/persisted workflow debugging.
 
 ```bash
 cp apps/model-runtime-demo/.env.example apps/model-runtime-demo/.env
@@ -160,6 +177,8 @@ Open the URL from the terminal:
 - `/conversations/[id]` — **AI SDK UI streaming chat** (chat-first view, composer Web Search switch, composer Debug action, optional Web Search Sources)
 - `/companions/new` — Persona config (user address, hobbies, appearance, …)
 - `/debug/model-runtime` — legacy model runtime smoke test
+- `/stories` — Story Definition registry/import and Story Session entry
+- `/stories/[storyId]/sessions/[sessionId]` — playable Story Runtime with state and Debug panels
 
 Full env reference: [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md).
 
@@ -174,7 +193,7 @@ Embedding for long-term memory remains a **separate** `EmbeddingProvider` (typic
 
 ---
 
-## V1.2 limitations (summary)
+## Current limitations (V1.3)
 
 Not in this release:
 
@@ -183,6 +202,8 @@ Not in this release:
 - Streaming multi-turn tool loop; token-level output safety
 - Ollama embedding provider
 - Tavily Extract/Crawl/Map/Research, deep browsing, search history, source persistence
+- Story Definition import is process-local; created sessions retain an immutable snapshot, but imported catalog entries disappear after restart
+- No visual story authoring studio, story marketplace, branching editor, or Companion Persona/Memory integration with Story Mode
 
 Details: [`.code-reviews/v1.1/conclusion.md`](.code-reviews/v1.1/conclusion.md).
 

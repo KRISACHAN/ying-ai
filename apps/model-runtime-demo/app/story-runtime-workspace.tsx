@@ -16,6 +16,7 @@ import { parseStoryNdjsonWireEvents, StoryStreamProtocolError } from "./lib/stor
 import type { StoryWorkflowStreamWireEvent } from "./lib/story-stream-wire";
 import { StoryStreamUIAdapter, type StoryTurnStatus } from "./lib/story-stream-ui-adapter";
 import type { StoryModelRuntimeInfo } from "./lib/story-runtime-factory";
+import type { StoryPersistedDebugSnapshot } from "./lib/story-debug-repository";
 
 export interface StoryRuntimeInitialDetail {
   session: {
@@ -29,6 +30,7 @@ export interface StoryRuntimeInitialDetail {
   turns: StoryTurn[];
   summary: StoryNarrativeSummary | null;
   modelRuntime: StoryModelRuntimeInfo;
+  debugSnapshot: StoryPersistedDebugSnapshot;
 }
 
 interface RuntimeMessage {
@@ -49,10 +51,13 @@ export function StoryRuntimeWorkspace({
   );
   const [summary, setSummary] = useState(initialDetail.summary);
   const [turns, setTurns] = useState(initialDetail.turns);
+  const [persistedMessages, setPersistedMessages] = useState(initialDetail.messages);
+  const [persistedDebug, setPersistedDebug] = useState(initialDetail.debugSnapshot);
   const [wireEvents, setWireEvents] = useState<StoryWorkflowStreamWireEvent[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<StoryTurnStatus>("success");
   const [error, setError] = useState<string | null>(null);
+  const [idempotentReplay, setIdempotentReplay] = useState(false);
   const currentScene = useMemo(
     () =>
       initialDetail.definition.scenes.find((scene) => scene.id === state.currentSceneId) ?? null,
@@ -69,6 +74,7 @@ export function StoryRuntimeWorkspace({
     const assistantId = `assistant_${clientTurnId}`;
     setInput("");
     setError(null);
+    setIdempotentReplay(false);
     setWireEvents([]);
     setStatus("submitted");
     setMessages((current) => [
@@ -114,6 +120,9 @@ export function StoryRuntimeWorkspace({
         if (event.type === "story:error") {
           setError(`${event.error.code}: ${event.error.message}`);
         }
+        if (event.type === "story:finish") {
+          setIdempotentReplay(event.output.idempotentReplay === true);
+        }
       }
 
       const turnStatus = adapter.getTurnStatus();
@@ -150,16 +159,21 @@ export function StoryRuntimeWorkspace({
       recentMessages?: StoryMessage[];
       turns?: StoryTurn[];
       summary?: StoryNarrativeSummary | null;
+      debugSnapshot?: StoryPersistedDebugSnapshot;
     };
     if (!body.ok || body.latestState === undefined || body.recentMessages === undefined) {
       return;
     }
     setState(body.latestState);
+    setPersistedMessages(body.recentMessages);
     if (!options.preserveTurnOutcome) {
       setMessages(toRuntimeMessages(initialDetail.definition, body.recentMessages));
     }
     setTurns(body.turns ?? []);
     setSummary(body.summary ?? null);
+    if (body.debugSnapshot !== undefined) {
+      setPersistedDebug(body.debugSnapshot);
+    }
     if (!options.preserveTurnOutcome) {
       setStatus("success");
     }
@@ -201,6 +215,7 @@ export function StoryRuntimeWorkspace({
               {status === "submitted" || status === "streaming" ? "生成中" : "发送行动"}
             </button>
             <span className="meta-line">状态：{status}</span>
+            {idempotentReplay ? <span className="meta-line">已提交回合重放</span> : null}
           </div>
           {error !== null ? <p className="form-error">{error}</p> : null}
         </div>
@@ -228,7 +243,9 @@ export function StoryRuntimeWorkspace({
           state={state}
           turns={turns}
           summary={summary}
+          recentMessages={persistedMessages}
           wireEvents={wireEvents}
+          persistedDebug={persistedDebug}
           modelRuntime={initialDetail.modelRuntime}
         />
       </section>
@@ -293,20 +310,43 @@ function StoryDebugPanel({
   state,
   turns,
   summary,
+  recentMessages,
   wireEvents,
+  persistedDebug,
   modelRuntime,
 }: {
   definition: StoryDefinition;
   state: StoryState;
   turns: StoryTurn[];
   summary: StoryNarrativeSummary | null;
+  recentMessages: StoryMessage[];
   wireEvents: StoryWorkflowStreamWireEvent[];
+  persistedDebug: StoryPersistedDebugSnapshot;
   modelRuntime: StoryModelRuntimeInfo;
 }) {
-  const latestPlan = payloadFor(wireEvents, "story:plan-completed");
-  const latestLore = payloadFor(wireEvents, "story:lore-recalled");
+  const isLive = wireEvents.length > 0;
+  const latestPlanPayload = payloadFor(wireEvents, "story:plan-completed");
+  const latestLorePayload = payloadFor(wireEvents, "story:lore-recalled");
+  const latestContext = payloadFor(wireEvents, "story:context-ready");
   const latestPrepared = payloadFor(wireEvents, "story:state-prepared");
   const latestRejected = payloadFor(wireEvents, "story:validation-failed");
+  const latestPlan = isLive ? (latestPlanPayload?.plan ?? null) : persistedDebug.latestTurn?.plan;
+  const latestLore: unknown[] = isLive
+    ? Array.isArray(latestLorePayload?.recalledLore)
+      ? latestLorePayload.recalledLore
+      : []
+    : (persistedDebug.latestTurn?.recalledLore ?? []);
+  const acceptedChanges = isLive
+    ? (latestPrepared?.appliedChanges ?? [])
+    : persistedDebug.acceptedChanges;
+  const rejectedChanges = isLive ? (latestRejected?.errors ?? []) : persistedDebug.rejectedChanges;
+  const timeline = isLive
+    ? wireEvents.map((event) => ({
+        type: event.type,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
+      }))
+    : persistedDebug.timeline;
 
   return (
     <>
@@ -319,8 +359,43 @@ function StoryDebugPanel({
         <pre className="output">{summary?.text ?? "暂无摘要"}</pre>
       </section>
       <section className="debug-section">
+        <h3>Effective Context</h3>
+        <pre className="output">
+          {JSON.stringify(
+            {
+              source: isLive ? "live" : persistedDebug.source,
+              contextScope: isLive ? "live_turn_context" : "current_session_context",
+              summaryPresent: latestContext?.summaryPresent ?? summary !== null,
+              recentMessageCount: latestContext?.recentMessageCount ?? recentMessages.length,
+              recalledLoreIds:
+                latestContext?.recalledLoreIds ??
+                latestLore.map(recalledLoreId).filter((id) => id !== undefined),
+              definitionVersion: definition.version,
+              stateRevision: state.revision,
+              currentSceneId: state.currentSceneId,
+            },
+            null,
+            2,
+          )}
+        </pre>
+      </section>
+      <section className="debug-section">
+        <h3>Recent Messages</h3>
+        <pre className="output">
+          {JSON.stringify(
+            recentMessages.map((message) => ({
+              role: message.role,
+              sequence: message.sequence,
+              content: message.content,
+            })),
+            null,
+            2,
+          )}
+        </pre>
+      </section>
+      <section className="debug-section">
         <h3>Recalled Lore</h3>
-        <pre className="output">{JSON.stringify(latestLore ?? {}, null, 2)}</pre>
+        <pre className="output">{JSON.stringify(latestLore, null, 2)}</pre>
       </section>
       <section className="debug-section">
         <h3>Story Planner Output</h3>
@@ -331,15 +406,16 @@ function StoryDebugPanel({
         <pre className="output">
           {JSON.stringify(
             {
-              accepted: latestPrepared?.appliedChanges ?? [],
-              rejected: latestRejected?.errors ?? [],
-              preparedState: latestPrepared
-                ? {
-                    previousRevision: latestPrepared.previousRevision,
-                    nextRevision: latestPrepared.nextRevision,
-                    stateChanged: latestPrepared.stateChanged,
-                  }
-                : null,
+              accepted: acceptedChanges,
+              rejected: rejectedChanges,
+              preparedState:
+                isLive && latestPrepared
+                  ? {
+                      previousRevision: latestPrepared.previousRevision,
+                      nextRevision: latestPrepared.nextRevision,
+                      stateChanged: latestPrepared.stateChanged,
+                    }
+                  : null,
             },
             null,
             2,
@@ -348,17 +424,7 @@ function StoryDebugPanel({
       </section>
       <section className="debug-section">
         <h3>Workflow Timeline</h3>
-        <pre className="output">
-          {JSON.stringify(
-            wireEvents.map((event) => ({
-              type: event.type,
-              sequence: event.sequence,
-              occurredAt: event.occurredAt,
-            })),
-            null,
-            2,
-          )}
-        </pre>
+        <pre className="output">{JSON.stringify(timeline, null, 2)}</pre>
       </section>
       <section className="debug-section">
         <h3>Runtime</h3>
@@ -406,6 +472,17 @@ function toRuntimeMessages(
 function payloadFor(events: StoryWorkflowStreamWireEvent[], type: string) {
   const event = [...events].reverse().find((candidate) => candidate.type === type);
   return event && "payload" in event ? event.payload : null;
+}
+
+function recalledLoreId(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("entry" in value)) {
+    return undefined;
+  }
+  const entry = value.entry;
+  if (typeof entry !== "object" || entry === null || !("id" in entry)) {
+    return undefined;
+  }
+  return typeof entry.id === "string" ? entry.id : undefined;
 }
 
 function resolveAttributeRows(

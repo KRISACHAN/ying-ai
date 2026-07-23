@@ -49,6 +49,7 @@ export function CreateStorySessionButton({ storyId }: { storyId: string }) {
 }
 
 export function StoryImportPanel() {
+  const router = useRouter();
   const [source, setSource] = useState("");
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +70,10 @@ export function StoryImportPanel() {
       const body = (await response.json()) as {
         ok: boolean;
         storyId?: string;
-        persisted?: boolean;
+        definitionVersion?: string;
+        registered?: boolean;
+        registration?: "registered" | "unchanged";
+        lifetime?: "process";
         errors?: Array<{ message: string }>;
         error?: { message: string };
       };
@@ -81,7 +85,10 @@ export function StoryImportPanel() {
         return;
       }
 
-      setResult(`校验通过：${body.storyId}。V1.3 仅预览导入，不写入旧存档 definition。`);
+      setResult(
+        `已${body.registration === "unchanged" ? "确认" : "注册"}：${body.storyId} v${body.definitionVersion}。当前 Demo 进程内可创建存档；重启后临时目录会消失，已创建存档仍使用冻结 snapshot。`,
+      );
+      router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "导入 JSON 无效");
     } finally {
@@ -92,7 +99,7 @@ export function StoryImportPanel() {
   return (
     <section className="start-panel story-import-panel">
       <label className="scope-field full-span">
-        <span>Story Definition JSON 导入预览</span>
+        <span>Story Definition JSON 导入</span>
         <textarea
           className="chat-input"
           rows={5}
@@ -106,7 +113,7 @@ export function StoryImportPanel() {
         disabled={source.trim() === "" || isChecking}
         onClick={checkImport}
       >
-        {isChecking ? "校验中" : "校验 JSON"}
+        {isChecking ? "导入中" : "校验并注册"}
       </button>
       {result !== null ? <p className="meta-line">{result}</p> : null}
       {error !== null ? <pre className="form-error full-span">{error}</pre> : null}

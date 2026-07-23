@@ -24,6 +24,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       turns: detail.turns,
       summary: detail.summary,
       definitionPreview: createStoryDefinitionPreview(detail.definition),
+      debugSnapshot: detail.debugSnapshot,
     });
   } catch (error) {
     return errorResponse(error);

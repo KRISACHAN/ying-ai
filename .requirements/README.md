@@ -17,6 +17,8 @@ Root archive for **ying-companion requirement and planning documents**. AI agent
     02-execution.md
     03-v1.0-plan.md
     04-v1.1-plan.md
+    05-v1.2-plan.md
+    06-v1.3-story-mode-plan.md
   stages/                   # Versioned executable stage task archives
     v1.0/
     v1.1/
@@ -122,6 +124,7 @@ Reviews: [`.code-reviews/v1.1/`](../.code-reviews/v1.1/conclusion.md). Do not re
 stages/v1.3/stage-01/  01-story-domain-and-runtime-foundation.md
 stages/v1.3/stage-02/  02-narrative-workflow-lore-and-persistence.md
 stages/v1.3/stage-03/  03-story-workbench-and-release-closure.md
+                       03-story-workbench-and-release-closure-patch.md
 ```
 
 ---
@@ -167,6 +170,8 @@ When generating **new** requirement or stage docs, follow project convention: **
 **"What are the V1.0 stages?"** → [`prompts/03-v1.0-plan.md`](prompts/03-v1.0-plan.md) § 总体阶段规划
 
 **"What are the V1.1 stages?"** → [`prompts/04-v1.1-plan.md`](prompts/04-v1.1-plan.md) · [`stages/v1.1/`](stages/v1.1/)
+
+**"What are the V1.3 Story Mode stages?"** → [`prompts/06-v1.3-story-mode-plan.md`](prompts/06-v1.3-story-mode-plan.md) · [`stages/v1.3/`](stages/v1.3/) · [Stage 03 closure patch](stages/v1.3/stage-03/03-story-workbench-and-release-closure-patch.md)
 
 **"What was implemented for stage 1?"** → [`stages/v1.0/stage-01/01-model-runtime.md`](stages/v1.0/stage-01/01-model-runtime.md)
 

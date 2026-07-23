@@ -35,6 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       let text = "";
       let turnId: string | undefined;
       let stateRevision: number | undefined;
+      let idempotentReplay = false;
 
       try {
         const runtime = await getStoryWorkflowRuntime();
@@ -50,6 +51,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           if (event.type === "story:committed") {
             turnId = event.turnId;
             stateRevision = event.stateRevision;
+            idempotentReplay = event.idempotentReplay;
+            if (event.idempotentReplay && event.assistantText !== undefined) {
+              text = event.assistantText;
+            }
           }
           if (event.type === "story:summary-updated") {
             output = {
@@ -59,6 +64,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               ...(turnId ? { turnId } : {}),
               ...(stateRevision !== undefined ? { stateRevision } : {}),
               summaryStatus: event.status,
+              idempotentReplay,
             };
           }
           if (event.type === "story:finish") {
@@ -73,6 +79,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                     text,
                     ...(turnId ? { turnId } : {}),
                     ...(stateRevision !== undefined ? { stateRevision } : {}),
+                    idempotentReplay,
                   },
                 ),
               ),

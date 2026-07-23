@@ -13,16 +13,15 @@ import {
   getStoryRuntimeHost,
   type StoryModelRuntimeInfo,
 } from "./story-runtime-factory";
+import {
+  createPersistedStoryDebugSnapshot,
+  createStorySessionListItem,
+  registerRuntimeStoryDefinition,
+  type StoryPersistedDebugSnapshot,
+  type StorySessionListItem,
+} from "./story-workbench-data";
 
-export interface StorySessionListItem {
-  id: string;
-  storyId: string;
-  definitionVersion: string;
-  stateRevision: number;
-  currentSceneId: string;
-  updatedAt: string;
-  createdAt: string;
-}
+export type { StoryPersistedDebugSnapshot, StorySessionListItem } from "./story-workbench-data";
 
 export interface StorySessionDetail {
   session: StorySession;
@@ -32,6 +31,7 @@ export interface StorySessionDetail {
   turns: CommittedStoryTurn[];
   summary: StoryNarrativeSummary | null;
   modelRuntime: StoryModelRuntimeInfo;
+  debugSnapshot: StoryPersistedDebugSnapshot;
 }
 
 interface StorySessionRow {
@@ -44,6 +44,7 @@ interface StorySessionRow {
     revision?: number;
     currentSceneId?: string;
   };
+  definition_snapshot: StoryDefinition;
 }
 
 export class StoryDebugRepository {
@@ -62,10 +63,16 @@ export class StoryDebugRepository {
     return host.sessionProvider.createSession({ storyId });
   }
 
+  async registerStoryDefinition(definition: StoryDefinition): Promise<"registered" | "unchanged"> {
+    const host = await getStoryRuntimeHost();
+    return registerRuntimeStoryDefinition(host.storyProvider, definition);
+  }
+
   async listSessions(storyId: string): Promise<StorySessionListItem[]> {
     const host = await getStoryRuntimeHost();
     const result = await host.pool.query<StorySessionRow>(
-      `SELECT s.id, s.story_id, s.definition_version, s.created_at, s.updated_at, st.state_json
+      `SELECT s.id, s.story_id, s.definition_version, s.definition_snapshot,
+              s.created_at, s.updated_at, st.state_json
        FROM story_sessions s
        JOIN story_states st ON st.session_id = s.id
        WHERE s.story_id = $1
@@ -73,15 +80,18 @@ export class StoryDebugRepository {
       [storyId],
     );
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      storyId: row.story_id,
-      definitionVersion: row.definition_version,
-      stateRevision: Number(row.state_json.revision ?? 0),
-      currentSceneId: row.state_json.currentSceneId ?? "",
-      createdAt: row.created_at.toISOString(),
-      updatedAt: row.updated_at.toISOString(),
-    }));
+    return result.rows.map((row) =>
+      createStorySessionListItem({
+        id: row.id,
+        storyId: row.story_id,
+        definitionVersion: row.definition_version,
+        definition: row.definition_snapshot,
+        stateRevision: Number(row.state_json.revision ?? 0),
+        currentSceneId: row.state_json.currentSceneId ?? "",
+        createdAt: row.created_at.toISOString(),
+        updatedAt: row.updated_at.toISOString(),
+      }),
+    );
   }
 
   async getSessionDetail(sessionId: string): Promise<StorySessionDetail | null> {
@@ -110,6 +120,13 @@ export class StoryDebugRepository {
       turns,
       summary,
       modelRuntime: getStoryModelRuntimeInfo(),
+      debugSnapshot: createPersistedStoryDebugSnapshot({
+        definition: session.definitionSnapshot,
+        state,
+        messages,
+        turns,
+        summary,
+      }),
     };
   }
 }

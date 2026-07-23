@@ -103,6 +103,8 @@ export interface StoryCommittedEvent extends StoryEventBase {
   turnId: string;
   turnNumber: number;
   stateRevision: number;
+  idempotentReplay: boolean;
+  assistantText?: string;
 }
 
 export interface StorySummaryUpdatedEvent extends StoryEventBase {

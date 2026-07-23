@@ -204,6 +204,8 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
           turnId: committed.id,
           turnNumber: committed.turnNumber,
           stateRevision: committed.nextStateRevision,
+          idempotentReplay: true,
+          assistantText: committed.assistantText,
         });
         await context.emit({ type: "story:finish" });
         return {
@@ -218,6 +220,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
           committed: true,
           summaryStatus: "unchanged",
           stateChanged: committed.stateChanged,
+          idempotentReplay: true,
           stateSnapshotStatus: "current_latest",
           events: context.events,
           text: committed.assistantText,
@@ -380,6 +383,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         turnId: committedTurn.id,
         turnNumber: committedTurn.turnNumber,
         stateRevision: committedTurn.nextStateRevision,
+        idempotentReplay: false,
       });
 
       const summaryStatus = await this.updateSummary({
@@ -404,6 +408,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         committed: true,
         summaryStatus,
         stateChanged,
+        idempotentReplay: false,
         stateSnapshotStatus: "turn_snapshot",
         events: context.events,
         text: assistantText,

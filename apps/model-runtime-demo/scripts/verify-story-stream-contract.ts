@@ -36,7 +36,12 @@ const events: StoryWorkflowStreamWireEvent[] = [
     type: "story:committed",
     ...base,
     sequence: 5,
-    payload: { turnId: "turn_1", turnNumber: 1, stateRevision: 1 },
+    payload: {
+      turnId: "turn_1",
+      turnNumber: 1,
+      stateRevision: 1,
+      idempotentReplay: false,
+    },
   },
   {
     type: "story:finish",
@@ -73,6 +78,31 @@ assert.deepEqual(
   "payload" in preparedWireEvent ? preparedWireEvent.payload.appliedChanges : undefined,
   [{ type: "add_clue", clueId: "menu-mark" }],
   "state-prepared wire payload must include validator-approved changes",
+);
+
+const replayWireEvent = toStoryWorkflowStreamWireEvent({
+  type: "story:committed",
+  runId: base.workflowId,
+  sessionId: base.sessionId,
+  clientTurnId: base.clientTurnId,
+  sequence: 8,
+  occurredAt: new Date(base.occurredAt),
+  turnId: "turn_1",
+  turnNumber: 1,
+  stateRevision: 1,
+  idempotentReplay: true,
+  assistantText: "雾气涌入。",
+});
+assert.deepEqual(
+  "payload" in replayWireEvent ? replayWireEvent.payload : undefined,
+  {
+    turnId: "turn_1",
+    turnNumber: 1,
+    stateRevision: 1,
+    idempotentReplay: true,
+    assistantText: "雾气涌入。",
+  },
+  "idempotent committed wire event must expose canonical output",
 );
 
 const parsedEvents = await collect(

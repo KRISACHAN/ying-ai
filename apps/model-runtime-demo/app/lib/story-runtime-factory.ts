@@ -24,7 +24,6 @@ import type { Pool } from "pg";
 import { getDebugPool } from "./debug-db";
 import { loadDefaultDebugModelConfig, resolveDebugModelConfig } from "./model-config";
 import { createConfiguredModel, describeModelFactoryResult } from "./model-factory";
-
 const seedDefinitions = [fogHarborMystery, minimalWuxiaContract] as const;
 
 let storyRuntimePromise: Promise<StoryRuntimeHost> | undefined;

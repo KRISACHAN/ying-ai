@@ -23,6 +23,7 @@ export interface StoryWorkflowResult {
   committed: true;
   summaryStatus: "updated" | "unchanged" | "failed";
   stateChanged: boolean;
+  idempotentReplay: boolean;
   stateSnapshotStatus: "turn_snapshot" | "current_latest";
   events: StoryWorkflowEvent[];
   /** @deprecated Stage 01 compatibility. Use assistantText. */

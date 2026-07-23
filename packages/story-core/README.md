@@ -36,7 +36,7 @@ guardInput
 
 `DefaultStoryWorkflow` 只会为 `InMemoryStoryStateProvider` 自动创建 in-memory Turn / Message / Committer。Host 注入持久化 state provider 时，必须同时注入 `turnRepository`、`messageProvider` 与 `committer`，避免 State 与 Turn/Message 分别落到不同存储。
 
-重复 `clientTurnId` 命中已 committed turn 时不会再次推进 revision，也不会再次调用 Planner / Renderer。V1.3 Stage 02 不持久化 turn 级 state snapshot，因此 replay 结果的 `previousState` / `nextState` 是当前最新 state，并通过 `stateSnapshotStatus: "current_latest"` 标记；正常新提交为 `stateSnapshotStatus: "turn_snapshot"`。
+重复 `clientTurnId` 命中已 committed turn 时不会再次推进 revision，也不会再次调用 Lore / Planner / Validator / Renderer、Summary 或 Committer。`StoryWorkflowResult` 与 `story:committed` 显式返回 `idempotentReplay`；重放事件同时携带 canonical assistant text，供宿主稳定恢复原回复。V1.3 不持久化 turn 级 state snapshot，因此 replay 结果的 `previousState` / `nextState` 是当前最新 state，并通过 `stateSnapshotStatus: "current_latest"` 标记；正常新提交为 `stateSnapshotStatus: "turn_snapshot"`。
 
 ### 模型 Planner / Renderer
 
@@ -116,4 +116,4 @@ pnpm --filter @ying-companion/story-core verify:story-contract
 pnpm --filter @ying-companion/story-core verify:story-workflow
 ```
 
-`verify:story-workflow` 完全离线，覆盖事件顺序、text delta、clientTurnId 幂等、失败不污染状态、Summary 失败不回滚、secret lore 可见性与 revision 语义。
+`verify:story-workflow` 完全离线，覆盖事件顺序、text delta、clientTurnId canonical 重放及模型零调用、失败不污染状态、Summary 失败不回滚、secret lore 可见性与 revision 语义。

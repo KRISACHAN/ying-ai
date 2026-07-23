@@ -109,7 +109,7 @@ CI 仍建议显式执行上面的 migration，确保 schema 版本可审计。
 打开 Next.js 输出的本地地址：
 
 - `/`：会话历史列表。选择已有伴侣创建新会话，或进入伴侣创建页。
-- `/stories`：Story Workbench 入口。显示种子故事列表，提供 Story Definition JSON 校验预览入口。
+- `/stories`：Story Workbench 入口。显示当前进程 Registry 中的故事，并可校验和注册 Story Definition JSON。
 - `/stories/[storyId]/sessions`：Story Session 列表与新建存档入口。Session 创建时冻结 `definitionSnapshot`，后续恢复不读取更新后的种子定义。
 - `/stories/[storyId]/sessions/[sessionId]`：Story Runtime。可发送自由文本行动，观察流式叙事、Core State、按 Attribute Schema 渲染的动态 attrs、Narrative Summary、Lore / Plan / State / Timeline Debug 信息。
 - `/companions/new`、`/companions/[id]/edit`：配置 Persona，包含用户显示名、建议称呼、兴趣、外貌与补充指令；服务端会在每轮聊天时将最新配置注入 `DefaultPersonaProvider`。
@@ -201,6 +201,10 @@ JSON-safe 数据；浏览器端 runtime guard 会拒绝缺少 terminal event 或
 `GET /api/story-sessions/[id]` 恢复最新 `messages / latestState / summary / definitionVersion`；失败回合
 也会刷新持久化 state，但保留 `failed` / `validation_failed` 状态和本轮输入，不伪装成成功。
 
+重复提交同一 `clientTurnId` 会返回已提交回合的 canonical assistant text、turnId 和 revision，
+不会再次运行 Lore / Planner / Validator / Renderer、写 Summary 或新增消息。Wire 与 UI metadata
+均显式携带 `idempotentReplay`，页面以“已提交回合重放”标识该成功终态。
+
 当前 Story Wire 是 Demo Debug 协议，`story:lore-recalled` 会携带 `planner_only` Lore 全文，以便开发者
 解释召回与可见性决策。它不是产品端公开协议；未来 `apps/web` 接入 Story Mode 时必须建立单独映射，
 不得向普通用户传递 `planner_only.content`。
@@ -216,6 +220,15 @@ Planner 同时接收原始玩家输入、冻结 Story Definition 的公开投影
 对白。普通叙述或对话允许 `stateChanges=[]`，但仍必须生成自然的戏内反馈，不能改写成预设调查行为。
 离线 Fake Model / Planner / Renderer 只用于契约验证脚本，不进入 Story Workbench 生产路径。
 
+Debug 面板区分 `live` 与 `persisted` 数据源。发送期间以 Wire Events 展示 Effective Context、Recent
+Messages、Lore、Plan、Accepted / Rejected Changes 与完整 Timeline；首次加载或刷新后，则从已提交
+Turn、Messages、Summary、State 和 Definition Snapshot 恢复数据库可证明的 committed lifecycle，
+不会伪造历史 live event 的精确时间。
+
+JSON 导入先执行 Definition 校验，成功后注册到当前 Demo 进程的 Story Registry。相同内容重复导入
+幂等，相同 id 的冲突内容返回 409 且不会覆盖。Registry 重启后清空；已经创建的 Session 仍保留完整
+`definitionSnapshot` 并可恢复，不会被后续导入或种子升级改写。
+
 自动化契约验证：
 
 ```bash
@@ -226,19 +239,21 @@ pnpm --filter @ying-companion/story-postgres verify:story-recovery
 pnpm --filter @ying-companion/model-runtime-demo verify:story-stream-contract
 pnpm --filter @ying-companion/model-runtime-demo verify:story-ui-adapter
 pnpm --filter @ying-companion/model-runtime-demo verify:story-workbench-planner
+pnpm --filter @ying-companion/model-runtime-demo verify:story-workbench-data
 ```
 
 最小手工验收：
 
 ```txt
-A. /stories 显示雾港疑云与青崖试剑；JSON 导入校验入口可返回 preview / errors
+A. /stories 显示雾港疑云与青崖试剑；合法 JSON 注册后立即出现在当前进程故事列表，非法或冲突定义不进入 Registry
 B. 新建雾港 Session → Runtime 显示 openingText、当前场景与初始 attrs
 C. 连续发送自由行动或对白 → 回复承接实际输入与上一轮内容，文本增量显示，Debug 中可见 Lore / Plan / Timeline / model / committed revision
 D. 明确调查、交谈或移动 → 仅有 Definition 与上下文支持的物品、事件、场景或 attrs 通过 StateChange 推进
 E. 新建青崖试剑 Session → 侧栏显示 combatPower / sectStanding，不显示雾港字段
-F. 刷新 Runtime 页 → messages / state / revision / definitionVersion 从 Postgres 恢复
+F. 刷新 Runtime 页 → messages / state / revision / definitionVersion 及 persisted Debug 的 Plan / Lore / changes 从 Postgres 恢复
 G. 自动化 validator-failure 契约 → UI Adapter 显示 validation failed，世界状态不被污染
 H. 无有效模型配置 → 发送时显示明确错误；故事列表与已有存档仍可浏览
+I. 使用相同 clientTurnId 重放已提交请求 → 显示“已提交回合重放”，正文、turnId 与 revision 保持 canonical，数据库不新增消息
 ```
 
 ## Web Search（V1.2）

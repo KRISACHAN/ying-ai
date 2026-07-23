@@ -15,6 +15,7 @@ export interface StoryTurnMetadata {
   turnStatus: StoryTurnStatus;
   stateRevision?: number;
   turnId?: string;
+  idempotentReplay?: boolean;
   error?: {
     code: string;
     message: string;
@@ -31,6 +32,7 @@ export class StoryStreamUIAdapter {
   private turnStatus: StoryTurnStatus = "submitted";
   private stateRevision: number | undefined;
   private turnId: string | undefined;
+  private idempotentReplay = false;
 
   public consume(event: StoryWorkflowStreamWireEvent): UIMessageChunk[] {
     this.chunks.length = 0;
@@ -46,6 +48,13 @@ export class StoryStreamUIAdapter {
       case "story:committed":
         this.turnId = readString(event.payload.turnId);
         this.stateRevision = readNumber(event.payload.stateRevision);
+        this.idempotentReplay = event.payload.idempotentReplay === true;
+        if (this.idempotentReplay) {
+          const assistantText = readString(event.payload.assistantText);
+          if (assistantText !== undefined && this.aggregatedText === "") {
+            this.handleTextDelta(assistantText);
+          }
+        }
         this.updateTurnStatus("committed");
         break;
       case "story:validation-failed":
@@ -96,6 +105,7 @@ export class StoryStreamUIAdapter {
 
     this.stateRevision = event.output.stateRevision ?? this.stateRevision;
     this.turnId = event.output.turnId ?? this.turnId;
+    this.idempotentReplay = event.output.idempotentReplay ?? this.idempotentReplay;
     this.turnStatus = "success";
     this.push({
       type: "finish",
@@ -150,6 +160,7 @@ export class StoryStreamUIAdapter {
       ...(this.workflowId ? { workflowId: this.workflowId } : {}),
       ...(this.stateRevision !== undefined ? { stateRevision: this.stateRevision } : {}),
       ...(this.turnId ? { turnId: this.turnId } : {}),
+      ...(this.idempotentReplay ? { idempotentReplay: true } : {}),
       turnStatus: this.turnStatus,
       ...extra,
     };

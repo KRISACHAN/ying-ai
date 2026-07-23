@@ -58,6 +58,9 @@ lock current state revision
 
 每个成功 committed turn 都推进 `StoryState.revision + 1`，即使没有业务状态变化。业务变化用 `stateChanged` 记录。
 
+数据库层只负责返回 canonical committed turn；是否为重放的可观测标记与 canonical assistant text
+由 Story Workflow/Core Event 暴露给宿主。该补充不改变唯一约束、事务边界或消息数量语义。
+
 ## 验证
 
 ```bash

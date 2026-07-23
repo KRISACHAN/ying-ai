@@ -121,6 +121,15 @@ async function testClientTurnIdIdempotency(): Promise<void> {
   });
   assert(planned === 1, "idempotent retry must not call planner again");
   assert(second.turnId === first.turnId, "idempotent retry should return committed turn");
+  assert(second.assistantText === first.assistantText, "idempotent retry should return text");
+  assert(second.idempotentReplay, "idempotent retry should be observable in the result");
+  const committedEvent = second.events.find((event) => event.type === "story:committed");
+  assert(
+    committedEvent?.type === "story:committed" &&
+      committedEvent.idempotentReplay &&
+      committedEvent.assistantText === first.assistantText,
+    "idempotent retry should expose the canonical turn in the committed event",
+  );
   assert(
     (await requireState(runtime)).revision === 1,
     "idempotent retry must not advance revision",

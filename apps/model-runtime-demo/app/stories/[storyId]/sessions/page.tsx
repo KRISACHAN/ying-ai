@@ -60,7 +60,7 @@ export default async function StorySessionsPage({
                   <span>
                     revision {session.stateRevision} · definition {session.definitionVersion}
                   </span>
-                  <h2>{sceneTitle(story, session.currentSceneId)}</h2>
+                  <h2>{session.currentSceneTitle}</h2>
                   <p>{session.id}</p>
                   <time>{formatDate(session.updatedAt)}</time>
                 </Link>
@@ -80,10 +80,6 @@ function PreviewBlock({ title, items }: { title: string; items: string[] }) {
       <span>{items.join(" / ") || "无"}</span>
     </div>
   );
-}
-
-function sceneTitle(story: { scenes: Array<{ id: string; title: string }> }, sceneId: string) {
-  return story.scenes.find((scene) => scene.id === sceneId)?.title ?? sceneId;
 }
 
 function formatDate(value: string): string {

@@ -15,6 +15,7 @@ export interface SerializableStoryWorkflowOutput {
   turnId?: string;
   stateRevision?: number;
   summaryStatus?: "updated" | "unchanged" | "failed";
+  idempotentReplay?: boolean;
 }
 
 export type StoryPayloadWireEventType =
@@ -185,6 +186,7 @@ export function toSerializableStoryOutput(input: {
   turnId?: string;
   state?: StoryState;
   summaryStatus?: "updated" | "unchanged" | "failed";
+  idempotentReplay?: boolean;
 }): SerializableStoryWorkflowOutput {
   return {
     sessionId: input.sessionId,
@@ -193,6 +195,7 @@ export function toSerializableStoryOutput(input: {
     ...(input.turnId ? { turnId: input.turnId } : {}),
     ...(input.state ? { stateRevision: input.state.revision } : {}),
     ...(input.summaryStatus ? { summaryStatus: input.summaryStatus } : {}),
+    ...(input.idempotentReplay !== undefined ? { idempotentReplay: input.idempotentReplay } : {}),
   };
 }
 

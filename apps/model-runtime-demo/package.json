@@ -13,6 +13,7 @@
     "verify:story-stream-contract": "pnpm --filter @ying-companion/story-core --filter @ying-companion/story-postgres build && node --experimental-strip-types --experimental-specifier-resolution=node scripts/verify-story-stream-contract.ts",
     "verify:story-ui-adapter": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/verify-story-ui-adapter.ts",
     "verify:story-workbench-planner": "pnpm --filter @ying-companion/story-core --filter @ying-companion/story-postgres build && node --experimental-strip-types --experimental-specifier-resolution=node scripts/verify-story-workbench-planner.ts",
+    "verify:story-workbench-data": "pnpm --filter @ying-companion/story-core --filter @ying-companion/story-postgres build && node --experimental-strip-types --experimental-specifier-resolution=node scripts/verify-story-workbench-data.ts",
     "verify:web-search-workflow": "pnpm --filter @ying-companion/ai-core --filter @ying-companion/memory-postgres --filter @ying-companion/tool-web-search --filter @ying-companion/tool-web-search-tavily build && node scripts/verify-web-search-workflow.mjs",
     "clean": "rm -rf .next .turbo"
   },

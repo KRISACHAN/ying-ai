@@ -21,7 +21,12 @@ const successEvents: StoryWorkflowStreamWireEvent[] = [
     type: "story:committed",
     ...base,
     sequence: 4,
-    payload: { turnId: "turn_1", turnNumber: 1, stateRevision: 1 },
+    payload: {
+      turnId: "turn_1",
+      turnNumber: 1,
+      stateRevision: 1,
+      idempotentReplay: false,
+    },
   },
   {
     type: "story:finish",
@@ -49,6 +54,50 @@ assert.equal(
       (chunk.messageMetadata as { turnStatus?: unknown } | undefined)?.turnStatus === "success",
   ),
   true,
+);
+
+const replayChunks = collectStoryUIChunksFromWireEvents([
+  { type: "story:start", ...base, sequence: 1 },
+  {
+    type: "story:committed",
+    ...base,
+    sequence: 2,
+    payload: {
+      turnId: "turn_1",
+      turnNumber: 1,
+      stateRevision: 1,
+      idempotentReplay: true,
+      assistantText: "白鲸酒馆",
+    },
+  },
+  {
+    type: "story:finish",
+    ...base,
+    sequence: 3,
+    output: {
+      sessionId: base.sessionId,
+      clientTurnId: base.clientTurnId,
+      text: "白鲸酒馆",
+      turnId: "turn_1",
+      stateRevision: 1,
+      idempotentReplay: true,
+    },
+  },
+]);
+assert.equal(
+  replayChunks.some(
+    (chunk) =>
+      chunk.type === "finish" &&
+      (chunk.messageMetadata as { idempotentReplay?: unknown } | undefined)?.idempotentReplay ===
+        true,
+  ),
+  true,
+  "idempotent replay should be observable in final metadata",
+);
+assert.deepEqual(
+  replayChunks.filter((chunk) => chunk.type === "text-delta").map((chunk) => chunk.delta),
+  ["白鲸酒馆"],
+  "idempotent replay should restore the canonical assistant text",
 );
 
 const validationChunks = collectStoryUIChunksFromWireEvents([
