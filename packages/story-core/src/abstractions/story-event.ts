@@ -1,5 +1,6 @@
 import type { RecalledLoreEntry } from "./lore-provider";
 import type { StoryTurnPlan } from "./story-planner";
+import type { StoryStateChange } from "./story-state-change";
 
 export type StoryWorkflowEvent =
   | StoryStartEvent
@@ -80,6 +81,7 @@ export interface StoryStatePreparedEvent extends StoryEventBase {
   previousRevision: number;
   nextRevision: number;
   stateChanged: boolean;
+  appliedChanges: StoryStateChange[];
 }
 
 export interface StoryRenderStartedEvent extends StoryEventBase {

@@ -62,6 +62,16 @@ async function testEventOrderAndDelta(): Promise<void> {
   const types = events.map((event) => event.type);
   assert(types.includes("story:context-ready"), "context-ready event should be emitted");
   assert(types.includes("story:committed"), "committed event should be emitted");
+  const preparedEvent = events.find((event) => event.type === "story:state-prepared");
+  if (!preparedEvent) {
+    throw new Error("state-prepared event should be emitted");
+  }
+  assert(
+    preparedEvent.appliedChanges.length === 1 &&
+      preparedEvent.appliedChanges[0]?.type === "add_clue" &&
+      preparedEvent.appliedChanges[0].clueId === "menu-mark",
+    "state-prepared must expose validator-approved changes",
+  );
   assert(
     events
       .filter((event) => event.type === "story:text-delta")

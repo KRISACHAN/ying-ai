@@ -116,7 +116,19 @@ export function StoryRuntimeWorkspace({
         }
       }
 
-      await refreshDetail();
+      const turnStatus = adapter.getTurnStatus();
+      const turnFailed = turnStatus === "failed" || turnStatus === "validation_failed";
+      if (turnStatus !== "success" && !turnFailed) {
+        throw new StoryStreamProtocolError(
+          `Story stream ended with non-terminal turn status: ${turnStatus}`,
+        );
+      }
+      if (turnFailed) {
+        setMessages((current) =>
+          current.filter((item) => item.id !== assistantId || item.content !== ""),
+        );
+      }
+      await refreshDetail({ preserveTurnOutcome: turnFailed });
       router.refresh();
     } catch (caught) {
       const messageText =
@@ -128,7 +140,7 @@ export function StoryRuntimeWorkspace({
     }
   }
 
-  async function refreshDetail() {
+  async function refreshDetail(options: { preserveTurnOutcome?: boolean } = {}) {
     const response = await fetch(`/api/story-sessions/${initialDetail.session.id}`, {
       cache: "no-store",
     });
@@ -143,10 +155,14 @@ export function StoryRuntimeWorkspace({
       return;
     }
     setState(body.latestState);
-    setMessages(toRuntimeMessages(initialDetail.definition, body.recentMessages));
+    if (!options.preserveTurnOutcome) {
+      setMessages(toRuntimeMessages(initialDetail.definition, body.recentMessages));
+    }
     setTurns(body.turns ?? []);
     setSummary(body.summary ?? null);
-    setStatus("success");
+    if (!options.preserveTurnOutcome) {
+      setStatus("success");
+    }
   }
 
   return (
@@ -315,8 +331,15 @@ function StoryDebugPanel({
         <pre className="output">
           {JSON.stringify(
             {
-              accepted: latestPrepared,
-              rejected: latestRejected,
+              accepted: latestPrepared?.appliedChanges ?? [],
+              rejected: latestRejected?.errors ?? [],
+              preparedState: latestPrepared
+                ? {
+                    previousRevision: latestPrepared.previousRevision,
+                    nextRevision: latestPrepared.nextRevision,
+                    stateChanged: latestPrepared.stateChanged,
+                  }
+                : null,
             },
             null,
             2,

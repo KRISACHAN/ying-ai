@@ -331,6 +331,7 @@ export class DefaultStoryWorkflow implements StoryWorkflow {
         previousRevision: currentState.revision,
         nextRevision: currentState.revision + 1,
         stateChanged,
+        appliedChanges: validation.changes,
       });
 
       const rendererLore = getRendererLore({

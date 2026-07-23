@@ -1,4 +1,5 @@
 import type { ChatModel } from "@ying-companion/ai-core";
+import type { StoryDefinition } from "../abstractions/story-definition";
 import type { StoryPlanner, StoryPlannerInput, StoryTurnPlan } from "../abstractions/story-planner";
 import { storyTurnPlanSchema } from "./story-turn-plan-schema";
 
@@ -30,7 +31,7 @@ export class ModelStoryPlanner implements StoryPlanner {
           role: "user",
           content: JSON.stringify({
             userInput: input.userInput,
-            story: input.definition,
+            story: createPlannerStoryContext(input.definition),
             currentState: input.state,
             narrativeSummary: input.summary?.text ?? null,
             recentMessages: (input.recentMessages ?? []).map((message) => ({
@@ -83,4 +84,38 @@ export class ModelStoryPlanner implements StoryPlanner {
       },
     } as StoryTurnPlan;
   }
+}
+
+function createPlannerStoryContext(definition: StoryDefinition) {
+  return {
+    id: definition.id,
+    version: definition.version,
+    title: definition.title,
+    description: definition.description,
+    premise: definition.premise,
+    genre: definition.genre,
+    tone: definition.tone,
+    ...(definition.writingStyle ? { writingStyle: definition.writingStyle } : {}),
+    playerRole: definition.playerRole,
+    characters: definition.characters.map((character) => ({
+      id: character.id,
+      name: character.name,
+      description: character.description,
+      personality: character.personality,
+      speakingStyle: character.speakingStyle,
+      publicBackground: character.publicBackground,
+      goals: character.goals,
+      ...(character.fears ? { fears: character.fears } : {}),
+      narrativeRole: character.narrativeRole,
+    })),
+    scenes: definition.scenes,
+    items: definition.items,
+    clues: definition.clues,
+    events: definition.events,
+    openingSceneId: definition.openingSceneId,
+    attributes: definition.attributes,
+    relationshipsEnabled: definition.relationshipsEnabled ?? false,
+    ...(definition.relationshipBounds ? { relationshipBounds: definition.relationshipBounds } : {}),
+    narrativeRules: definition.narrativeRules,
+  };
 }

@@ -132,6 +132,45 @@ assert.deepEqual(plannerPayload.recentMessages, [
   { role: "user", content: recentMessages[0]?.content },
   { role: "assistant", content: recentMessages[1]?.content },
 ]);
+const plannerStory = plannerPayload.story as Record<string, unknown>;
+assert.equal("lore" in plannerStory, false, "unrecalled lore must not enter planner story context");
+const plannerCharacters = plannerStory.characters as Array<Record<string, unknown>>;
+assert.equal(
+  plannerCharacters.some((character) => "privateBackground" in character || "secrets" in character),
+  false,
+  "private character fields must not enter planner story context",
+);
+assert.equal(
+  JSON.stringify(plannerStory).includes("旧港口三号码头后有一条绕过巡逻的窄路"),
+  false,
+  "unrecalled secret content must not be serialized through the definition",
+);
+
+const hiddenLore = fogHarborMystery.lore.find((entry) => entry.id === "hidden-smuggler-route");
+assert.ok(hiddenLore, "fog harbor seed must include hidden lore");
+await planner.plan({
+  sessionId,
+  userInput,
+  definition: fogHarborMystery,
+  state,
+  recalledLore: [
+    {
+      entry: hiddenLore,
+      visibility: "planner_only",
+      activationReason: ["always"],
+      priority: hiddenLore.priority ?? 0,
+      estimatedTokens: 20,
+    },
+  ],
+  summary,
+  recentMessages,
+});
+const recalledPlannerPayload = readUserPayload(model.generateInputs[1]);
+assert.equal(
+  JSON.stringify(recalledPlannerPayload.recalledLore).includes(hiddenLore.content),
+  true,
+  "planner_only lore must still enter the planner through recalledLore",
+);
 
 const renderer = new ModelStoryRenderer(model);
 let rendered = "";

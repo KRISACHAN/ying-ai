@@ -6,7 +6,10 @@ import {
   StoryStreamProtocolError,
   validateStoryWorkflowStreamWireEvent,
 } from "../app/lib/story-stream-transport.ts";
-import type { StoryWorkflowStreamWireEvent } from "../app/lib/story-stream-wire.ts";
+import {
+  toStoryWorkflowStreamWireEvent,
+  type StoryWorkflowStreamWireEvent,
+} from "../app/lib/story-stream-wire.ts";
 
 const base = {
   workflowId: "story_wf_contract",
@@ -54,6 +57,24 @@ for (const event of events) {
   assert.deepEqual(validateStoryWorkflowStreamWireEvent(parsed), event);
 }
 
+const preparedWireEvent = toStoryWorkflowStreamWireEvent({
+  type: "story:state-prepared",
+  runId: base.workflowId,
+  sessionId: base.sessionId,
+  clientTurnId: base.clientTurnId,
+  sequence: 7,
+  occurredAt: new Date(base.occurredAt),
+  previousRevision: 2,
+  nextRevision: 3,
+  stateChanged: true,
+  appliedChanges: [{ type: "add_clue", clueId: "menu-mark" }],
+});
+assert.deepEqual(
+  "payload" in preparedWireEvent ? preparedWireEvent.payload.appliedChanges : undefined,
+  [{ type: "add_clue", clueId: "menu-mark" }],
+  "state-prepared wire payload must include validator-approved changes",
+);
+
 const parsedEvents = await collect(
   parseStoryNdjsonWireEvents(
     streamFromChunks([
@@ -97,6 +118,16 @@ await assert.rejects(
 await assert.rejects(
   () => collect(parseStoryNdjsonWireEvents(streamFromChunks([new TextEncoder().encode("{")]))),
   StoryStreamProtocolError,
+);
+
+await assert.rejects(
+  () =>
+    collect(
+      parseStoryNdjsonWireEvents(
+        streamFromChunks([encodeStoryNdjson({ type: "story:start", ...base, sequence: 1 })]),
+      ),
+    ),
+  /before a terminal story event/,
 );
 
 assert.throws(

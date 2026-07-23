@@ -40,9 +40,11 @@ guardInput
 
 ### 模型 Planner / Renderer
 
-`ModelStoryPlanner` 使用模型结构化输出生成 `StoryTurnPlan`。输入包含原始玩家输入、Session 冻结的
-Story Definition、当前 State、Narrative Summary、近期消息和召回 Lore；返回前会再次用
-`storyTurnPlanSchema` 校验，并强制把 `interpretedAction.raw` 恢复为真实玩家输入。
+`ModelStoryPlanner` 使用模型结构化输出生成 `StoryTurnPlan`。输入包含原始玩家输入、Session 冻结
+Definition 的公开投影、当前 State、Narrative Summary、近期消息和召回 Lore。公开投影不会包含完整
+`lore`、角色 `privateBackground` 或 `secrets`；Lore 只能经 `recalledLore` 的 activation、budget 与
+visibility 结果进入 Planner。返回前会再次用 `storyTurnPlanSchema` 校验，并强制把
+`interpretedAction.raw` 恢复为真实玩家输入。
 
 `ModelStoryRenderer` 只消费通过校验的 Plan、currentState / nextState 和可见上下文。模型声明支持
 streaming 时走 `ChatModel.stream()`；否则回退到 `generate()` 并输出单个文本块。Host 负责创建和
@@ -73,7 +75,7 @@ story:finish
 story:error
 ```
 
-事件保留 Core 语义：`Date`、富对象和错误对象允许存在。Stage 03 的 Demo Wire 层再做网络安全映射。`story:state-prepared` 只代表内存候选状态，只有 `story:committed` 后世界才算推进。
+事件保留 Core 语义：`Date`、富对象和错误对象允许存在。Stage 03 的 Demo Wire 层再做网络安全映射。`story:state-prepared` 的 `appliedChanges` 是 validator 接受的内存候选变更；只有 `story:committed` 后世界才算推进。
 
 ## Seeds
 

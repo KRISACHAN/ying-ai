@@ -69,6 +69,10 @@ export class StoryStreamUIAdapter {
     return [...this.chunks];
   }
 
+  public getTurnStatus(): StoryTurnStatus {
+    return this.turnStatus;
+  }
+
   private handleTextDelta(text: string): void {
     if (!this.textStarted) {
       this.push({ type: "text-start", id: this.textPartId });

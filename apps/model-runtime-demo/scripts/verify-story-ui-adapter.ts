@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { collectStoryUIChunksFromWireEvents } from "../app/lib/story-stream-ui-adapter.ts";
+import {
+  collectStoryUIChunksFromWireEvents,
+  StoryStreamUIAdapter,
+} from "../app/lib/story-stream-ui-adapter.ts";
 import type { StoryWorkflowStreamWireEvent } from "../app/lib/story-stream-wire.ts";
 
 const base = {
@@ -71,6 +74,30 @@ assert.equal(
       (chunk.data as { status?: unknown }).status === "validation_failed",
   ),
   true,
+);
+
+const validationAdapter = new StoryStreamUIAdapter();
+for (const event of [
+  { type: "story:start", ...base, sequence: 1 },
+  {
+    type: "story:validation-failed",
+    ...base,
+    sequence: 2,
+    payload: { errors: [{ code: "change.attribute.undeclared", message: "bad attr" }] },
+  },
+  {
+    type: "story:error",
+    ...base,
+    sequence: 3,
+    error: { code: "STORY_STATE_CHANGE_REJECTED", message: "bad attr" },
+  },
+] satisfies StoryWorkflowStreamWireEvent[]) {
+  validationAdapter.consume(event);
+}
+assert.equal(
+  validationAdapter.getTurnStatus(),
+  "validation_failed",
+  "refresh callers must be able to preserve a validation failure terminal state",
 );
 
 const failedChunks = collectStoryUIChunksFromWireEvents([

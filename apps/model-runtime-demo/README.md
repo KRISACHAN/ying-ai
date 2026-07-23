@@ -196,19 +196,25 @@ DefaultStoryWorkflow.stream()
 ```
 
 Wire 层负责把 `Date` 转成 ISO string，并把 error / raw / unknown payload 显式转成
-JSON-safe 数据；浏览器端 runtime guard 会拒绝 terminal event 之后的额外事件。`story:finish`
-只在 workflow 已发出 finish 后发送，UI 完成后会重新读取 `GET /api/story-sessions/[id]`
-恢复最新 `messages / latestState / summary / definitionVersion`。
+JSON-safe 数据；浏览器端 runtime guard 会拒绝缺少 terminal event 或 terminal event 之后仍有业务事件的流。
+`story:finish` 只在 workflow 已发出 finish 后发送。成功回合会重新读取
+`GET /api/story-sessions/[id]` 恢复最新 `messages / latestState / summary / definitionVersion`；失败回合
+也会刷新持久化 state，但保留 `failed` / `validation_failed` 状态和本轮输入，不伪装成成功。
+
+当前 Story Wire 是 Demo Debug 协议，`story:lore-recalled` 会携带 `planner_only` Lore 全文，以便开发者
+解释召回与可见性决策。它不是产品端公开协议；未来 `apps/web` 接入 Story Mode 时必须建立单独映射，
+不得向普通用户传递 `planner_only.content`。
 
 状态侧栏分为固定 Core State 与 Dynamic Attributes。attrs 渲染完全来自
 `StoryDefinition.attributes[]`，并通过 `createStoryAttributeStorageKey()` 读取：
 `story`、`player`、`character`、`scene` scope 使用同一套 renderer；`showInSidebar=false`
 的字段不进默认侧栏，但 Debug 中可查看完整 attrs。`relationships` 仅在 Definition 启用时展示。
 
-Planner 同时接收原始玩家输入、冻结的 Story Definition、当前 State、Narrative Summary、近期消息与
-本轮召回 Lore；Renderer 接收已校验 Plan 和 nextState，并延续近期动作与对白。普通叙述或对话允许
-`stateChanges=[]`，但仍必须生成自然的戏内反馈，不能改写成预设调查行为。离线 Fake Model / Planner /
-Renderer 只用于契约验证脚本，不进入 Story Workbench 生产路径。
+Planner 同时接收原始玩家输入、冻结 Story Definition 的公开投影、当前 State、Narrative Summary、
+近期消息与本轮召回 Lore。完整 `lore`、角色私密背景和秘密不会通过 Definition 投影进入模型，只能经
+`recalledLore` 门控进入 Planner；Renderer 接收已校验 Plan、nextState 和可见 Lore，并延续近期动作与
+对白。普通叙述或对话允许 `stateChanges=[]`，但仍必须生成自然的戏内反馈，不能改写成预设调查行为。
+离线 Fake Model / Planner / Renderer 只用于契约验证脚本，不进入 Story Workbench 生产路径。
 
 自动化契约验证：
 

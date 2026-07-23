@@ -72,6 +72,9 @@ export async function* parseStoryNdjsonWireEvents(
     if (pendingBuffer.trim() !== "") {
       throw new StoryStreamProtocolError("NDJSON stream ended with an incomplete JSON line.");
     }
+    if (!terminalReceived) {
+      throw new StoryStreamProtocolError("NDJSON stream ended before a terminal story event.");
+    }
   } finally {
     reader.releaseLock();
   }
