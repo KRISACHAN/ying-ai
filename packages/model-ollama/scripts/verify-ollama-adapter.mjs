@@ -5,7 +5,7 @@ import {
   ModelRuntimeError,
   createCompanionCore,
   EmptyToolRegistry,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 import { createOllamaChatModel, OllamaChatModel } from "../dist/index.js";
 import { toOllamaMessages } from "../dist/ollama-message-mapper.js";
 import { toModelToolCalls, toOllamaTools } from "../dist/ollama-tool-mapper.js";

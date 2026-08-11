@@ -1,4 +1,4 @@
-import { WebSearchProviderError } from "@ying-companion/tool-web-search";
+import { WebSearchProviderError } from "@ying-ai/tool-web-search";
 
 export type TavilyErrorCode =
   | "authentication_failed"

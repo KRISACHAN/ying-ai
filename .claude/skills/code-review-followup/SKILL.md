@@ -1,6 +1,6 @@
 ---
 name: code-review-followup
-description: Follow up on an existing code review report: verify each finding against current code and project standards; classify as accepted/fixed, invalid, deferred, or unaddressed; apply safe fixes when requested; rerun required verification; write Chinese `{model}-followup.md` in the same `.code-reviews/{n}-{slug}/` directory, where `{model}` is the identifier of the model producing the follow-up. Use when the user references Cursor/Codex/Claude review results, asks whether review findings are valid, requests fixes for review findings, or asks for a follow-up response document.
+description: Follow up on an existing code review report: verify each finding against current code and project standards; classify as accepted/fixed, invalid, deferred, or unaddressed; apply safe fixes when requested; rerun required verification; write Chinese `{model}-followup.md` in the same `.code-reviews/{app-name}/{n}-{slug}/` directory, where `{model}` is the identifier of the model producing the follow-up. Use when the user references Cursor/Codex/Claude review results, asks whether review findings are valid, requests fixes for review findings, or asks for a follow-up response document.
 ---
 
 # Code Review Followup
@@ -9,7 +9,7 @@ Handles follow-up verification and response for existing code review reports. Do
 
 ## Workflow
 
-1. Read the review report the user referenced, plus any existing follow-up examples in the same `.code-reviews/{n}-{slug}/` directory.
+1. Read the review report the user referenced, plus any existing follow-up examples in the same `.code-reviews/{app-name}/{n}-{slug}/` directory.
 2. Read relevant current code, docs, and diffs; verify each review finding. Prefer `rg`, `git diff`, and targeted file reads.
 3. Classify each actionable finding:
    - **Accepted and Fixed:** finding is valid and fixed in this pass, or already fixed in current code.
@@ -27,9 +27,10 @@ Prefer the same directory as the referenced review:
 
 ```txt
 .code-reviews/
-  {n}-{slug}/
-    cursor-review.md
-    {model}-followup.md
+  {app-name}/
+    {n}-{slug}/
+      cursor-review.md
+      {model}-followup.md
 ```
 
 `{model}` in `{model}-followup.md`:

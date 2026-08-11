@@ -1,4 +1,4 @@
-import type { WebSearchRetrievalMetadata } from "@ying-companion/tool-web-search";
+import type { WebSearchRetrievalMetadata } from "@ying-ai/tool-web-search";
 
 import type { ChatWorkflowStreamWireEvent } from "./chat-stream-wire";
 

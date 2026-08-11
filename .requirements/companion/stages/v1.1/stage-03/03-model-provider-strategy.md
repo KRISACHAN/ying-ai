@@ -474,17 +474,13 @@ export interface ModelProviderConfig {
   model: string;
 }
 
-export interface ModelAdapterStrategy<
-  TConfig extends ModelProviderConfig = ModelProviderConfig,
-> {
+export interface ModelAdapterStrategy<TConfig extends ModelProviderConfig = ModelProviderConfig> {
   readonly provider: TConfig["provider"];
   create(config: TConfig): ChatModel;
 }
 
 export interface ModelAdapterRegistry {
-  register<TConfig extends ModelProviderConfig>(
-    strategy: ModelAdapterStrategy<TConfig>,
-  ): void;
+  register<TConfig extends ModelProviderConfig>(strategy: ModelAdapterStrategy<TConfig>): void;
 
   create(config: ModelProviderConfig): ChatModel;
 }

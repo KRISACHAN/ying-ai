@@ -5,7 +5,7 @@ import type {
   StoryMessage,
   StoryNarrativeSummary,
   StoryState,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 
 export interface StorySessionListItem {
   id: string;

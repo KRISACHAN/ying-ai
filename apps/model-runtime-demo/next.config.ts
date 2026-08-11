@@ -1,12 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@ying-companion/ai-core"],
+  transpilePackages: ["@ying-ai/ai-core"],
   serverExternalPackages: [
-    "@ying-companion/story-postgres",
-    "@ying-companion/tool-web-search",
-    "@ying-companion/tool-web-search-tavily",
-    "@ying-companion/memory-postgres",
+    "@ying-ai/story-postgres",
+    "@ying-ai/tool-web-search",
+    "@ying-ai/tool-web-search-tavily",
+    "@ying-ai/memory-postgres",
   ],
 };
 

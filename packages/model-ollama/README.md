@@ -1,6 +1,8 @@
-# @ying-companion/model-ollama
+# @ying-ai/model-ollama
 
-Ollama `ChatModel` adapter for `@ying-companion/ai-core`. V1.1 ships chat only — **no** Ollama embedding provider.
+**English** | [简体中文](./README.zh-CN.md)
+
+Ollama `ChatModel` adapter for `@ying-ai/ai-core`. V1.1 ships chat only — **no** Ollama embedding provider.
 
 This package is a server-side adapter. It does not read environment variables, does not depend on the demo app, and does not implement embeddings, memory, workflow, HTTP routes, NDJSON, or browser-side Ollama access.
 
@@ -12,8 +14,8 @@ This package is a server-side adapter. It does not read environment variables, d
 ## Quick start
 
 ```ts
-import { createOllamaChatModel } from "@ying-companion/model-ollama";
-import { createCompanionCore } from "@ying-companion/ai-core";
+import { createOllamaChatModel } from "@ying-ai/model-ollama";
+import { createCompanionCore } from "@ying-ai/ai-core";
 
 const model = createOllamaChatModel({
   model: "qwen3:8b",
@@ -88,11 +90,11 @@ storage or embeddings; it only returns the structured object requested by Core.
 ## Verification
 
 ```bash
-pnpm --filter @ying-companion/model-ollama verify:adapter
+pnpm --filter @ying-ai/model-ollama verify:adapter
 ```
 
 ## Related
 
 - Core streaming: [`packages/ai-core/README.md`](../ai-core/README.md)
 - Demo Ollama switch: [`apps/model-runtime-demo/README.md`](../../apps/model-runtime-demo/README.md)
-- Stage spec: [`.requirements/stages/v1.1/stage-06/06-ollama-model-adapter.md`](../../.requirements/stages/v1.1/stage-06/06-ollama-model-adapter.md)
+- Stage spec: [`.requirements/companion/stages/v1.1/stage-06/06-ollama-model-adapter.md`](../../.requirements/companion/stages/v1.1/stage-06/06-ollama-model-adapter.md)

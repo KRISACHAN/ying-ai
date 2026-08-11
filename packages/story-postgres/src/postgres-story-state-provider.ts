@@ -1,4 +1,4 @@
-import type { StoryState, StoryStateProvider } from "@ying-companion/story-core";
+import type { StoryState, StoryStateProvider } from "@ying-ai/story-core";
 import type { StoryPostgresClient } from "./client";
 import { deserializeStoryDefinition } from "./serializers/story-definition-serializer";
 import { deserializeStoryState, serializeStoryState } from "./serializers/story-state-serializer";

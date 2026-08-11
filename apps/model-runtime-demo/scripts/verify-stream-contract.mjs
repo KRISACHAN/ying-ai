@@ -1,6 +1,6 @@
 /* global console, process, ReadableStream, TextDecoder, TextEncoder */
 
-import aiCore from "@ying-companion/ai-core";
+import aiCore from "@ying-ai/ai-core";
 
 const { createCompanionCore } = aiCore;
 

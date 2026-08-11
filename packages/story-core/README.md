@@ -1,18 +1,20 @@
-# @ying-companion/story-core
+# @ying-ai/story-core
 
-`@ying-companion/story-core` 是 V1.3 Story Mode 的独立故事域 SDK。它复用 `@ying-companion/ai-core` 的通用模型与 Safety 抽象，但不修改 Companion Chat 主链路，也不依赖数据库、环境变量或 Demo UI。
+**English** | [简体中文](./README.zh-CN.md)
 
-## 边界
+`@ying-ai/story-core` is the standalone story-domain SDK for V1.3 Story Mode. It reuses `@ying-ai/ai-core`’s shared model and Safety abstractions, but does not modify the Companion Chat main path and does not depend on a database, environment variables, or Demo UI.
 
-- Core 包不读取 `process.env`。
-- Story State 不写入 Companion Memory。
-- Planner 只输出结构化 `StoryTurnPlan`，Renderer 只渲染文本。
-- 状态只能通过 `StateTransitionValidator` 校验后的 `StoryStateChange` 原子提交。
-- 动态字段必须先在 `StoryDefinition.attributes` 中声明，再写入 `StoryState.attrs`。
+## Boundaries
+
+- The Core package does not read `process.env`.
+- Story State is never written into Companion Memory.
+- Planner only outputs a structured `StoryTurnPlan`; Renderer only renders text.
+- State may only be committed atomically via `StoryStateChange` values that pass `StateTransitionValidator`.
+- Dynamic fields must be declared in `StoryDefinition.attributes` before they can be written to `StoryState.attrs`.
 
 ## Workflow
 
-`DefaultStoryWorkflow.execute()` 与 `stream()` 共用同一套步骤：
+`DefaultStoryWorkflow.execute()` and `stream()` share the same steps:
 
 ```txt
 guardInput
@@ -32,28 +34,21 @@ guardInput
 → update Summary
 ```
 
-成功路径不再调用 `StoryStateProvider.saveState()`；状态、Turn、Messages 只能通过 `StoryTurnCommitter` 一次提交。所有 successful committed turn 都推进 `StoryState.revision + 1`，包括无 `stateChanges` 的戏内拒绝。是否真的改了世界业务状态用 `stateChanged` 区分，不用 revision 推断。
+The success path no longer calls `StoryStateProvider.saveState()`; State, Turn, and Messages can only be committed once via `StoryTurnCommitter`. Every successful committed turn advances `StoryState.revision + 1`, including in-scene refusals with no `stateChanges`. Whether world business state actually changed is distinguished by `stateChanged`, not inferred from revision.
 
-`DefaultStoryWorkflow` 只会为 `InMemoryStoryStateProvider` 自动创建 in-memory Turn / Message / Committer。Host 注入持久化 state provider 时，必须同时注入 `turnRepository`、`messageProvider` 与 `committer`，避免 State 与 Turn/Message 分别落到不同存储。
+`DefaultStoryWorkflow` auto-creates in-memory Turn / Message / Committer only for `InMemoryStoryStateProvider`. When the Host injects a persisted state provider, it must also inject `turnRepository`, `messageProvider`, and `committer`, so State and Turn/Message do not land in different stores.
 
-重复 `clientTurnId` 命中已 committed turn 时不会再次推进 revision，也不会再次调用 Lore / Planner / Validator / Renderer、Summary 或 Committer。`StoryWorkflowResult` 与 `story:committed` 显式返回 `idempotentReplay`；重放事件同时携带 canonical assistant text，供宿主稳定恢复原回复。V1.3 不持久化 turn 级 state snapshot，因此 replay 结果的 `previousState` / `nextState` 是当前最新 state，并通过 `stateSnapshotStatus: "current_latest"` 标记；正常新提交为 `stateSnapshotStatus: "turn_snapshot"`。
+A repeated `clientTurnId` that hits an already committed turn does not advance revision again and does not call Lore / Planner / Validator / Renderer, Summary, or Committer again. `StoryWorkflowResult` and `story:committed` explicitly return `idempotentReplay`; replay events also carry canonical assistant text so the host can stably restore the original reply. V1.3 does not persist turn-level state snapshots, so replay results’ `previousState` / `nextState` are the current latest state and are marked `stateSnapshotStatus: "current_latest"`; normal new commits use `stateSnapshotStatus: "turn_snapshot"`.
 
-### 模型 Planner / Renderer
+### Model Planner / Renderer
 
-`ModelStoryPlanner` 使用模型结构化输出生成 `StoryTurnPlan`。输入包含原始玩家输入、Session 冻结
-Definition 的公开投影、当前 State、Narrative Summary、近期消息和召回 Lore。公开投影不会包含完整
-`lore`、角色 `privateBackground` 或 `secrets`；Lore 只能经 `recalledLore` 的 activation、budget 与
-visibility 结果进入 Planner。返回前会再次用 `storyTurnPlanSchema` 校验，并强制把
-`interpretedAction.raw` 恢复为真实玩家输入。
+`ModelStoryPlanner` uses model structured output to produce a `StoryTurnPlan`. Inputs include raw player input, the Session’s frozen Definition public projection, current State, Narrative Summary, recent messages, and recalled Lore. The public projection never includes full `lore`, character `privateBackground`, or `secrets`; Lore can only enter Planner through `recalledLore` activation, budget, and visibility results. Before returning, the plan is validated again with `storyTurnPlanSchema`, and `interpretedAction.raw` is forced back to the real player input.
 
-`ModelStoryRenderer` 只消费通过校验的 Plan、currentState / nextState 和可见上下文。模型声明支持
-streaming 时走 `ChatModel.stream()`；否则回退到 `generate()` 并输出单个文本块。Host 负责创建和
-注入模型，Core 不读取环境变量。`FakeStoryPlanner` / `FakeStoryRenderer` 用于离线契约验证，不代表
-交互式宿主的默认叙事实现。
+`ModelStoryRenderer` only consumes a validated Plan, currentState / nextState, and visible context. When the model declares streaming support it uses `ChatModel.stream()`; otherwise it falls back to `generate()` and emits a single text chunk. The Host creates and injects the model; Core does not read env vars. `FakeStoryPlanner` / `FakeStoryRenderer` are for offline contract verification and are not the default narrative implementation for an interactive host.
 
 ## Events
 
-Story Core Event 属于本包，不塞进 Companion stream event：
+Story Core Events belong to this package and are not stuffed into Companion stream events:
 
 ```txt
 story:start
@@ -75,45 +70,45 @@ story:finish
 story:error
 ```
 
-事件保留 Core 语义：`Date`、富对象和错误对象允许存在。Stage 03 的 Demo Wire 层再做网络安全映射。`story:state-prepared` 的 `appliedChanges` 是 validator 接受的内存候选变更；只有 `story:committed` 后世界才算推进。
+Events keep Core semantics: `Date`, rich objects, and error objects are allowed. Stage 03’s Demo Wire layer performs the network-safe mapping. `appliedChanges` on `story:state-prepared` are in-memory candidate changes accepted by the validator; the world only advances after `story:committed`.
 
 ## Seeds
 
-公共种子定义从包根导出：
+Shared seed definitions are exported from the package root:
 
 ```ts
-import { fogHarborMystery, minimalWuxiaContract } from "@ying-companion/story-core";
+import { fogHarborMystery, minimalWuxiaContract } from "@ying-ai/story-core";
 ```
 
-Demo Story Workbench 与契约验证共用这些定义，证明同一套 Runtime / Attribute Renderer 可以消费「雾港疑云」与最小武侠契约两套不同 `StoryDefinition.attributes`。
+Demo Story Workbench and contract verification share these definitions, proving one Runtime / Attribute Renderer can consume two different `StoryDefinition.attributes` sets — 「雾港疑云」 and the minimal wuxia contract.
 
 ## Lore
 
-`KeywordLoreProvider` 支持：
+`KeywordLoreProvider` supports:
 
 - `always`
 - `keyword`
 - `state`
 - `keyword_and_state`
-- scene / character 过滤
-- priority 排序
-- 简单 budget 截断
-- secret lore 可见性
+- scene / character filtering
+- priority sorting
+- simple budget truncation
+- secret lore visibility
 
-召回结果使用 `RecalledLoreEntry`，区分 `planner_only` 与 `planner_and_renderer`。Renderer 只接收 `planner_and_renderer`。`StoryState.revealedLoreIds` 是固定 Core State 字段，必须通过 `add_revealed_lore` 变更校验后持久化；不能用 `attrs` 伪造。
+Recall results use `RecalledLoreEntry`, distinguishing `planner_only` and `planner_and_renderer`. Renderer only receives `planner_and_renderer`. `StoryState.revealedLoreIds` is a fixed Core State field and must be persisted only after an `add_revealed_lore` change passes validation; it must not be faked via `attrs`.
 
 ## Summary
 
-Narrative Summary 是早期剧情压缩记忆，不替代 `StoryState` 或 `StoryDefinition`。Summary 更新发生在 Turn 成功提交后；Summary 失败不会回滚已提交 Turn，下回合继续使用旧 Summary 与 recent messages。
+Narrative Summary is compressed early-plot memory; it does not replace `StoryState` or `StoryDefinition`. Summary updates happen after a Turn commits successfully; Summary failure does not roll back the committed Turn — the next turn continues with the old Summary and recent messages.
 
-## 验证
+## Verification
 
 ```bash
-pnpm --filter @ying-companion/story-core typecheck
-pnpm --filter @ying-companion/story-core build
-pnpm --filter @ying-companion/story-core lint
-pnpm --filter @ying-companion/story-core verify:story-contract
-pnpm --filter @ying-companion/story-core verify:story-workflow
+pnpm --filter @ying-ai/story-core typecheck
+pnpm --filter @ying-ai/story-core build
+pnpm --filter @ying-ai/story-core lint
+pnpm --filter @ying-ai/story-core verify:story-contract
+pnpm --filter @ying-ai/story-core verify:story-workflow
 ```
 
-`verify:story-workflow` 完全离线，覆盖事件顺序、text delta、clientTurnId canonical 重放及模型零调用、失败不污染状态、Summary 失败不回滚、secret lore 可见性与 revision 语义。
+`verify:story-workflow` is fully offline and covers event order, text delta, clientTurnId canonical replay with zero model calls, failure without state pollution, Summary failure without rollback, secret lore visibility, and revision semantics.

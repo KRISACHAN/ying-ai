@@ -6,7 +6,7 @@ import type {
   ToolResult,
   WorkflowStepName,
   WorkflowStepStatus,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };

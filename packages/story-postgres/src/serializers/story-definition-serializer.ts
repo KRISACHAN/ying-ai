@@ -1,5 +1,5 @@
-import type { StoryDefinition } from "@ying-companion/story-core";
-import { validateStoryDefinition } from "@ying-companion/story-core";
+import type { StoryDefinition } from "@ying-ai/story-core";
+import { validateStoryDefinition } from "@ying-ai/story-core";
 
 export function serializeStoryDefinition(definition: StoryDefinition): unknown {
   const validation = validateStoryDefinition(definition);

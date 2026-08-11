@@ -1,5 +1,5 @@
 /**
- * @ying-companion/ai-core 公共导出入口。
+ * @ying-ai/ai-core 公共导出入口。
  *
  * 导出内容分为四类：
  * 1. abstractions/ — 接口与类型契约（宿主可依赖的稳定 API）

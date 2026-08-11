@@ -1,5 +1,5 @@
-import type { StoryDefinition } from "@ying-companion/story-core";
-import { validateStoryDefinition } from "@ying-companion/story-core";
+import type { StoryDefinition } from "@ying-ai/story-core";
+import { validateStoryDefinition } from "@ying-ai/story-core";
 
 import {
   createStoryDefinitionPreview,

@@ -1,5 +1,5 @@
-import type { StoryProvider, StorySession, StorySessionProvider } from "@ying-companion/story-core";
-import { initializeStoryState, validateStoryDefinition } from "@ying-companion/story-core";
+import type { StoryProvider, StorySession, StorySessionProvider } from "@ying-ai/story-core";
+import { initializeStoryState, validateStoryDefinition } from "@ying-ai/story-core";
 import type { StoryPostgresClient } from "./client";
 import { withTransaction } from "./client";
 import {

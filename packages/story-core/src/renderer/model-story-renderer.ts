@@ -1,4 +1,4 @@
-import type { ChatModel, GenerateInput } from "@ying-companion/ai-core";
+import type { ChatModel, GenerateInput } from "@ying-ai/ai-core";
 import type {
   StoryRenderInput,
   StoryRenderResult,

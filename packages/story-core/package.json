@@ -1,5 +1,5 @@
 {
-  "name": "@ying-companion/story-core",
+  "name": "@ying-ai/story-core",
   "version": "0.0.0",
   "private": true,
   "type": "commonjs",
@@ -19,7 +19,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@ying-companion/ai-core": "workspace:*",
+    "@ying-ai/ai-core": "workspace:*",
     "zod": "catalog:"
   }
 }

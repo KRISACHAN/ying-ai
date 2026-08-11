@@ -1,5 +1,5 @@
-import { truncateSnippet } from "@ying-companion/tool-web-search";
-import type { WebSearchResult, WebSearchSource } from "@ying-companion/tool-web-search";
+import { truncateSnippet } from "@ying-ai/tool-web-search";
+import type { WebSearchResult, WebSearchSource } from "@ying-ai/tool-web-search";
 
 import { scoreUpcomingEventRelevance } from "./extract-event-dates";
 

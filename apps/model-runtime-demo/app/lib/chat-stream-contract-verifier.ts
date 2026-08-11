@@ -13,8 +13,8 @@ import type {
   WorkflowStepName,
   WorkflowStepStatus,
   WorkflowTextDeltaStreamEvent,
-} from "@ying-companion/ai-core";
-import { createCompanionCore } from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
+import { createCompanionCore } from "@ying-ai/ai-core";
 
 import {
   toChatWorkflowStreamWireEvent,

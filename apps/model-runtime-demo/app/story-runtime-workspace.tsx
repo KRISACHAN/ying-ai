@@ -7,7 +7,7 @@ import type {
   StoryNarrativeSummary,
   StoryState,
   StoryTurn,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 

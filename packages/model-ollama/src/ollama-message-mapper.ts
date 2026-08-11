@@ -1,9 +1,4 @@
-import type {
-  ChatMessage,
-  GenerateInput,
-  GenerateUsage,
-  ModelToolCall,
-} from "@ying-companion/ai-core";
+import type { ChatMessage, GenerateInput, GenerateUsage, ModelToolCall } from "@ying-ai/ai-core";
 import type { ChatRequest, ChatResponse, Message } from "ollama";
 
 import { OllamaAdapterError } from "./errors";

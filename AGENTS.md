@@ -1,4 +1,4 @@
-# ying-companion — AI Entry
+# ying-ai — AI Entry
 
 > **Single entry for all AI tools.** Read this file first. [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) redirect here.
 > Human overview: [README.md](README.md)
@@ -25,6 +25,10 @@
 
 ## Project Snapshot
 
+**This repo hosts multiple independent AI apps** — each lives under `apps/<name>`, with shared capabilities under `packages/<name>`. Convention for adding a new app: [README.md → Adding a new AI app](README.md#adding-a-new-ai-app).
+
+**First app — Companion SDK** (chat + Persona + memory + tools, plus an independent Story Mode runtime):
+
 | Layer              | Location                                                      | Status                                                                                        |
 | ------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | **AI Core SDK**    | `packages/ai-core`                                            | **V1.1 complete** — `streamWorkflow`, tool planning, model profiles, shared step runner       |
@@ -36,43 +40,50 @@
 | **Product API**    | `apps/api`                                                    | Scaffold — planned RBAC backend                                                               |
 | **Product web**    | `apps/web`                                                    | Scaffold — planned user frontend                                                              |
 
-**V1 boundary** ([`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in. **Core Event** (`ChatWorkflowStreamEvent`) stays in Core; **Wire Event** (`ChatWorkflowStreamWireEvent`) is mapped in the demo — do not serialize `Date` / `raw` / `Error` to the network.
+**V1 boundary** ([`.requirements/companion/prompts/02-execution.md`](.requirements/companion/prompts/02-execution.md)): pure core/SDK — no auth, user system, or deployment. `ai-core` does **not** read env vars; apps pass config in. **Core Event** (`ChatWorkflowStreamEvent`) stays in Core; **Wire Event** (`ChatWorkflowStreamWireEvent`) is mapped in the demo — do not serialize `Date` / `raw` / `Error` to the network.
 
-**Current package:** V1.0 frozen (tag `v1.0`) — [`.requirements/stages/v1.0/`](.requirements/stages/v1.0/) · [`.code-reviews/v1.0/`](.code-reviews/v1.0/). **V1.1 complete** — stages [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/) · conclusion [`.code-reviews/v1.1/conclusion.md`](.code-reviews/v1.1/conclusion.md) · roadmap [`.requirements/prompts/04-v1.1-plan.md`](.requirements/prompts/04-v1.1-plan.md). **V1.2 complete** — stages [`.requirements/stages/v1.2/`](.requirements/stages/v1.2/) · roadmap [`.requirements/prompts/05-v1.2-plan.md`](.requirements/prompts/05-v1.2-plan.md). **V1.3 complete** — stages [`.requirements/stages/v1.3/`](.requirements/stages/v1.3/) · roadmap [`.requirements/prompts/06-v1.3-story-mode-plan.md`](.requirements/prompts/06-v1.3-story-mode-plan.md) · Stage 03 closure [main](.requirements/stages/v1.3/stage-03/03-story-workbench-and-release-closure.md) / [patch](.requirements/stages/v1.3/stage-03/03-story-workbench-and-release-closure-patch.md).
+**Current package:** V1.0 frozen (tag `v1.0`) — [`.requirements/companion/stages/v1.0/`](.requirements/companion/stages/v1.0/) · [`.code-reviews/companion/v1.0/`](.code-reviews/companion/v1.0/). **V1.1 complete** — stages [`.requirements/companion/stages/v1.1/`](.requirements/companion/stages/v1.1/) · conclusion [`.code-reviews/companion/v1.1/conclusion.md`](.code-reviews/companion/v1.1/conclusion.md) · roadmap [`.requirements/companion/prompts/04-v1.1-plan.md`](.requirements/companion/prompts/04-v1.1-plan.md). **V1.2 complete** — stages [`.requirements/companion/stages/v1.2/`](.requirements/companion/stages/v1.2/) · roadmap [`.requirements/companion/prompts/05-v1.2-plan.md`](.requirements/companion/prompts/05-v1.2-plan.md). **V1.3 complete** — stages [`.requirements/companion/stages/v1.3/`](.requirements/companion/stages/v1.3/) · roadmap [`.requirements/companion/prompts/06-v1.3-story-mode-plan.md`](.requirements/companion/prompts/06-v1.3-story-mode-plan.md) · Stage 03 closure [main](.requirements/companion/stages/v1.3/stage-03/03-story-workbench-and-release-closure.md) / [patch](.requirements/companion/stages/v1.3/stage-03/03-story-workbench-and-release-closure-patch.md).
 
 ---
 
 ## `.requirements/` — what to build
 
-| When                           | Read                                                                |
-| ------------------------------ | ------------------------------------------------------------------- |
-| Product vision                 | `prompts/00-basic.md`, `01-detail.md`                               |
-| V1 scope / constraints         | `prompts/02-execution.md`                                           |
-| Full V1.0 roadmap              | `prompts/03-v1.0-plan.md`                                           |
-| Full V1.1 roadmap              | `prompts/04-v1.1-plan.md`                                           |
-| Full V1.2 roadmap              | `prompts/05-v1.2-plan.md`                                           |
-| Full V1.3 roadmap (Story Mode) | `prompts/06-v1.3-story-mode-plan.md`                                |
-| Implement / inspect V1.0 stage | `stages/v1.0/stage-{NN}/{NN}-{topic}.md` (patches only for history) |
-| Implement / inspect V1.1 stage | `stages/v1.1/stage-{NN}/{NN}-{topic}.md`                            |
-| Implement / inspect V1.2 stage | `stages/v1.2/stage-{NN}/{NN}-{topic}.md`                            |
-| Implement / inspect V1.3 stage | `stages/v1.3/stage-{NN}/{NN}-{topic}.md`（实施前撰写）              |
+`.requirements/` is a **per-app archive** — each AI app that needs staged specs gets its own `.requirements/<app-name>/` folder. Index: [`.requirements/README.md`](.requirements/README.md).
+
+**Companion SDK** (first app, migrated from the original `ying-companion` repo) — [`.requirements/companion/README.md`](.requirements/companion/README.md):
+
+| When                           | Read                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| Product vision                 | `companion/prompts/00-basic.md`, `01-detail.md`                               |
+| V1 scope / constraints         | `companion/prompts/02-execution.md`                                           |
+| Full V1.0 roadmap              | `companion/prompts/03-v1.0-plan.md`                                           |
+| Full V1.1 roadmap              | `companion/prompts/04-v1.1-plan.md`                                           |
+| Full V1.2 roadmap              | `companion/prompts/05-v1.2-plan.md`                                           |
+| Full V1.3 roadmap (Story Mode) | `companion/prompts/06-v1.3-story-mode-plan.md`                                |
+| Implement / inspect V1.0 stage | `companion/stages/v1.0/stage-{NN}/{NN}-{topic}.md` (patches only for history) |
+| Implement / inspect V1.1 stage | `companion/stages/v1.1/stage-{NN}/{NN}-{topic}.md`                            |
+| Implement / inspect V1.2 stage | `companion/stages/v1.2/stage-{NN}/{NN}-{topic}.md`                            |
+| Implement / inspect V1.3 stage | `companion/stages/v1.3/stage-{NN}/{NN}-{topic}.md`                            |
 
 - **`prompts/`** — planning context (why and overall shape); not the live task checklist.
 - **`stages/`** — executable specs with acceptance criteria; read the main `{NN}-{topic}.md` before coding.
-
-Full conventions: [`.requirements/README.md`](.requirements/README.md). Requirement **content is Chinese**.
+- **New app?** Only add a `.requirements/<app-name>/` archive if it benefits from staged specs; small apps can skip this and just keep a good `README.md`. Full conventions: [`.requirements/README.md`](.requirements/README.md) · [README.md → Adding a new AI app](README.md#adding-a-new-ai-app). Requirement **content is Chinese**.
 
 ---
 
 ## `.code-reviews/` — review archive
 
-| When                                | Read / do                                                            |
-| ----------------------------------- | -------------------------------------------------------------------- |
-| Check if a V1.0 commit was reviewed | `v1.0/{n}-{7-char-sha}/` folder                                      |
-| Check V1.1 stage / release reviews  | `v1.1/{n}-{7-char-sha}/` · `v1.1/conclusion.md` · `v1.1/acceptance/` |
-| Understand past findings            | `{tool}-review.md` in that versioned folder                          |
-| Verify fixes                        | `{model}-followup.md` in same folder                                 |
-| Write a new review                  | `.codex/skills/code-review/` → `.code-reviews/{version}/{n}-{slug}/` |
+`.code-reviews/` is a **per-app archive** — reviews for each AI app live under `.code-reviews/<app-name>/`. Index: [`.code-reviews/README.md`](.code-reviews/README.md).
+
+**Companion SDK** (first app) — [`.code-reviews/companion/README.md`](.code-reviews/companion/README.md):
+
+| When                                | Read / do                                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Check if a V1.0 commit was reviewed | `companion/v1.0/{n}-{7-char-sha}/` folder                                                          |
+| Check V1.1 stage / release reviews  | `companion/v1.1/{n}-{7-char-sha}/` · `companion/v1.1/conclusion.md` · `companion/v1.1/acceptance/` |
+| Understand past findings            | `{tool}-review.md` in that versioned folder                                                        |
+| Verify fixes                        | `{model}-followup.md` in same folder                                                               |
+| Write a new review                  | `.codex/skills/code-review/` → `.code-reviews/<app-name>/{n}-{slug}/`                              |
 
 Full naming rules: [`.code-reviews/README.md`](.code-reviews/README.md). Follow-up skill: `.codex/skills/code-review-followup/`.
 
@@ -106,7 +117,7 @@ Shared tool map: [docs/ai/platforms.md](docs/ai/platforms.md). Tool-specific beh
 
 ## Package Context
 
-When editing under `apps/` or `packages/`, read that package's `README.md`:
+When editing under `apps/` or `packages/`, read that package's `README.md`. Adding a new app or capability? Start with a fresh `README.md` in its folder and link it here.
 
 - [packages/ai-core/README.md](packages/ai-core/README.md) — Core SDK, `executeWorkflow` / `streamWorkflow`, tool planning
 - [packages/model-ollama/README.md](packages/model-ollama/README.md) — Ollama adapter, capability overrides

@@ -1,4 +1,4 @@
-import type { ChatModel } from "@ying-companion/ai-core";
+import type { ChatModel } from "@ying-ai/ai-core";
 import type { StoryDefinition } from "../abstractions/story-definition";
 import type { StoryPlanner, StoryPlannerInput, StoryTurnPlan } from "../abstractions/story-planner";
 import { storyTurnPlanSchema } from "./story-turn-plan-schema";

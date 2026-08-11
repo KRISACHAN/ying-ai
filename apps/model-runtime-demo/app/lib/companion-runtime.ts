@@ -13,7 +13,7 @@ import {
   type MemoryProvider,
   type MemoryScope,
   type SummaryOptions,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 import { LOCAL_DEBUG_OWNER } from "./debug-owner";
 import { DebugRepository, PostgresDebugSummaryProvider } from "./debug-repository";

@@ -1,8 +1,10 @@
-# @ying-companion/story-postgres
+# @ying-ai/story-postgres
 
-`@ying-companion/story-postgres` 是 V1.3 Story Mode 的 PostgreSQL 持久化适配器。Host 注入 `pg.Pool` 或 `PoolClient`；本包不读取环境变量，验证脚本才会使用 `DATABASE_URL`。
+**English** | [简体中文](./README.zh-CN.md)
 
-## Host 接入
+`@ying-ai/story-postgres` is the PostgreSQL persistence adapter for V1.3 Story Mode. The Host injects a `pg.Pool` or `PoolClient`; this package does not read environment variables — only verification scripts use `DATABASE_URL`.
+
+## Host integration
 
 ```ts
 import { Pool } from "pg";
@@ -11,35 +13,35 @@ import {
   PostgresStoryStateProvider,
   PostgresStoryTurnCommitter,
   runStoryPostgresMigrations,
-} from "@ying-companion/story-postgres";
+} from "@ying-ai/story-postgres";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 await runStoryPostgresMigrations(pool);
 ```
 
-沿用 Demo / memory-postgres 的 `DATABASE_URL + pg.Pool` 模式，不新增 env 名。
-`apps/model-runtime-demo` 的 Story Runtime Factory 会持有同一个 pool，并一次性注入
-Session / State / TurnRepository / Message / Committer / Summary Provider；不要在 route 内只临时创建部分 provider 后回退到 in-memory。
+Follows the Demo / memory-postgres `DATABASE_URL + pg.Pool` pattern with no new env names.
+The Story Runtime Factory in `apps/model-runtime-demo` holds one shared pool and injects
+Session / State / TurnRepository / Message / Committer / Summary Providers in one shot; do not temporarily create only some providers inside a route and fall back to in-memory.
 
-业务回合提交应走 `PostgresStoryTurnCommitter`。`PostgresStoryStateProvider.saveState()` 仅用于开档初始化或宿主维护工具；需要直接保存时应传入 `expectedRevision`，以启用 revision CAS：
+Business turn commits should go through `PostgresStoryTurnCommitter`. `PostgresStoryStateProvider.saveState()` is only for save-slot initialization or host maintenance tools; when saving directly, pass `expectedRevision` to enable revision CAS:
 
 ```ts
 await stateProvider.saveState(sessionId, nextState, { expectedRevision: current.revision });
 ```
 
-## 表职责
+## Table responsibilities
 
-- `story_sessions`：session 元数据与冻结的 `definition_snapshot`
-- `story_states`：完整规范化 `StoryState` JSON，表名不是 `story_session_states`
-- `story_turns`：committed turn 记录与 `client_turn_id` 幂等约束
-- `story_messages`：每个 committed turn 固定 user + assistant 两条消息
-- `story_summaries`：Narrative Summary 与 version 并发保护
+- `story_sessions`: session metadata and frozen `definition_snapshot`
+- `story_states`: full normalized `StoryState` JSON — the table is not named `story_session_states`
+- `story_turns`: committed turn records and `client_turn_id` idempotency constraint
+- `story_messages`: fixed user + assistant message pair per committed turn
+- `story_summaries`: Narrative Summary with version concurrency protection
 
-开档时从 `StoryProvider` 读取 Definition，校验后深拷贝入 `definition_snapshot`。后续回合只读取 snapshot；种子故事升级不会改写旧存档。
+On save-slot creation, Definition is read from `StoryProvider`, validated, and deep-copied into `definition_snapshot`. Later turns only read the snapshot; seed-story upgrades do not rewrite old saves.
 
-## 提交语义
+## Commit semantics
 
-V1.3 默认不预写 `processing` turn，也不实现队列、超时恢复或同 Session 自动串行化。成功回合在单一事务内：
+V1.3 by default does not pre-write a `processing` turn, and does not implement queues, timeout recovery, or automatic same-Session serialization. A successful turn runs in a single transaction:
 
 ```txt
 lock current state revision
@@ -50,25 +52,24 @@ lock current state revision
 → update story_sessions.updated_at
 ```
 
-同一 `sessionId + clientTurnId`：
+For the same `sessionId + clientTurnId`:
 
-- 已有 `committed`：直接返回旧 Turn，不推进 revision。
-- 已有 `failed`：允许同 id 重试，并在成功时覆盖为 committed。
-- 默认实现不写 failed turn；失败不会污染 state/messages。
+- Existing `committed`: return the old Turn immediately; do not advance revision.
+- Existing `failed`: same-id retry is allowed and overwrites to committed on success.
+- The default implementation does not write failed turns; failures do not pollute state/messages.
 
-每个成功 committed turn 都推进 `StoryState.revision + 1`，即使没有业务状态变化。业务变化用 `stateChanged` 记录。
+Every successful committed turn advances `StoryState.revision + 1`, even with no business-state change. Business changes are recorded via `stateChanged`.
 
-数据库层只负责返回 canonical committed turn；是否为重放的可观测标记与 canonical assistant text
-由 Story Workflow/Core Event 暴露给宿主。该补充不改变唯一约束、事务边界或消息数量语义。
+The database layer only returns the canonical committed turn; the observability flag for replay and the canonical assistant text are exposed to the host by Story Workflow / Core Events. That addition does not change unique constraints, transaction boundaries, or message-count semantics.
 
-## 验证
+## Verification
 
 ```bash
-pnpm --filter @ying-companion/story-postgres typecheck
-pnpm --filter @ying-companion/story-postgres build
-pnpm --filter @ying-companion/story-postgres lint
-pnpm --filter @ying-companion/story-postgres verify:story-postgres
-pnpm --filter @ying-companion/story-postgres verify:story-recovery
+pnpm --filter @ying-ai/story-postgres typecheck
+pnpm --filter @ying-ai/story-postgres build
+pnpm --filter @ying-ai/story-postgres lint
+pnpm --filter @ying-ai/story-postgres verify:story-postgres
+pnpm --filter @ying-ai/story-postgres verify:story-recovery
 ```
 
-验证脚本使用 `DATABASE_URL`，未设置时默认连接 `postgresql://localhost:5432/ying_companion_dev`。覆盖 migration、Definition Snapshot、原子提交、clientTurnId 幂等、failed turn 同 id 重试、revision CAS、Summary version conflict 与多轮重启恢复。
+Verification scripts use `DATABASE_URL`, defaulting to `postgresql://localhost:5432/ying_companion_dev` when unset. Coverage includes migration, Definition Snapshot, atomic commit, clientTurnId idempotency, failed-turn same-id retry, revision CAS, Summary version conflict, and multi-turn restart recovery.

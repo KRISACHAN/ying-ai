@@ -2,8 +2,8 @@ import type {
   WebSearchProviderId,
   WebSearchRetrievalMetadata,
   WebSearchSource,
-} from "@ying-companion/tool-web-search";
-import type { ToolResult } from "@ying-companion/ai-core";
+} from "@ying-ai/tool-web-search";
+import type { ToolResult } from "@ying-ai/ai-core";
 
 export interface DemoWorkflowWebSearchMetadata {
   query: string;

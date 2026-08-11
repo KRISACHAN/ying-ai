@@ -160,3 +160,6 @@ vite.config.ts.timestamp-*
 .playwright-cli/*
 .playwright-cli/**
 !.playwright-cli/page-*.yml
+output/
+output/*
+output/**

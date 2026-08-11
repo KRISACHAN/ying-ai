@@ -1,4 +1,4 @@
-import type { SafetyProvider } from "@ying-companion/ai-core";
+import type { SafetyProvider } from "@ying-ai/ai-core";
 import type {
   StoryEventBase,
   StoryWorkflowEvent,

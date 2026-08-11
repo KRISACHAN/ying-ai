@@ -1,5 +1,5 @@
 {
-  "name": "@ying-companion/memory-postgres",
+  "name": "@ying-ai/memory-postgres",
   "version": "0.0.0",
   "private": true,
   "type": "commonjs",
@@ -17,7 +17,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@ying-companion/ai-core": "workspace:*",
+    "@ying-ai/ai-core": "workspace:*",
     "pg": "^8.13.0"
   },
   "devDependencies": {

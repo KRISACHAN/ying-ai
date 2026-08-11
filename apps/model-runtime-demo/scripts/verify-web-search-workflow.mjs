@@ -2,9 +2,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { LocalToolRegistry, createCompanionCore, createModel } from "@ying-companion/ai-core";
-import { createWebSearchTool } from "@ying-companion/tool-web-search";
-import { TavilyWebSearchProvider } from "@ying-companion/tool-web-search-tavily";
+import { LocalToolRegistry, createCompanionCore, createModel } from "@ying-ai/ai-core";
+import { createWebSearchTool } from "@ying-ai/tool-web-search";
+import { TavilyWebSearchProvider } from "@ying-ai/tool-web-search-tavily";
 
 function loadEnvFile(path) {
   if (!existsSync(path)) {

@@ -6,8 +6,8 @@ import type {
   StoryNarrativeSummary,
   StorySession,
   StoryState,
-} from "@ying-companion/story-core";
-import { deserializeStoryDefinition } from "@ying-companion/story-postgres";
+} from "@ying-ai/story-core";
+import { deserializeStoryDefinition } from "@ying-ai/story-postgres";
 
 import {
   getStoryModelRuntimeInfo,

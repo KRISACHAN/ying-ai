@@ -6,8 +6,8 @@ import {
   type ModelProfile,
   type ModelProfileOverride,
   type RequiredModelCapabilities,
-} from "@ying-companion/ai-core";
-import { createOllamaChatModel, type OllamaChatModelOptions } from "@ying-companion/model-ollama";
+} from "@ying-ai/ai-core";
+import { createOllamaChatModel, type OllamaChatModelOptions } from "@ying-ai/model-ollama";
 
 export interface ModelProviderConfig {
   provider: string;

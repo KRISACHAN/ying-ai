@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import type { CompanionGender } from "@ying-companion/ai-core";
+import type { CompanionGender } from "@ying-ai/ai-core";
 
 import type { DebugCompanion } from "./lib/debug-types";
 

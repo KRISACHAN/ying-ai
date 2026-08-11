@@ -5,7 +5,7 @@ import type {
   CoreProviderMeta,
   EmotionState,
   WorkflowTrace,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 export type MessageRole = "user" | "assistant";
 export type MessageStatus = "pending" | "completed" | "failed";

@@ -6,7 +6,7 @@ import {
   type ModelCapabilitySkipItem,
   type ModelRuntimeErrorItem,
   type ModelRuntimeInfo,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 import { loadModelConfig, maskSecret } from "../../lib/model-config";
 import { createConfiguredModel, describeModelFactoryResult } from "../../lib/model-factory";

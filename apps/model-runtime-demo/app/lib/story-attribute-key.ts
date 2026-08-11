@@ -1,4 +1,4 @@
-import type { StoryAttributeDefinition } from "@ying-companion/story-core";
+import type { StoryAttributeDefinition } from "@ying-ai/story-core";
 
 export function createStoryAttributeStorageKey(input: {
   definition: StoryAttributeDefinition;

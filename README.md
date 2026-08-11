@@ -1,6 +1,8 @@
-# ying-companion
+# ying-ai
 
-Enterprise AI companion monorepo — admin backend, user-facing frontend, and a **pluggable AI Companion Core SDK**. Built with pnpm workspaces and Turborepo.
+**English** | [简体中文](README.zh-CN.md)
+
+A general-purpose **AI capabilities monorepo** — home for independent AI applications (`apps/*`) built on shared, reusable AI capabilities and SDKs (`packages/*`). Built with pnpm workspaces and Turborepo.
 
 > **Using an AI coding assistant?** See [AGENTS.md](AGENTS.md). This file is for humans.
 
@@ -8,13 +10,15 @@ Enterprise AI companion monorepo — admin backend, user-facing frontend, and a 
 
 ## What & why
 
-The goal is a **pluggable AI companion core** that product apps (admin API + user web) can embed. V1 focuses on the SDK itself — no auth, user accounts, or deployment yet. Scope details: [`.requirements/prompts/02-execution.md`](.requirements/prompts/02-execution.md).
+This repo is a **container for many AI apps**, not a single product. Each app under `apps/` is independent and picks whatever it needs from `packages/` — a model runtime, memory, tool, or domain SDK. New apps get added over time without disturbing existing ones; shared logic moves into `packages/` once two or more apps need it. See [Adding a new AI app](#adding-a-new-ai-app).
 
-**Current milestone:** **V1.3 is complete** — the V1.0–V1.2 Companion SDK remains compatible, and Story Mode now provides a separate story domain/runtime, PostgreSQL recovery, model-backed planning/rendering, schema-driven state, NDJSON streaming, and a playable/debuggable Story Workbench. Specs: [`.requirements/stages/v1.3/`](.requirements/stages/v1.3/) · Plan: [`.requirements/prompts/06-v1.3-story-mode-plan.md`](.requirements/prompts/06-v1.3-story-mode-plan.md).
+**First app in this repo — Companion SDK:** a pluggable AI companion core (chat + Persona + memory + tools) plus an independent Story Mode runtime, both hosted for local debugging in [`apps/model-runtime-demo`](apps/model-runtime-demo/). It reached **V1.3** — Story Mode adds a separate story domain/runtime, PostgreSQL recovery, model-backed planning/rendering, schema-driven state, NDJSON streaming, and a playable/debuggable Story Workbench. Scope details: [`.requirements/companion/prompts/02-execution.md`](.requirements/companion/prompts/02-execution.md) · Specs: [`.requirements/companion/stages/v1.3/`](.requirements/companion/stages/v1.3/) · Plan: [`.requirements/companion/prompts/06-v1.3-story-mode-plan.md`](.requirements/companion/prompts/06-v1.3-story-mode-plan.md).
 
 ---
 
 ## Architecture
+
+_Apps and packages that make up the Companion SDK — the first app hosted in this repo:_
 
 | Part                  | Path                                                                                                                            | Status                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -58,31 +62,37 @@ flowchart LR
 ## Repository layout
 
 ```txt
-ying-companion/
-├── apps/
-│   ├── api/                  @ying-companion/api
-│   ├── web/                  @ying-companion/web
-│   └── model-runtime-demo/   @ying-companion/model-runtime-demo
-├── packages/
-│   ├── ai-core/              @ying-companion/ai-core
-│   ├── model-ollama/         @ying-companion/model-ollama
-│   ├── memory-postgres/      @ying-companion/memory-postgres
-│   ├── story-core/           @ying-companion/story-core
-│   └── story-postgres/       @ying-companion/story-postgres
-├── docs/ai/                  Agent operating rules (see AGENTS.md)
-├── .requirements/            Requirements & stage task specs
-├── .code-reviews/            Code review archive
-├── AGENTS.md                 AI agent entry
+ying-ai/
+├── apps/                        Independent AI apps — one folder per app
+│   ├── api/                     @ying-ai/api                   (scaffold)
+│   ├── web/                     @ying-ai/web                   (scaffold)
+│   └── model-runtime-demo/      @ying-ai/model-runtime-demo    (Companion SDK + Story Mode — first app)
+├── packages/                     Reusable AI capabilities & SDKs — shared across apps
+│   ├── ai-core/                 @ying-ai/ai-core
+│   ├── model-ollama/            @ying-ai/model-ollama
+│   ├── memory-postgres/         @ying-ai/memory-postgres
+│   ├── tool-web-search/         @ying-ai/tool-web-search
+│   ├── tool-web-search-tavily/  @ying-ai/tool-web-search-tavily
+│   ├── story-core/              @ying-ai/story-core
+│   └── story-postgres/          @ying-ai/story-postgres
+├── docs/ai/                     Agent operating rules (see AGENTS.md)
+├── .requirements/                Requirements & stage task specs (per app/feature)
+├── .code-reviews/                Code review archive
+├── AGENTS.md                     AI agent entry
 └── turbo.json
 ```
 
-Package READMEs: [ai-core](packages/ai-core/README.md) · [model-ollama](packages/model-ollama/README.md) · [memory-postgres](packages/memory-postgres/README.md) · [story-core](packages/story-core/README.md) · [story-postgres](packages/story-postgres/README.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [web](apps/web/README.md) · [api](apps/api/README.md)
+**Convention for new AI apps:** add a folder under `apps/<app-name>` with its own `package.json` (`@ying-ai/<app-name>`), English `README.md`, and Simplified Chinese `README.zh-CN.md` (with language switcher links at the top of both). Keep app-specific glue code in the app; move anything reusable across apps into `packages/<capability-name>`. See [Adding a new AI app](#adding-a-new-ai-app).
+
+Package READMEs (EN · 中文): [ai-core](packages/ai-core/README.md) · [中文](packages/ai-core/README.zh-CN.md) · [model-ollama](packages/model-ollama/README.md) · [中文](packages/model-ollama/README.zh-CN.md) · [memory-postgres](packages/memory-postgres/README.md) · [中文](packages/memory-postgres/README.zh-CN.md) · [tool-web-search](packages/tool-web-search/README.md) · [中文](packages/tool-web-search/README.zh-CN.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.md) · [中文](packages/tool-web-search-tavily/README.zh-CN.md) · [story-core](packages/story-core/README.md) · [中文](packages/story-core/README.zh-CN.md) · [story-postgres](packages/story-postgres/README.md) · [中文](packages/story-postgres/README.zh-CN.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [中文](apps/model-runtime-demo/README.zh-CN.md) · [web](apps/web/README.md) · [中文](apps/web/README.zh-CN.md) · [api](apps/api/README.md) · [中文](apps/api/README.zh-CN.md)
 
 ---
 
-## Roadmap
+## Roadmap (Companion SDK)
 
-**V1.0** (frozen): [`.requirements/prompts/03-v1.0-plan.md`](.requirements/prompts/03-v1.0-plan.md) · [stages](.requirements/stages/v1.0/) · [reviews](.code-reviews/v1.0/)
+_Version history for the first app in this repo. Future apps track their own progress in their own `README.md` / `.requirements/` (optional — see below)._
+
+**V1.0** (frozen): [`.requirements/companion/prompts/03-v1.0-plan.md`](.requirements/companion/prompts/03-v1.0-plan.md) · [stages](.requirements/companion/stages/v1.0/) · [reviews](.code-reviews/companion/v1.0/)
 
 **V1.1** (complete):
 
@@ -97,7 +107,7 @@ Stage 7  Debug workbench (NDJSON)
 Stage 8  Documentation & review
 ```
 
-Full plan: [`.requirements/prompts/04-v1.1-plan.md`](.requirements/prompts/04-v1.1-plan.md) · Stage specs: [`.requirements/stages/v1.1/`](.requirements/stages/v1.1/)
+Full plan: [`.requirements/companion/prompts/04-v1.1-plan.md`](.requirements/companion/prompts/04-v1.1-plan.md) · Stage specs: [`.requirements/companion/stages/v1.1/`](.requirements/companion/stages/v1.1/)
 
 **V1.2** (complete):
 
@@ -106,7 +116,7 @@ Stage 1  Web Search Tool + Tavily adapter
 Stage 2  Demo AI SDK UI, Sources display, docs sync
 ```
 
-Full plan: [`.requirements/prompts/05-v1.2-plan.md`](.requirements/prompts/05-v1.2-plan.md) · Stage specs: [`.requirements/stages/v1.2/`](.requirements/stages/v1.2/)
+Full plan: [`.requirements/companion/prompts/05-v1.2-plan.md`](.requirements/companion/prompts/05-v1.2-plan.md) · Stage specs: [`.requirements/companion/stages/v1.2/`](.requirements/companion/stages/v1.2/)
 
 **V1.3** (complete):
 
@@ -116,7 +126,20 @@ Stage 2  Narrative workflow, Lore, and PostgreSQL persistence
 Stage 3  Story Workbench and release closure
 ```
 
-Full plan: [`.requirements/prompts/06-v1.3-story-mode-plan.md`](.requirements/prompts/06-v1.3-story-mode-plan.md) · Stage specs: [`.requirements/stages/v1.3/`](.requirements/stages/v1.3/)
+Full plan: [`.requirements/companion/prompts/06-v1.3-story-mode-plan.md`](.requirements/companion/prompts/06-v1.3-story-mode-plan.md) · Stage specs: [`.requirements/companion/stages/v1.3/`](.requirements/companion/stages/v1.3/)
+
+---
+
+## Adding a new AI app
+
+This repo is designed to keep growing with new, unrelated AI apps. To add one:
+
+1. **Create the app** under `apps/<app-name>/` with its own `package.json` (name it `@ying-ai/<app-name>`), English `README.md`, and Simplified Chinese `README.zh-CN.md` (with language switcher links at the top of both) describing what it does, how to run it, and its env vars.
+2. **Reuse, don't fork.** Check `packages/` first — `ai-core` (model runtime/workflow), `model-ollama`, `memory-postgres`, `tool-web-search*` may already cover what you need. Don't couple a new app to Companion- or Story-specific code.
+3. **Extract shared logic.** If two or more apps need the same capability, pull it into a new `packages/<capability-name>` following the existing package conventions (own `package.json`, `tsconfig*.json`, bilingual `README.md` / `README.zh-CN.md`, and a `verify:*` contract script if it has a testable boundary).
+4. **No workspace wiring needed.** `pnpm-workspace.yaml` already globs `apps/*` and `packages/*`, and `turbo.json` tasks apply automatically — just `pnpm install` after adding the folder.
+5. **Requirements docs are optional.** Add `.requirements/<app-name>/` (own `prompts/` + `stages/`, following the [`.requirements/companion/`](.requirements/companion/) pattern) only if the app benefits from staged specs like the Companion SDK did; a small app can just keep a good README.
+6. **Update this README** — add a row to [Repository layout](#repository-layout) (and [Architecture](#architecture) if it's substantial) so humans and AI tools can find it.
 
 ---
 
@@ -151,15 +174,15 @@ pnpm build
 **Single package:**
 
 ```bash
-pnpm turbo run typecheck --filter @ying-companion/ai-core
-pnpm turbo run lint --filter @ying-companion/model-runtime-demo
+pnpm turbo run typecheck --filter @ying-ai/ai-core
+pnpm turbo run lint --filter @ying-ai/model-runtime-demo
 ```
 
 More commands: [docs/ai/core/project-context.md](docs/ai/core/project-context.md).
 
 ---
 
-## Run the Debug Workbench
+## Run the Companion Debug Workbench (first app)
 
 The Next.js demo hosts both the **Core Workflow Debug Workbench** and the V1.3 **Story Workbench**. The Companion surface covers Persona, memory, emotion, tools, Web Search and Sources; Story Mode adds story selection/import, persistent sessions, streamed narrative, dynamic state, and live/persisted workflow debugging.
 
@@ -168,7 +191,7 @@ cp apps/model-runtime-demo/.env.example apps/model-runtime-demo/.env
 # Set OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, DATABASE_URL (see demo README)
 # Optional Web Search: WEB_SEARCH_ENABLED=true, WEB_SEARCH_BACKEND=tavily, TAVILY_API_KEY, toolCalling=true
 
-pnpm --filter @ying-companion/model-runtime-demo dev
+pnpm --filter @ying-ai/model-runtime-demo dev
 ```
 
 Open the URL from the terminal:
@@ -193,7 +216,7 @@ Embedding for long-term memory remains a **separate** `EmbeddingProvider` (typic
 
 ---
 
-## Current limitations (V1.3)
+## Current limitations — Companion SDK (V1.3)
 
 Not in this release:
 
@@ -205,11 +228,13 @@ Not in this release:
 - Story Definition import is process-local; created sessions retain an immutable snapshot, but imported catalog entries disappear after restart
 - No visual story authoring studio, story marketplace, branching editor, or Companion Persona/Memory integration with Story Mode
 
-Details: [`.code-reviews/v1.1/conclusion.md`](.code-reviews/v1.1/conclusion.md).
+Details: [`.code-reviews/companion/v1.1/conclusion.md`](.code-reviews/companion/v1.1/conclusion.md).
 
 ---
 
 ## Tech stack
+
+_Below reflects the Companion SDK app; future apps may use a different stack where it makes sense — record it in that app's own README._
 
 | Layer     | Tools                                                            |
 | --------- | ---------------------------------------------------------------- |

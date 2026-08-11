@@ -1,4 +1,4 @@
-import { containsCjk } from "@ying-companion/tool-web-search";
+import { containsCjk } from "@ying-ai/tool-web-search";
 
 import { getDefaultStartDate } from "./tavily-search-defaults";
 import type { TavilySearchTopic } from "./tavily-types";

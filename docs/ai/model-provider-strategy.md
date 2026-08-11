@@ -74,7 +74,7 @@ Implementation reference: [`apps/model-runtime-demo/app/lib/chat-stream-wire.ts`
 
 Rules: strip `raw`, serialize dates as ISO strings, map `Error` to `SafeWorkflowError`. Do not duplicate full DTO definitions here — see stage-02 spec and demo wire mapper.
 
-Verify: `pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract`
+Verify: `pnpm --filter @ying-ai/model-runtime-demo verify:stream-contract`
 
 ## Ollama Local Development
 
@@ -86,4 +86,4 @@ See [`apps/model-runtime-demo/README.md`](../../apps/model-runtime-demo/README.m
 
 ## V1.1 Limitations
 
-See [`.code-reviews/v1.1/conclusion.md`](../../.code-reviews/v1.1/conclusion.md) § 已知限制.
+See [`.code-reviews/companion/v1.1/conclusion.md`](../../.code-reviews/companion/v1.1/conclusion.md) § 已知限制.

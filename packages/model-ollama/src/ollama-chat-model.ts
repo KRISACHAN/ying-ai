@@ -13,7 +13,7 @@ import {
   type ModelRuntimeErrorItem,
   type ModelRuntimeInfo,
   type RequiredModelCapabilities,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 import { Ollama, type ChatRequest, type ChatResponse } from "ollama";
 
 import { toGenerateUsage, toOllamaRequestOptions } from "./ollama-message-mapper";

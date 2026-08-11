@@ -4,7 +4,7 @@ import type {
   StoryTurnPlan,
   StoryTurn,
   StoryTurnRepository,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 import type { StoryPostgresClient } from "./client";
 
 interface StoryTurnRow {

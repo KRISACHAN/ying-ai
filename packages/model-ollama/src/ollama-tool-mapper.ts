@@ -1,4 +1,4 @@
-import type { ModelToolCall } from "@ying-companion/ai-core";
+import type { ModelToolCall } from "@ying-ai/ai-core";
 import type { ChatResponse, Tool, ToolCall } from "ollama";
 
 import { OllamaAdapterError } from "./errors";

@@ -1,4 +1,4 @@
-import type { ChatWorkflowOutput } from "@ying-companion/ai-core";
+import type { ChatWorkflowOutput } from "@ying-ai/ai-core";
 
 import {
   attachProviderMetadata,

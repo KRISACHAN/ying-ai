@@ -11,7 +11,7 @@ import type {
   SummarySaveInput,
   SummarySaveResult,
   SummaryScope,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 import { createId, ensureDebugWorkspaceSchema, getDebugPool, toSafeErrorMessage } from "./debug-db";
 import { LOCAL_DEBUG_OWNER } from "./debug-owner";

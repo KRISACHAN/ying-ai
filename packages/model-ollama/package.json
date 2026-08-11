@@ -1,5 +1,5 @@
 {
-  "name": "@ying-companion/model-ollama",
+  "name": "@ying-ai/model-ollama",
   "version": "0.0.0",
   "private": true,
   "type": "commonjs",
@@ -18,7 +18,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@ying-companion/ai-core": "workspace:*",
+    "@ying-ai/ai-core": "workspace:*",
     "ollama": "^0.6.3"
   }
 }

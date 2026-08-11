@@ -1,6 +1,6 @@
 "use client";
 
-import type { ConversationSummary, EmotionState, WorkflowTrace } from "@ying-companion/ai-core";
+import type { ConversationSummary, EmotionState, WorkflowTrace } from "@ying-ai/ai-core";
 
 import type { ChatWorkflowStreamWireEvent } from "./lib/chat-stream-wire";
 import type { MemoryHealthView, WorkflowRunDetail, WorkflowRunListItem } from "./lib/debug-types";

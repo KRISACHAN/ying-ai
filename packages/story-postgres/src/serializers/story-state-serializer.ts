@@ -1,5 +1,5 @@
-import type { StoryDefinition, StoryState } from "@ying-companion/story-core";
-import { DefaultStoryTransitionValidator } from "@ying-companion/story-core";
+import type { StoryDefinition, StoryState } from "@ying-ai/story-core";
+import { DefaultStoryTransitionValidator } from "@ying-ai/story-core";
 
 const validator = new DefaultStoryTransitionValidator();
 

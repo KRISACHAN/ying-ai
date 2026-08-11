@@ -674,15 +674,15 @@ workflow:finish
 
 沿用 Stage 2 冻结枚举，本阶段至少覆盖：
 
-| 场景 | code | step（建议） |
-| --- | --- | --- |
-| Workflow 未实现 stream | `workflow_stream_not_supported` | — |
-| Input Safety 拒绝 | `input_safety_rejected` | `safety:input` |
-| Output Safety 拒绝 | `output_safety_rejected` | `safety:output` |
-| 模型流失败（含空回复、首个 delta 前失败、已输出后中断） | `model_stream_failed` | `model:stream` |
-| Tool 规划不可恢复失败 | `tool_planning_failed` | `tool:plan` |
-| Tool 执行不可恢复失败 | `tool_execution_failed` | `tool:execute` |
-| 其他未分类工作流失败 | `workflow_failed` | 当前步骤 |
+| 场景                                                    | code                            | step（建议）    |
+| ------------------------------------------------------- | ------------------------------- | --------------- |
+| Workflow 未实现 stream                                  | `workflow_stream_not_supported` | —               |
+| Input Safety 拒绝                                       | `input_safety_rejected`         | `safety:input`  |
+| Output Safety 拒绝                                      | `output_safety_rejected`        | `safety:output` |
+| 模型流失败（含空回复、首个 delta 前失败、已输出后中断） | `model_stream_failed`           | `model:stream`  |
+| Tool 规划不可恢复失败                                   | `tool_planning_failed`          | `tool:plan`     |
+| Tool 执行不可恢复失败                                   | `tool_execution_failed`         | `tool:execute`  |
+| 其他未分类工作流失败                                    | `workflow_failed`               | 当前步骤        |
 
 `post_process_failed` 保留给未来 mandatory 后置 Provider；V1.1 的 Summary / Memory / Emotion 默认可降级，不得滥用此 code 终止 finish。
 

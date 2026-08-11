@@ -88,25 +88,25 @@ importers:
       '@ai-sdk/react':
         specifier: ^3.0.226
         version: 3.0.226(react@19.2.7)(zod@4.4.3)
-      '@ying-companion/ai-core':
+      '@ying-ai/ai-core':
         specifier: workspace:*
         version: link:../../packages/ai-core
-      '@ying-companion/memory-postgres':
+      '@ying-ai/memory-postgres':
         specifier: workspace:*
         version: link:../../packages/memory-postgres
-      '@ying-companion/model-ollama':
+      '@ying-ai/model-ollama':
         specifier: workspace:*
         version: link:../../packages/model-ollama
-      '@ying-companion/story-core':
+      '@ying-ai/story-core':
         specifier: workspace:*
         version: link:../../packages/story-core
-      '@ying-companion/story-postgres':
+      '@ying-ai/story-postgres':
         specifier: workspace:*
         version: link:../../packages/story-postgres
-      '@ying-companion/tool-web-search':
+      '@ying-ai/tool-web-search':
         specifier: workspace:*
         version: link:../../packages/tool-web-search
-      '@ying-companion/tool-web-search-tavily':
+      '@ying-ai/tool-web-search-tavily':
         specifier: workspace:*
         version: link:../../packages/tool-web-search-tavily
       ai:
@@ -151,7 +151,7 @@ importers:
 
   packages/memory-postgres:
     dependencies:
-      '@ying-companion/ai-core':
+      '@ying-ai/ai-core':
         specifier: workspace:*
         version: link:../ai-core
       pg:
@@ -164,7 +164,7 @@ importers:
 
   packages/model-ollama:
     dependencies:
-      '@ying-companion/ai-core':
+      '@ying-ai/ai-core':
         specifier: workspace:*
         version: link:../ai-core
       ollama:
@@ -173,7 +173,7 @@ importers:
 
   packages/story-core:
     dependencies:
-      '@ying-companion/ai-core':
+      '@ying-ai/ai-core':
         specifier: workspace:*
         version: link:../ai-core
       zod:
@@ -182,7 +182,7 @@ importers:
 
   packages/story-postgres:
     dependencies:
-      '@ying-companion/story-core':
+      '@ying-ai/story-core':
         specifier: workspace:*
         version: link:../story-core
       pg:
@@ -195,13 +195,13 @@ importers:
 
   packages/tool-web-search:
     dependencies:
-      '@ying-companion/ai-core':
+      '@ying-ai/ai-core':
         specifier: workspace:*
         version: link:../ai-core
 
   packages/tool-web-search-tavily:
     dependencies:
-      '@ying-companion/tool-web-search':
+      '@ying-ai/tool-web-search':
         specifier: workspace:*
         version: link:../tool-web-search
 

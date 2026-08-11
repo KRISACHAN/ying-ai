@@ -6,7 +6,7 @@ import {
   type WebSearchResult,
   type WebSearchRetrievalMetadata,
   type WebSearchRetrievalRequest,
-} from "@ying-companion/tool-web-search";
+} from "@ying-ai/tool-web-search";
 
 import { normalizeRetrievalQuery } from "./normalize-retrieval-query";
 import { normalizeTavilyResult } from "./normalize-tavily-result";

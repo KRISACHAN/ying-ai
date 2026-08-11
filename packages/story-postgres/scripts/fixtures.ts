@@ -1,4 +1,4 @@
-import type { StoryDefinition } from "@ying-companion/story-core";
+import type { StoryDefinition } from "@ying-ai/story-core";
 
 export const fogHarborMystery: StoryDefinition = {
   id: "fog-harbor-mystery",

@@ -5,12 +5,12 @@ import {
   type MemoryRecallResult,
   type MemorySaveInput,
   type MemorySaveResult,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 import {
   OpenAIEmbeddingProvider,
   PostgresMemoryProvider,
   type MemoryDatabaseHealth,
-} from "@ying-companion/memory-postgres";
+} from "@ying-ai/memory-postgres";
 import { Pool } from "pg";
 
 import { readOptionalEnv } from "./model-config";

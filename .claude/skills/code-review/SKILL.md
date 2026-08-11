@@ -1,11 +1,11 @@
 ---
 name: code-review
-description: "[OMX] Comprehensive code review: OMX dual-lane (code-reviewer + architect), ying-companion project standards and AI editor rules, scope from user commit/paths else staged else unstaged; write numbered Chinese reports to .code-reviews/{n}-{slug}/ with tool-attributed filenames. Use for code review, PR review, or quality assessment."
+description: "[OMX] Comprehensive code review: OMX dual-lane (code-reviewer + architect), ying-ai project standards and AI editor rules, scope from user commit/paths else staged else unstaged; write numbered Chinese reports to .code-reviews/{app-name}/{n}-{slug}/ with tool-attributed filenames. Use for code review, PR review, or quality assessment."
 ---
 
 # Code Review
 
-OMX dual-lane review + project standards + AI editor rules. Skill instructions are in English; **report output is Chinese** and saved under `.code-reviews/`.
+OMX dual-lane review + project standards + AI editor rules. Skill instructions are in English; **report output is Chinese** and saved under `.code-reviews/<app-name>/` — this repo hosts multiple independent AI apps, each with its own review archive (see [`.code-reviews/README.md`](../../../.code-reviews/README.md)).
 
 ## When to Use
 
@@ -18,10 +18,11 @@ OMX dual-lane review + project standards + AI editor rules. Skill instructions a
 ## Workflow Overview
 
 1. **Determine scope** (priority rules below)
-2. **Load standards** (project + editor rules)
-3. **Run dual-lane review in parallel** (`code-reviewer` + `architect`)
-4. **Synthesize verdict** per OMX rules
-5. **Write Chinese report** to `.code-reviews/{n}-{slug}/`
+2. **Determine app archive** — which `<app-name>` this scope belongs to (see Directory Layout below)
+3. **Load standards** (project + editor rules)
+4. **Run dual-lane review in parallel** (`code-reviewer` + `architect`)
+5. **Synthesize verdict** per OMX rules
+6. **Write Chinese report** to `.code-reviews/<app-name>/{n}-{slug}/`
 
 ---
 
@@ -183,26 +184,28 @@ Reports are **written in Chinese** (headings, summary, findings, checklist, note
 
 ```
 .code-reviews/
-  {n}-{slug}/
-    {tool}-review.md       # initial review
+  {app-name}/
+    {n}-{slug}/
+      {tool}-review.md       # initial review
 ```
 
-- Root: `.code-reviews/` (create if missing)
-- One review scope → **one subfolder**; different AI tools write separate files under the same scope without overwriting
+- Root: `.code-reviews/<app-name>/` (create the app folder if missing)
+- **`{app-name}`** — the app this review's scope belongs to. Infer it from the diff: which `apps/<name>` it touches, or which app owns the touched `packages/*` (check that package's README "used by" section, or [`docs/ai/core/project-context.md`](../../../docs/ai/core/project-context.md)). All existing apps/packages (`apps/model-runtime-demo`, `apps/api`, `apps/web`, `packages/ai-core`, `model-ollama`, `memory-postgres`, `tool-web-search*`, `story-core`, `story-postgres`) belong to `companion`. If scope spans multiple apps or doesn't map cleanly to one, ask the user which `{app-name}` to file under.
+- One review scope → **one subfolder** inside that app's archive; different AI tools write separate files under the same scope without overwriting
 
 ### Folder Naming `{n}-{slug}`
 
-| Part     | Rule                                                                                  |
-| -------- | ------------------------------------------------------------------------------------- |
-| `{n}`    | Scan `.code-reviews/` for folders matching `^\d+-`, take max+1; start at `0` if empty |
-| `{slug}` | See table below                                                                       |
+| Part     | Rule                                                                                                                                                                                                     |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{n}`    | Scan `.code-reviews/<app-name>/` (or its versioned subfolder, if that app uses release folders like Companion SDK's `v1.0/`, `v1.1/`, …) for folders matching `^\d+-`, take max+1; start at `0` if empty |
+| `{slug}` | See table below                                                                                                                                                                                          |
 
 | Scope type                                                    | `{slug}` rule                           | Example                      |
 | ------------------------------------------------------------- | --------------------------------------- | ---------------------------- |
 | User-specified commit, short SHA, or **HEAD / latest commit** | First **7 lowercase chars** of full SHA | `0-63288da`, `1-ca46e25`     |
 | Staged / unstaged / path scope (no commit context)            | kebab-case scope hint (≤40 chars)       | `staged`, `packages-ai-core` |
 
-**Commit scopes must** use `{n}-{7-char-sha}` format, consistent with archived folders `.code-reviews/0-63288da` and `.code-reviews/1-ca46e25`.
+**Commit scopes must** use `{n}-{7-char-sha}` format, consistent with archived folders `.code-reviews/companion/v1.0/0-63288da` and `.code-reviews/companion/v1.0/1-ca46e25`.
 
 When resolving slug: if scope maps to a commit, run `git rev-parse` for the full SHA, then take the first 7 characters.
 
@@ -227,7 +230,7 @@ Common `{tool}` values:
 
 ### Report Template (`{tool}-review.md`)
 
-Reference: `.code-reviews/0-63288da/cursor-review.md`, `.code-reviews/1-ca46e25/cursor-review.md`.
+Reference: `.code-reviews/companion/v1.0/0-63288da/cursor-review.md`, `.code-reviews/companion/v1.0/1-ca46e25/cursor-review.md`.
 
 ```markdown
 # 代码审查 — {范围简述}
@@ -325,7 +328,7 @@ Reference: `.code-reviews/0-63288da/cursor-review.md`, `.code-reviews/1-ca46e25/
 
 ### Chat Reply
 
-After writing the file, reply briefly with: verdict, key findings, report path (e.g. `.code-reviews/2-ca46e25/cursor-review.md`).
+After writing the file, reply briefly with: verdict, key findings, report path (e.g. `.code-reviews/<app-name>/2-ca46e25/cursor-review.md`).
 
 ---
 

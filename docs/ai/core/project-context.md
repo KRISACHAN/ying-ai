@@ -2,28 +2,30 @@
 
 ## Overview
 
-**ying-companion** is a pnpm + Turborepo monorepo (TypeScript, ESLint, Prettier, Husky, commitlint).
+**ying-ai** is a pnpm + Turborepo monorepo that hosts multiple independent AI apps (`apps/*`) built on shared, reusable AI capabilities and SDKs (`packages/*`). TypeScript, ESLint, Prettier, Husky, and commitlint apply workspace-wide.
 
-**V1.0** delivered the core SDK, Postgres memory, and debug workbench. **V1.1** added Persona, workflow streaming, model profiles, tool planning, Ollama, and NDJSON. **V1.2** added provider-neutral Web Search and an AI SDK UI chat surface. **V1.3** adds the independent `story-core` runtime, `story-postgres` persistence, and a playable Story Workbench with live/persisted debug data.
+**Adding a new app:** create `apps/<name>` with its own `package.json` (`@ying-ai/<name>`) and `README.md`; reuse `packages/*` where it fits, or add a new `packages/<capability-name>` once logic is shared by 2+ apps. No workspace config changes are needed — `pnpm-workspace.yaml` already globs `apps/*` and `packages/*`.
+
+**First app — Companion SDK** (`apps/model-runtime-demo` + `packages/ai-core`, `model-ollama`, `memory-postgres`, `tool-web-search*`, `story-core`, `story-postgres`): **V1.0** delivered the core SDK, Postgres memory, and debug workbench. **V1.1** added Persona, workflow streaming, model profiles, tool planning, Ollama, and NDJSON. **V1.2** added provider-neutral Web Search and an AI SDK UI chat surface. **V1.3** added the independent `story-core` runtime, `story-postgres` persistence, and a playable Story Workbench with live/persisted debug data.
 
 ## Layout
 
-```
-ying-companion/
-├── apps/
-│   ├── api/                  # @ying-companion/api
-│   ├── web/                  # @ying-companion/web
-│   └── model-runtime-demo/   # @ying-companion/model-runtime-demo (Companion + V1.3 Story Workbench)
-├── packages/
-│   ├── ai-core/              # @ying-companion/ai-core
-│   ├── model-ollama/         # @ying-companion/model-ollama (V1.1)
-│   ├── memory-postgres/      # @ying-companion/memory-postgres
-│   ├── tool-web-search/      # @ying-companion/tool-web-search
-│   ├── tool-web-search-tavily/ # @ying-companion/tool-web-search-tavily
-│   ├── story-core/           # @ying-companion/story-core
-│   └── story-postgres/       # @ying-companion/story-postgres
+```txt
+ying-ai/
+├── apps/                      # Independent AI apps — one per folder
+│   ├── api/                  # @ying-ai/api (scaffold)
+│   ├── web/                  # @ying-ai/web (scaffold)
+│   └── model-runtime-demo/   # @ying-ai/model-runtime-demo — Companion SDK + Story Mode (first app)
+├── packages/                  # Reusable AI capabilities/SDKs — shared across apps
+│   ├── ai-core/              # @ying-ai/ai-core
+│   ├── model-ollama/         # @ying-ai/model-ollama
+│   ├── memory-postgres/      # @ying-ai/memory-postgres
+│   ├── tool-web-search/      # @ying-ai/tool-web-search
+│   ├── tool-web-search-tavily/ # @ying-ai/tool-web-search-tavily
+│   ├── story-core/           # @ying-ai/story-core
+│   └── story-postgres/       # @ying-ai/story-postgres
 ├── docs/ai/                  # AI agent operating rules
-├── .requirements/            # Requirement and stage specs (v1.0 through v1.3)
+├── .requirements/            # Requirement and stage specs (per app; Companion SDK covers v1.0-v1.3)
 ├── .code-reviews/            # Code review archive
 ├── .codex/                   # Codex / OMX project scope
 └── turbo.json                # Turborepo task graph
@@ -47,9 +49,9 @@ ying-companion/
 Use Turbo filters to target a single package:
 
 ```bash
-pnpm turbo run build --filter @ying-companion/ai-core
-pnpm turbo run typecheck --filter @ying-companion/model-runtime-demo
-pnpm turbo run lint --filter @ying-companion/web
+pnpm turbo run build --filter @ying-ai/ai-core
+pnpm turbo run typecheck --filter @ying-ai/model-runtime-demo
+pnpm turbo run lint --filter @ying-ai/web
 ```
 
 Or run scripts from the package directory:
@@ -62,24 +64,24 @@ cd packages/ai-core && pnpm build
 ### V1.2 verification scripts
 
 ```bash
-pnpm --filter @ying-companion/model-ollama verify:adapter
-pnpm --filter @ying-companion/model-runtime-demo verify:stream-contract
-pnpm --filter @ying-companion/model-runtime-demo verify:chat-ui-adapter
-pnpm --filter @ying-companion/tool-web-search verify:web-search-contract
-pnpm --filter @ying-companion/model-runtime-demo verify:web-search-workflow
+pnpm --filter @ying-ai/model-ollama verify:adapter
+pnpm --filter @ying-ai/model-runtime-demo verify:stream-contract
+pnpm --filter @ying-ai/model-runtime-demo verify:chat-ui-adapter
+pnpm --filter @ying-ai/tool-web-search verify:web-search-contract
+pnpm --filter @ying-ai/model-runtime-demo verify:web-search-workflow
 ```
 
 ### V1.3 Story verification scripts
 
 ```bash
-pnpm --filter @ying-companion/story-core verify:story-contract
-pnpm --filter @ying-companion/story-core verify:story-workflow
-pnpm --filter @ying-companion/story-postgres verify:story-postgres
-pnpm --filter @ying-companion/story-postgres verify:story-recovery
-pnpm --filter @ying-companion/model-runtime-demo verify:story-stream-contract
-pnpm --filter @ying-companion/model-runtime-demo verify:story-ui-adapter
-pnpm --filter @ying-companion/model-runtime-demo verify:story-workbench-planner
-pnpm --filter @ying-companion/model-runtime-demo verify:story-workbench-data
+pnpm --filter @ying-ai/story-core verify:story-contract
+pnpm --filter @ying-ai/story-core verify:story-workflow
+pnpm --filter @ying-ai/story-postgres verify:story-postgres
+pnpm --filter @ying-ai/story-postgres verify:story-recovery
+pnpm --filter @ying-ai/model-runtime-demo verify:story-stream-contract
+pnpm --filter @ying-ai/model-runtime-demo verify:story-ui-adapter
+pnpm --filter @ying-ai/model-runtime-demo verify:story-workbench-planner
+pnpm --filter @ying-ai/model-runtime-demo verify:story-workbench-data
 ```
 
 ## Nested Agent Context

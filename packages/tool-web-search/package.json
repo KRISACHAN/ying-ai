@@ -1,5 +1,5 @@
 {
-  "name": "@ying-companion/tool-web-search",
+  "name": "@ying-ai/tool-web-search",
   "version": "0.0.0",
   "private": true,
   "type": "commonjs",
@@ -17,6 +17,6 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@ying-companion/ai-core": "workspace:*"
+    "@ying-ai/ai-core": "workspace:*"
   }
 }

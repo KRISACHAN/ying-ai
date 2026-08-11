@@ -5,7 +5,7 @@ import type {
   GenerateInput,
   GenerateOutput,
   GenerateStreamChunk,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 import {
   DefaultStoryTransitionValidator,
   fogHarborMystery,
@@ -15,7 +15,7 @@ import {
   type StoryMessage,
   type StoryNarrativeSummary,
   type StoryTurnPlan,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 
 const sessionId = "model-story-contract-session";
 const userInput = "伊芙琳冷冷地看了一眼，就开始自顾自地调酒。";

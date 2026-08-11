@@ -1,4 +1,4 @@
-import type { StoryState, StoryTurnPlan, StoryWorkflowEvent } from "@ying-companion/story-core";
+import type { StoryState, StoryTurnPlan, StoryWorkflowEvent } from "@ying-ai/story-core";
 
 import type { JsonValue } from "./chat-stream-wire";
 

@@ -2,7 +2,7 @@
  * 进程内长期记忆实现（开发/调试用）。
  *
  * recall 使用简单关键词匹配打分（非真实向量）；save 去重后存入内存数组，进程重启即丢失。
- * 生产持久化请使用 @ying-companion/memory-postgres 并注入 Core。
+ * 生产持久化请使用 @ying-ai/memory-postgres 并注入 Core。
  */
 import type {
   ExtractedMemory,

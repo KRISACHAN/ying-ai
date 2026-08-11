@@ -1,6 +1,6 @@
 import { inspectMemoryHealth, type MemoryDatabaseStatus } from "../../lib/memory-config";
 
-import type { MemoryDatabaseHealth } from "@ying-companion/memory-postgres";
+import type { MemoryDatabaseHealth } from "@ying-ai/memory-postgres";
 
 interface MemoryHealthResponse {
   ok: boolean;

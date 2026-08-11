@@ -1,4 +1,4 @@
-import type { SafetyCheckResult, SafetyProvider, CoreProviderMeta } from "@ying-companion/ai-core";
+import type { SafetyCheckResult, SafetyProvider, CoreProviderMeta } from "@ying-ai/ai-core";
 import type { StoryDefinition } from "../src/abstractions/story-definition";
 import type { StoryState } from "../src/abstractions/story-state";
 import type { StoryStateChange } from "../src/abstractions/story-state-change";

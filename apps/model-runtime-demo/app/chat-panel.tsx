@@ -11,7 +11,7 @@ import type {
   RecalledMemory,
   SummaryOptions,
   WorkflowTrace,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 const DEFAULT_SESSION_ID = "demo-chat-session";
 const DEFAULT_COMPANION_ID = "debug-companion";

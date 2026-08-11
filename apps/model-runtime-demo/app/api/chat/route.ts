@@ -14,7 +14,7 @@ import {
   type MemoryProvider,
   type MemoryScope,
   type SummaryOptions,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 import { loadModelConfig } from "../../lib/model-config";
 import { createConfiguredModel } from "../../lib/model-factory";

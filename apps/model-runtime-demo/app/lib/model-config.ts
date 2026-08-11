@@ -1,4 +1,4 @@
-import type { ModelCapabilities, ModelProfileOverride } from "@ying-companion/ai-core";
+import type { ModelCapabilities, ModelProfileOverride } from "@ying-ai/ai-core";
 
 import type { DemoModelProviderConfig, OpenAICompatibleModelConfig } from "./model-factory";
 
@@ -40,7 +40,7 @@ type OpenAIDebugRetry = Extract<DebugModelConfig, { provider: "openai-compatible
 /**
  * 仅供 demo 宿主使用：从环境变量读取模型运行时配置。
  *
- * 注意：`@ying-companion/ai-core` 不读取环境变量，配置必须由宿主读取后以参数传入。
+ * 注意：`@ying-ai/ai-core` 不读取环境变量，配置必须由宿主读取后以参数传入。
  */
 export function loadModelConfig(env: NodeJS.ProcessEnv): OpenAICompatibleModelConfig {
   const options: OpenAICompatibleModelConfig = {

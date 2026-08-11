@@ -1,6 +1,6 @@
-import { createWebSearchTool, type WebSearchProvider } from "@ying-companion/tool-web-search";
-import { TavilyWebSearchProvider } from "@ying-companion/tool-web-search-tavily";
-import type { ModelCapabilities } from "@ying-companion/ai-core";
+import { createWebSearchTool, type WebSearchProvider } from "@ying-ai/tool-web-search";
+import { TavilyWebSearchProvider } from "@ying-ai/tool-web-search-tavily";
+import type { ModelCapabilities } from "@ying-ai/ai-core";
 
 import { readOptionalEnv } from "./model-config";
 import type { WebSearchAvailability } from "./web-search-availability";

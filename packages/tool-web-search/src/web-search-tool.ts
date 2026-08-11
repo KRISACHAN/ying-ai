@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolHandler, ToolResult } from "@ying-companion/ai-core";
+import type { ToolDefinition, ToolHandler, ToolResult } from "@ying-ai/ai-core";
 
 import { formatWebSearchForModel } from "./format-web-search-for-model";
 import type { WebSearchInput, WebSearchProvider } from "./types";

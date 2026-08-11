@@ -7,8 +7,8 @@ import type {
   MemoryScope,
   MemorySource,
   MemoryType,
-} from "@ying-companion/ai-core";
-import { OpenAIEmbeddingProvider } from "@ying-companion/memory-postgres";
+} from "@ying-ai/ai-core";
+import { OpenAIEmbeddingProvider } from "@ying-ai/memory-postgres";
 
 import { createId, getDebugPool } from "./debug-db";
 import { LOCAL_DEBUG_OWNER } from "./debug-owner";

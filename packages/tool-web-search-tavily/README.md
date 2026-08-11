@@ -1,14 +1,16 @@
-# @ying-companion/tool-web-search-tavily
+# @ying-ai/tool-web-search-tavily
 
-Tavily adapter for `@ying-companion/tool-web-search`.
+**English** | [简体中文](./README.zh-CN.md)
+
+Tavily adapter for `@ying-ai/tool-web-search`.
 
 This package is a server-side adapter. It does not read environment variables and does not depend on the demo app.
 
 ## Quick start
 
 ```ts
-import { createWebSearchTool } from "@ying-companion/tool-web-search";
-import { TavilyWebSearchProvider } from "@ying-companion/tool-web-search-tavily";
+import { createWebSearchTool } from "@ying-ai/tool-web-search";
+import { TavilyWebSearchProvider } from "@ying-ai/tool-web-search-tavily";
 
 const provider = new TavilyWebSearchProvider({ apiKey: process.env.TAVILY_API_KEY! });
 const tool = createWebSearchTool({ provider });
@@ -26,8 +28,8 @@ When `evaluateSearchQuality()` marks the primary response as `poor`, the provide
 ## Verification
 
 ```bash
-pnpm --filter @ying-companion/tool-web-search-tavily test
-pnpm --filter @ying-companion/tool-web-search-tavily verify:web-search-contract
+pnpm --filter @ying-ai/tool-web-search-tavily test
+pnpm --filter @ying-ai/tool-web-search-tavily verify:web-search-contract
 ```
 
 The contract script loads `apps/model-runtime-demo/.env` and requires a real `TAVILY_API_KEY`.

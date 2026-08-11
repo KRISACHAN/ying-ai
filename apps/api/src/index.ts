@@ -1,1 +1,1 @@
-export const appName = "@ying-companion/api";
+export const appName = "@ying-ai/api";

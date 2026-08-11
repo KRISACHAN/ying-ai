@@ -24,7 +24,7 @@ import type {
   MemorySource,
   MemoryType,
   RecalledMemory,
-} from "@ying-companion/ai-core";
+} from "@ying-ai/ai-core";
 
 /** PostgresMemoryProvider 构造参数；tableName 须为合法 SQL 标识符。 */
 export interface PostgresMemoryProviderOptions {

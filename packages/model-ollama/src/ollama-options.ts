@@ -1,4 +1,4 @@
-import type { ModelCapabilities, ModelProfileOverride } from "@ying-companion/ai-core";
+import type { ModelCapabilities, ModelProfileOverride } from "@ying-ai/ai-core";
 
 import { OllamaAdapterError } from "./errors";
 

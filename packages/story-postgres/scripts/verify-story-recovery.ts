@@ -8,7 +8,7 @@ import {
   KeywordLoreProvider,
   type StoryStateChange,
   type StoryTurnPlan,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 import {
   PostgresStoryMessageProvider,
   PostgresStorySessionProvider,

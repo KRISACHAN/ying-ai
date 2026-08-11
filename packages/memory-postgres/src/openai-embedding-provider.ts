@@ -4,7 +4,7 @@
  * 调用 POST /v1/embeddings 将文本转为浮点向量，供 PostgresMemoryProvider 做 recall/save。
  * 配置由宿主传入，本类不读取环境变量；默认模型 text-embedding-3-small（1536 维）。
  */
-import type { EmbeddingProvider, EmbedInput, EmbedResult } from "@ying-companion/ai-core";
+import type { EmbeddingProvider, EmbedInput, EmbedResult } from "@ying-ai/ai-core";
 
 /** OpenAIEmbeddingProvider 构造参数；fetch 可注入以便测试。 */
 export interface OpenAIEmbeddingProviderOptions {

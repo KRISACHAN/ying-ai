@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { DebugRepository } from "../../../lib/debug-repository";
-import type { MemoryRecord } from "@ying-companion/ai-core";
+import type { MemoryRecord } from "@ying-ai/ai-core";
 import {
   CompanionMemoryAdminRepository,
   createCompanionMemoryScope,

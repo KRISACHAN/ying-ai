@@ -628,9 +628,7 @@ dispatchWireEvent
 ### 8.5 Wire Event runtime guard
 
 ```ts
-export function validateChatWorkflowStreamWireEvent(
-  value: unknown,
-): ChatWorkflowStreamWireEvent;
+export function validateChatWorkflowStreamWireEvent(value: unknown): ChatWorkflowStreamWireEvent;
 ```
 
 最低校验：

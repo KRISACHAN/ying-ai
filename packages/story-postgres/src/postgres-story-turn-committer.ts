@@ -3,8 +3,8 @@ import type {
   CommittedStoryTurn,
   StoryMessage,
   StoryTurnCommitter,
-} from "@ying-companion/story-core";
-import { StoryWorkflowError } from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
+import { StoryWorkflowError } from "@ying-ai/story-core";
 import type { PoolClient } from "pg";
 import type { StoryPostgresClient } from "./client";
 import { withTransaction } from "./client";

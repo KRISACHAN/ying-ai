@@ -10,7 +10,7 @@ import {
   type CommittedStoryTurn,
   type StoryMessage,
   type StoryNarrativeSummary,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 
 import {
   createPersistedStoryDebugSnapshot,

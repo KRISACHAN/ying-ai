@@ -8,7 +8,7 @@ USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES 
 <!-- END AUTONOMY DIRECTIVE -->
 <!-- omx:generated:agents-md -->
 
-> **ying-companion:** OMX operating contract in `docs/ai/`. Project entry: [AGENTS.md](../AGENTS.md). **All tools** (including Cursor) must read this file when using `.codex/` skills, agents, or prompts. Native assets only — no README under `.codex/`.
+> **ying-ai:** OMX operating contract in `docs/ai/`. Project entry: [AGENTS.md](../AGENTS.md). **All tools** (including Cursor) must read this file when using `.codex/` skills, agents, or prompts. Native assets only — no README under `.codex/`.
 
 # oh-my-codex - Intelligent Multi-Agent Orchestration
 

@@ -1,141 +1,143 @@
-# @ying-companion/ai-core
+# @ying-ai/ai-core
 
-AI Companion Core 纯 SDK 核心包（V1.0 基线 + V1.1 流式扩展）。提供可插拔的 Provider 抽象、模型运行时与聊天工作流编排，供宿主应用注入配置并驱动「用户输入 → 伴侣回复」的完整生命周期。
+**English** | [简体中文](./README.zh-CN.md)
 
----
-
-## 1. 包定位与边界
-
-`@ying-companion/ai-core` 是**业务无关**的伴侣 Core：
-
-- 定义 Persona、Memory、Emotion、Tool、Safety、Workflow 等全部能力插槽
-- 提供默认/占位实现，未接入完整能力时仍可运行
-- 通过 `CompanionCore.executeWorkflow()` 暴露单轮聊天入口
-- 通过 `CompanionCore.streamWorkflow()` 暴露 V1.1 工作流级 Core 事件流入口
-- **不读**环境变量、**不连**数据库、**不写**调试 UI（见 [`memory-postgres`](../memory-postgres/README.md) 与 [`model-runtime-demo`](../../apps/model-runtime-demo/README.md)）
-
-| 不包含                     | 归属                       |
-| -------------------------- | -------------------------- |
-| `DATABASE_URL` / `pg.Pool` | 宿主 + `memory-postgres`   |
-| 用户系统 / 鉴权            | 后续产品 API / Web         |
-| `console` / 调试面板       | 宿主 + `CoreObserver` 事件 |
+AI Companion Core pure SDK package (V1.0 baseline + V1.1 streaming extensions). Provides pluggable Provider abstractions, model runtime, and chat workflow orchestration so host apps can inject configuration and drive the full “user input → companion reply” lifecycle.
 
 ---
 
-## 2. 模块说明
+## 1. Package role and boundaries
 
-以下按 `src/` 目录组织。每个模块都是**可替换插槽**；Workflow 只依赖 `abstractions/` 中的接口。
+`@ying-ai/ai-core` is a **business-agnostic** companion Core:
 
-### 2.1 `abstractions/` — 公共契约（稳定 API）
+- Defines all capability slots: Persona, Memory, Emotion, Tool, Safety, Workflow, and more
+- Ships default / placeholder implementations so it still runs before full capabilities are wired
+- Exposes single-turn chat via `CompanionCore.executeWorkflow()`
+- Exposes the V1.1 workflow-level Core event stream via `CompanionCore.streamWorkflow()`
+- **Does not** read env vars, **does not** connect to a database, **does not** own debug UI (see [`memory-postgres`](../memory-postgres/README.md) and [`model-runtime-demo`](../../apps/model-runtime-demo/README.md))
 
-| 文件                 | 模块           | 作用                                                                                                             |
-| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `provider.ts`        | Provider 基础  | `CoreProvider` + `CoreProviderMeta`：所有插槽的统一父类型与稳定 `meta.id`                                        |
-| `core-context.ts`    | 依赖注入上下文 | `CompanionCoreContext`：工厂装配后的 Provider 集合；`ChatWorkflowCoreContext` 供 Workflow 使用                   |
-| `model.ts`           | 模型运行时     | `ChatModel`、`ModelProfile`、`GenerateInput/Output`、`ModelRuntimeInfo`；Core 与 LLM 的唯一边界                  |
-| `tool-planning.ts`   | 工具规划       | `ToolPlanningProvider`、`ToolPlan`：独立于最终回复生成的工具调用决策契约                                         |
-| `persona.ts`         | 伴侣角色       | `PersonaProvider`、`CompanionPersona`：名称、性别、性格、说话风格、用户称呼、兴趣与外貌设定等                    |
-| `memory.ts`          | 长期记忆       | `MemoryProvider`（recall/save）、`MemoryExtractor`（抽取）、`EmbeddingProvider`（向量化）、`MemoryScope`（隔离） |
-| `summary.ts`         | 滚动摘要       | `SummaryProvider`（load/save）、`SummaryUpdater`（压缩旧消息为 `ConversationSummary`）                           |
-| `emotion.ts`         | 情绪状态机     | `EmotionEngine`：`analyze` 识别情绪、`transition` 做状态转移（阶段 5 接入 Workflow）                             |
-| `tool.ts`            | 工具调用       | `ToolRegistry`：注册工具、执行 `tool_call`、返回 `ToolResult`；V1 参数 schema 使用 Core 自己的 object 约定       |
-| `safety.ts`          | 内容安全       | `SafetyProvider`：`guardInput` / `guardOutput`，拒绝时 Workflow 抛错                                             |
-| `workflow.ts`        | 聊天编排       | `ChatWorkflow`、`ChatWorkflowInput/Output`：宿主与 Core 之间的主业务契约；`stream` 是 V1.1 可选能力              |
-| `workflow-stream.ts` | 流式协议       | `ChatWorkflowStreamEvent`、`SafeWorkflowError`：Core 内部流事件与安全错误 DTO                                    |
-| `observer.ts`        | 可观测性       | `CoreObserver`、`CoreEvent`：各阶段 `*:start` / `*:end` 事件，供宿主展示调试信息                                 |
+| Not included               | Owned by                     |
+| -------------------------- | ---------------------------- |
+| `DATABASE_URL` / `pg.Pool` | Host + `memory-postgres`     |
+| User system / auth         | Later product API / Web      |
+| `console` / debug panel    | Host + `CoreObserver` events |
 
-### 2.2 `core/` — 门面与工厂
+---
 
-| 文件                        | 作用                                                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `companion-core.ts`         | `CompanionCore` 门面：`inspect()` 查看已挂载 Provider；`executeWorkflow()` / `streamWorkflow()` 委托 Workflow |
-| `companion-core-factory.ts` | `createCompanionCore()`：组装各 Provider 默认值；注入 `memory` 时自动配 `ModelMemoryExtractor` 等             |
+## 2. Module overview
+
+Organized under `src/`. Every module is a **replaceable slot**; Workflow depends only on interfaces in `abstractions/`.
+
+### 2.1 `abstractions/` — public contracts (stable API)
+
+| File                 | Module                | Role                                                                                                                      |
+| -------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `provider.ts`        | Provider base         | `CoreProvider` + `CoreProviderMeta`: unified parent type and stable `meta.id` for all slots                               |
+| `core-context.ts`    | DI context            | `CompanionCoreContext`: Provider set after factory assembly; `ChatWorkflowCoreContext` for Workflow                       |
+| `model.ts`           | Model runtime         | `ChatModel`, `ModelProfile`, `GenerateInput/Output`, `ModelRuntimeInfo`; sole boundary between Core and LLM               |
+| `tool-planning.ts`   | Tool planning         | `ToolPlanningProvider`, `ToolPlan`: tool-call decision contract separate from final reply generation                      |
+| `persona.ts`         | Companion persona     | `PersonaProvider`, `CompanionPersona`: name, gender, personality, speaking style, user address, hobbies, appearance, etc. |
+| `memory.ts`          | Long-term memory      | `MemoryProvider` (recall/save), `MemoryExtractor`, `EmbeddingProvider`, `MemoryScope`                                     |
+| `summary.ts`         | Rolling summary       | `SummaryProvider` (load/save), `SummaryUpdater` (compress old messages into `ConversationSummary`)                        |
+| `emotion.ts`         | Emotion state machine | `EmotionEngine`: `analyze` and `transition` (wired into Workflow in stage 5)                                              |
+| `tool.ts`            | Tool calling          | `ToolRegistry`: register tools, execute `tool_call`, return `ToolResult`; V1 param schema uses Core’s object convention   |
+| `safety.ts`          | Content safety        | `SafetyProvider`: `guardInput` / `guardOutput`; Workflow throws on reject                                                 |
+| `workflow.ts`        | Chat orchestration    | `ChatWorkflow`, `ChatWorkflowInput/Output`: main host↔Core business contract; `stream` is optional in V1.1                |
+| `workflow-stream.ts` | Streaming protocol    | `ChatWorkflowStreamEvent`, `SafeWorkflowError`: Core-internal stream events and safe error DTOs                           |
+| `observer.ts`        | Observability         | `CoreObserver`, `CoreEvent`: per-stage `*:start` / `*:end` events for host debug UI                                       |
+
+### 2.2 `core/` — facade and factory
+
+| File                        | Role                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `companion-core.ts`         | `CompanionCore` facade: `inspect()` for mounted Providers; `executeWorkflow()` / `streamWorkflow()` delegate to Workflow |
+| `companion-core-factory.ts` | `createCompanionCore()`: assemble Provider defaults; auto-wire `ModelMemoryExtractor` when `memory` is injected          |
 
 ### 2.3 `factories/` · `config/` · `errors/`
 
-| 路径                                           | 作用                                                                        |
-| ---------------------------------------------- | --------------------------------------------------------------------------- |
-| `factories/model.factory.ts`                   | `createModel()`：创建 `OpenAICompatibleModel`（宿主传入 apiKey / model 等） |
-| `config/model-config.ts`                       | `OpenAICompatibleConfig`：主模型、降级模型、重试次数类型                    |
-| `errors/model-runtime-error.ts`                | `ModelRuntimeError`：主/降级模型全部重试失败时抛出                          |
-| `errors/model-capability-unavailable-error.ts` | `ModelCapabilityUnavailableError`：候选模型不满足本次调用所需能力时抛出     |
+| Path                                           | Role                                                                                    |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `factories/model.factory.ts`                   | `createModel()`: create `OpenAICompatibleModel` (host passes apiKey / model, etc.)      |
+| `config/model-config.ts`                       | `OpenAICompatibleConfig`: primary model, fallback model, retry count types              |
+| `errors/model-runtime-error.ts`                | `ModelRuntimeError`: thrown when primary and fallback retries all fail                  |
+| `errors/model-capability-unavailable-error.ts` | `ModelCapabilityUnavailableError`: thrown when no candidate meets required capabilities |
 
-### 2.4 `implementations/` — 内置默认实现
+### 2.4 `implementations/` — built-in defaults
 
-| 子目录                                            | 默认实现                      | 作用                                                                                              |
-| ------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| `model/openai.ts`                                 | `OpenAICompatibleModel`       | Vercel AI SDK 适配；`generate` / `stream`、重试与降级                                             |
-| `tool-planning/default-tool-planning-provider.ts` | `DefaultToolPlanningProvider` | 调用 `generate({ requiredCapabilities: { toolCalling: true } })` 只产出 `no_tool` 或 `tool_calls` |
-| `workflow/simple-chat-workflow.ts`                | `SimpleChatWorkflow`          | V1 参考编排（阶段 3～7）：完整单轮流程、工具循环、Workflow Trace                                  |
-| `workflow/disabled-chat-workflow.ts`              | `DisabledChatWorkflow`        | 显式禁用 Workflow 时 `execute` 抛错                                                               |
-| `persona/default-persona-provider.ts`             | `DefaultPersonaProvider`      | 默认角色「映映」                                                                                  |
-| `persona/persona-prompt-builder.ts`               | Persona Prompt Builder        | normalize 结构化 Persona，生成可预览 Persona 段落与最终 system prompt                             |
-| `memory/noop-memory-provider.ts`                  | `NoopMemoryProvider`          | 未注入 memory 时的空实现                                                                          |
-| `memory/in-memory-memory-provider.ts`             | `InMemoryMemoryProvider`      | 进程内关键词 recall（开发调试用）                                                                 |
-| `memory/model-memory-extractor.ts`                | `ModelMemoryExtractor`        | LLM + Zod 结构化记忆抽取                                                                          |
-| `memory/prompt-formatter.ts`                      | `formatMemoriesForPrompt`     | 将 recall 结果格式化为 prompt 文本块                                                              |
-| `summary/noop-summary-provider.ts`                | `NoopSummaryProvider`         | 摘要存储空实现                                                                                    |
-| `summary/in-memory-summary-provider.ts`           | `InMemorySummaryProvider`     | 进程内摘要 Map（demo 用）                                                                         |
-| `summary/model-summary-updater.ts`                | `ModelSummaryUpdater`         | LLM 驱动滚动摘要更新                                                                              |
-| `summary/history-utils.ts`                        | `splitForSummary` 等          | 长对话 history 切分（旧消息 vs 近期消息）                                                         |
-| `summary/prompt-formatter.ts`                     | `formatSummaryForPrompt`      | 摘要注入 prompt                                                                                   |
-| `emotion/disabled-emotion-engine.ts`              | `DisabledEmotionEngine`       | 情绪占位；默认返回 neutral，避免自动增加模型调用                                                  |
-| `emotion/model-emotion-engine.ts`                 | `ModelEmotionEngine`          | 复用 `ChatModel` 推断伴侣意向情绪并执行状态转移                                                   |
-| `emotion/prompt-formatter.ts`                     | `formatEmotionForPrompt`      | 将最终情绪状态格式化为 prompt 文本块                                                              |
-| `tool/empty-tool-registry.ts`                     | `EmptyToolRegistry`           | 默认空工具注册表；无工具时聊天行为保持不变                                                        |
-| `tool/local-tool-registry.ts`                     | `LocalToolRegistry`           | 本地工具注册、列出、执行与受控错误包装                                                            |
-| `tool/tool-adapter.ts`                            | 工具适配器                    | `ToolDefinition -> GenerateInput.tools`、`ModelToolCall -> ToolCall`、follow-up messages          |
-| `tool/format-tool-results.ts`                     | 工具结果格式化                | 将 `ToolResult` 序列化为二次生成的 tool role 消息内容                                             |
-| `safety/passthrough-safety-provider.ts`           | `PassthroughSafetyProvider`   | 安全透传（一律放行）                                                                              |
-| `observer/noop-core-observer.ts`                  | `NoopCoreObserver`            | 丢弃所有事件                                                                                      |
+| Path                                              | Default impl                  | Role                                                                                                       |
+| ------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `model/openai.ts`                                 | `OpenAICompatibleModel`       | Vercel AI SDK adapter; `generate` / `stream`, retry and fallback                                           |
+| `tool-planning/default-tool-planning-provider.ts` | `DefaultToolPlanningProvider` | Calls `generate({ requiredCapabilities: { toolCalling: true } })` and only emits `no_tool` or `tool_calls` |
+| `workflow/simple-chat-workflow.ts`                | `SimpleChatWorkflow`          | V1 reference orchestration (stages 3–7): full single-turn flow, tool loop, Workflow Trace                  |
+| `workflow/disabled-chat-workflow.ts`              | `DisabledChatWorkflow`        | Throws on `execute` when Workflow is explicitly disabled                                                   |
+| `persona/default-persona-provider.ts`             | `DefaultPersonaProvider`      | Default persona “映映” (Ying Ying)                                                                         |
+| `persona/persona-prompt-builder.ts`               | Persona Prompt Builder        | Normalize structured Persona; build previewable Persona paragraph and final system prompt                  |
+| `memory/noop-memory-provider.ts`                  | `NoopMemoryProvider`          | Empty impl when memory is not injected                                                                     |
+| `memory/in-memory-memory-provider.ts`             | `InMemoryMemoryProvider`      | In-process keyword recall (dev/debug)                                                                      |
+| `memory/model-memory-extractor.ts`                | `ModelMemoryExtractor`        | LLM + Zod structured memory extraction                                                                     |
+| `memory/prompt-formatter.ts`                      | `formatMemoriesForPrompt`     | Format recall results into prompt text blocks                                                              |
+| `summary/noop-summary-provider.ts`                | `NoopSummaryProvider`         | Empty summary storage                                                                                      |
+| `summary/in-memory-summary-provider.ts`           | `InMemorySummaryProvider`     | In-process summary Map (demo)                                                                              |
+| `summary/model-summary-updater.ts`                | `ModelSummaryUpdater`         | LLM-driven rolling summary updates                                                                         |
+| `summary/history-utils.ts`                        | `splitForSummary`, etc.       | Split long history (old vs recent messages)                                                                |
+| `summary/prompt-formatter.ts`                     | `formatSummaryForPrompt`      | Inject summary into prompt                                                                                 |
+| `emotion/disabled-emotion-engine.ts`              | `DisabledEmotionEngine`       | Emotion placeholder; returns neutral by default to avoid extra model calls                                 |
+| `emotion/model-emotion-engine.ts`                 | `ModelEmotionEngine`          | Reuses `ChatModel` to infer companion intended emotion and run transitions                                 |
+| `emotion/prompt-formatter.ts`                     | `formatEmotionForPrompt`      | Format final emotion state into a prompt text block                                                        |
+| `tool/empty-tool-registry.ts`                     | `EmptyToolRegistry`           | Default empty registry; chat behavior unchanged when no tools                                              |
+| `tool/local-tool-registry.ts`                     | `LocalToolRegistry`           | Local register / list / execute with controlled error wrapping                                             |
+| `tool/tool-adapter.ts`                            | Tool adapter                  | `ToolDefinition -> GenerateInput.tools`, `ModelToolCall -> ToolCall`, follow-up messages                   |
+| `tool/format-tool-results.ts`                     | Tool result formatter         | Serialize `ToolResult` into tool-role message content for follow-up generation                             |
+| `safety/passthrough-safety-provider.ts`           | `PassthroughSafetyProvider`   | Always allow                                                                                               |
+| `observer/noop-core-observer.ts`                  | `NoopCoreObserver`            | Drop all events                                                                                            |
 
-### 2.5 外部协作包（不在本包内）
+### 2.5 External collaborator packages (outside this package)
 
-| 包                                | 实现的抽象                             | 作用                                           |
-| --------------------------------- | -------------------------------------- | ---------------------------------------------- |
-| `@ying-companion/memory-postgres` | `MemoryProvider` + `EmbeddingProvider` | PostgreSQL + pgvector 持久化与语义 recall      |
-| `apps/model-runtime-demo`         | 宿主（调试用）                         | 读 env、维护 history、注入 Core、展示 Observer |
+| Package                    | Implements                             | Role                                                   |
+| -------------------------- | -------------------------------------- | ------------------------------------------------------ |
+| `@ying-ai/memory-postgres` | `MemoryProvider` + `EmbeddingProvider` | PostgreSQL + pgvector persistence and semantic recall  |
+| `apps/model-runtime-demo`  | Host (debug)                           | Read env, maintain history, inject Core, show Observer |
 
-### 2.6 当前进度 vs 目标
+### 2.6 Current progress vs goals
 
-| 阶段 | 能力                | 状态                                   |
-| ---- | ------------------- | -------------------------------------- |
-| 1    | Model Runtime       | ✅                                     |
-| 2    | Core 抽象层         | ✅                                     |
-| 3    | 聊天主链路          | ✅                                     |
-| 4    | 长期记忆 + 滚动摘要 | ✅                                     |
-| 5    | 情绪状态机          | ✅                                     |
-| 6    | 工具调用多步循环    | ✅ 本地 Tool Registry + 非流式二次生成 |
-| 7    | 完整 Workflow 编排  | ✅ Trace 契约 + 失败/降级语义固化      |
-| 8    | 调试 UI             | 部分在 demo                            |
+| Stage | Capability                         | Status                                                    |
+| ----- | ---------------------------------- | --------------------------------------------------------- |
+| 1     | Model Runtime                      | ✅                                                        |
+| 2     | Core abstraction layer             | ✅                                                        |
+| 3     | Chat main path                     | ✅                                                        |
+| 4     | Long-term memory + rolling summary | ✅                                                        |
+| 5     | Emotion state machine              | ✅                                                        |
+| 6     | Multi-step tool loop               | ✅ Local Tool Registry + non-streaming follow-up generate |
+| 7     | Full Workflow orchestration        | ✅ Trace contract + failure/degraded semantics frozen     |
+| 8     | Debug UI                           | Partially in demo                                         |
 
 ---
 
-## 3. 当前真实调用流程
+## 3. Real call flow today
 
-> 下图描述阶段 1–7 完成后，用户发送一条 prompt 到拿到最终回复的真实端到端路径。
+> The diagrams below describe the real end-to-end path after stages 1–7: from user prompt to final reply.
 
-### 3.1 参与方与数据流总览
+### 3.1 Participants and data-flow overview
 
 ```mermaid
 flowchart TB
-  subgraph UserSide["用户侧"]
-    U["用户输入 prompt"]
-    UI["宿主 UI / API"]
+  subgraph UserSide["User side"]
+    U["User prompt"]
+    UI["Host UI / API"]
   end
 
-  subgraph Host["宿主应用（职责）"]
-    HIST["维护 history / sessionId / scope"]
-    ENV["读取配置，createModel + createCompanionCore"]
-    OBS_SUB["订阅 CoreObserver 事件"]
+  subgraph Host["Host app (responsibilities)"]
+    HIST["Maintain history / sessionId / scope"]
+    ENV["Read config, createModel + createCompanionCore"]
+    OBS_SUB["Subscribe to CoreObserver events"]
   end
 
-  subgraph Core["@ying-companion/ai-core"]
+  subgraph Core["@ying-ai/ai-core"]
     EXEC["core.executeWorkflow(input)"]
-    WF["ChatWorkflow（目标：全能力编排）"]
+    WF["ChatWorkflow (goal: full-capability orchestration)"]
   end
 
-  subgraph External["可选外部实现"]
+  subgraph External["Optional external implementations"]
     PG["memory-postgres"]
     LLM["OpenAI-compatible API"]
   end
@@ -150,226 +152,226 @@ flowchart TB
   WF -.->|CoreEvent| OBS_SUB
 ```
 
-**宿主每次调用传入：**
+**Host passes on every call:**
 
 ```ts
 await core.executeWorkflow({
   sessionId: "session-1",
-  message: "用户本轮 prompt",      // 用户输入
-  history: [...],                  // 短期对话历史（宿主维护）
+  message: "user prompt this turn", // user input
+  history: [...], // short-term chat history (host-owned)
   scope: { ownerType, ownerId, companionId },
   summaryOptions: { enabled, ... },
   memoryOptions: { limit, minImportance },
 });
 ```
 
-**宿主拿到：**
+**Host receives:**
 
 ```ts
-result.text; // 最终回复（展示给用户）
-result.memories; // 本轮 recall 的记忆
-result.metadata; // 抽取/保存的记忆、摘要、debugContext 等
+result.text; // final reply (show to user)
+result.memories; // memories recalled this turn
+result.metadata; // extracted/saved memories, summary, debugContext, etc.
 ```
 
 ---
 
-### 3.2 单轮完整流程（V1 目标态）
+### 3.2 Full single-turn flow (V1 target state)
 
 ```mermaid
 flowchart TD
-  START(["用户输入 prompt\n宿主调用 executeWorkflow"]) --> A
+  START(["User prompt\nHost calls executeWorkflow"]) --> A
 
-  subgraph PhaseA["阶段 A：输入守卫与上下文准备"]
+  subgraph PhaseA["Phase A: input guard & context prep"]
     A["workflow:start"] --> B["Safety.guardInput"]
-    B -->|拒绝| ERR(["workflow:error\n抛错，无伪回复"])
-    B -->|通过| C["Persona.load"]
-    C --> D["Summary.load\n（若 summaryOptions.enabled）"]
-    D --> E["Memory.recall\nquery = 用户 prompt\n→ embedding → pgvector TopK"]
-    E --> F["Emotion.analyze\n→ transition\n（基于上轮情绪状态）"]
+    B -->|reject| ERR(["workflow:error\nthrow; no fake reply"])
+    B -->|pass| C["Persona.load"]
+    C --> D["Summary.load\n(if summaryOptions.enabled)"]
+    D --> E["Memory.recall\nquery = user prompt\n→ embedding → pgvector TopK"]
+    E --> F["Emotion.analyze\n→ transition\n(based on previous emotion)"]
   end
 
-  subgraph PhaseB["阶段 B：Prompt 拼装"]
-    F --> F2["ToolRegistry.list\n（若宿主注入工具）"]
-    F2 --> G["buildSystemPrompt\n= Persona\n+ Summary 块\n+ Memory 块\n+ Emotion 块\n+ 工具说明\n+ 回复约束"]
+  subgraph PhaseB["Phase B: prompt assembly"]
+    F --> F2["ToolRegistry.list\n(if host injected tools)"]
+    F2 --> G["buildSystemPrompt\n= Persona\n+ Summary block\n+ Memory block\n+ Emotion block\n+ tool instructions\n+ reply constraints"]
     G --> H["messages =\n[system,\n recentHistory,\n user: prompt]"]
   end
 
-  subgraph PhaseC["阶段 C：主生成与工具循环（非流式）"]
-    H --> I["Model.generate\n（注册 tools 入参）"]
-    I --> J{"有 toolCalls?"}
-    J -->|是| K["ToolRegistry.execute\n每个 tool_call"]
-    K --> L["将 ToolResult 拼回 messages"]
-    L --> I2["Model.generate\n二次生成"]
+  subgraph PhaseC["Phase C: main generation & tool loop (non-streaming)"]
+    H --> I["Model.generate\n(with registered tools)"]
+    I --> J{"toolCalls?"}
+    J -->|yes| K["ToolRegistry.execute\neach tool_call"]
+    K --> L["Append ToolResult to messages"]
+    L --> I2["Model.generate\nfollow-up"]
     I2 --> M
-    J -->|否| M["得到候选回复文本"]
+    J -->|no| M["Candidate reply text"]
   end
 
-  subgraph PhaseD["阶段 D：输出守卫与写回"]
+  subgraph PhaseD["Phase D: output guard & write-back"]
     M --> N["Safety.guardOutput"]
-    N -->|拒绝| ERR
-    N -->|通过| O["Summary.update → save\n（长对话超阈值时）"]
-    O --> P["MemoryExtractor.extract\n本轮 user + assistant"]
-    P --> Q["Memory.save\n→ embed → 持久化"]
-    Q --> END(["workflow:end\n返回 ChatWorkflowOutput.text"])
+    N -->|reject| ERR
+    N -->|pass| O["Summary.update → save\n(when long history exceeds threshold)"]
+    O --> P["MemoryExtractor.extract\nthis turn user + assistant"]
+    P --> Q["Memory.save\n→ embed → persist"]
+    Q --> END(["workflow:end\nreturn ChatWorkflowOutput.text"])
   end
 
-  E -.->|失败| G
-  F -.->|失败| G
-  O -.->|失败| P
-  P -.->|失败| END
-  Q -.->|失败| END
+  E -.->|fail| G
+  F -.->|fail| G
+  O -.->|fail| P
+  P -.->|fail| END
+  Q -.->|fail| END
 ```
 
-**当前 `SimpleChatWorkflow` 的 V1 编排约束：**
+**Current `SimpleChatWorkflow` V1 orchestration constraints:**
 
-| 步骤                | V1 行为                                                           |
-| ------------------- | ----------------------------------------------------------------- |
-| `Persona.load`      | 关键路径；失败终止本轮                                            |
-| `Safety`            | 输入/输出任一拒绝都会抛错，不返回未通过检查的文本                 |
-| `Summary.load`      | 辅助读取路径；失败降级为无摘要继续                                |
-| `Memory.recall`     | 辅助读取路径；失败降级为空召回继续                                |
-| `Emotion.analyze`   | 辅助读取路径；失败回退 previous/neutral 继续                      |
-| `ToolRegistry.list` | 关键路径；失败终止本轮                                            |
-| `Tool` 工具循环     | 非流式 generate，默认最多 1 轮工具 + 1 次二次生成                 |
-| follow-up toolCalls | 不再执行，写入 `droppedToolCalls` / `toolCallsDropped`            |
-| 写回路径            | `Summary.update/save`、`Memory.extract/save` 失败不阻断已生成回复 |
+| Step                | V1 behavior                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `Persona.load`      | Critical path; failure aborts the turn                                                         |
+| `Safety`            | Any input/output reject throws; never returns unchecked text                                   |
+| `Summary.load`      | Auxiliary read; failure degrades to no summary and continues                                   |
+| `Memory.recall`     | Auxiliary read; failure degrades to empty recall and continues                                 |
+| `Emotion.analyze`   | Auxiliary read; failure falls back to previous/neutral and continues                           |
+| `ToolRegistry.list` | Critical path; failure aborts the turn                                                         |
+| Tool loop           | Non-streaming generate; default max 1 tool round + 1 follow-up generate                        |
+| follow-up toolCalls | Not executed; recorded as `droppedToolCalls` / `toolCallsDropped`                              |
+| Write-back path     | `Summary.update/save`, `Memory.extract/save` failures do not block the already generated reply |
 
-> 默认 `createCompanionCore({ model })` 仍使用 `DisabledEmotionEngine`，不会额外触发情绪分析 LLM。
-> 宿主显式注入 `new ModelEmotionEngine({ model })` 后，Workflow 会分析意向情绪并把最终情绪拼入 prompt。
+> Default `createCompanionCore({ model })` still uses `DisabledEmotionEngine` and does not trigger an extra emotion-analysis LLM call.
+> After the host explicitly injects `new ModelEmotionEngine({ model })`, Workflow analyzes intended emotion and appends the final emotion into the prompt.
 
 ---
 
-### 3.3 按时间线的真实调用序列
+### 3.3 Real call sequence on a timeline
 
-下面用**一次用户发消息**为例，列出 Core 内部实际发生的调用（含多次 LLM / embedding）：
+Using **one user message** as the example, the actual Core-internal calls (including multiple LLM / embedding calls):
 
 ```txt
-1. 宿主
+1. Host
    └─ core.executeWorkflow({ message, history, sessionId, scope, ... })
 
-2. Workflow 开始
+2. Workflow start
    ├─ observer.emit(workflow:start)
    ├─ persona.load({ sessionId })          → CompanionPersona
-   ├─ safety.guardInput(message)          → 不通过则抛错
-   ├─ summary.load(scope)                  → ConversationSummary | null（可选）
-   ├─ memory.recall({ scope, query })      → 宿主注入的 PostgresMemoryProvider
-   │    └─ embeddingProvider.embed(query)  → 向量
+   ├─ safety.guardInput(message)          → throw if rejected
+   ├─ summary.load(scope)                  → ConversationSummary | null (optional)
+   ├─ memory.recall({ scope, query })      → host-injected PostgresMemoryProvider
+   │    └─ embeddingProvider.embed(query)  → vector
    │    └─ SQL pgvector TopK               → RecalledMemory[]
    ├─ emotion.analyze({ message, history, persona, recalledMemories, previous })
-   │                                      → EmotionState（阶段 5）
+   │                                      → EmotionState (stage 5)
    └─ emotion.transition({ previous, detected })
 
-3. Prompt 拼装（无模型调用）
+3. Prompt assembly (no model call)
    ├─ formatSummaryForPrompt(summary)
    ├─ formatMemoriesForPrompt(memories)
-   ├─ tools.list()                         → ToolDefinition[]（若宿主注入工具）
+   ├─ tools.list()                         → ToolDefinition[] (if host injected tools)
    ├─ buildPersonaSystemPrompt(persona, summary, memory, emotion, tools)
    └─ messages = [system, ...recentHistory, user:message]
 
-4. 主生成 + 工具循环（阶段 6，非流式 generate）
+4. Main generation + tool loop (stage 6, non-streaming generate)
    ├─ model.generate({ messages, tools })  → text + toolCalls?
-   ├─ [若有 toolCalls] tools.execute(call) → ToolResult
-   ├─ [若有 toolCalls] model.generate(...)  → 二次生成
-   ├─ [若二次仍有 toolCalls] droppedToolCalls 记录，不再执行第三轮
-   └─ 得到最终 assistant 文本
+   ├─ [if toolCalls] tools.execute(call) → ToolResult
+   ├─ [if toolCalls] model.generate(...)  → follow-up generation
+   ├─ [if follow-up still has toolCalls] record droppedToolCalls; no third round
+   └─ final assistant text
 
-5. 输出守卫
-   └─ safety.guardOutput(text)             → 不通过则抛错
+5. Output guard
+   └─ safety.guardOutput(text)             → throw if rejected
 
-6. 写回（generate 之后，不阻断主回复）
-   ├─ summaryUpdater.update + summary.save  → 压缩旧 history（可选）
-   ├─ memoryExtractor.extract(...)          → 额外 1 次 LLM（structuredOutput 抽取）
-   └─ memory.save(...)                      → 额外 N 次 embedding + DB INSERT
+6. Write-back (after generate; does not block main reply)
+   ├─ summaryUpdater.update + summary.save  → compress old history (optional)
+   ├─ memoryExtractor.extract(...)          → extra 1 LLM call (structuredOutput extract)
+   └─ memory.save(...)                      → extra N embeddings + DB INSERT
 
-7. 返回
+7. Return
    ├─ observer.emit(workflow:end)
    └─ ChatWorkflowOutput { text, memories, metadata, modelOutput, ... }
 
-8. 宿主
-   ├─ 将 text 展示给用户
-   ├─ history.push(user, assistant)        → 下一轮再传入
-   └─ 根据 Observer 事件更新调试面板
+8. Host
+   ├─ Show text to user
+   ├─ history.push(user, assistant)        → pass again next turn
+   └─ Update debug panel from Observer events
 ```
 
-**单轮可能的模型调用次数（目标态全开）：**
+**Possible model calls per turn (full target state enabled):**
 
-| 调用                   | 触发条件                    | 次数  |
-| ---------------------- | --------------------------- | ----- |
-| 主 `generate`          | 每轮必有                    | 1+    |
-| `generate`（工具二次） | 模型返回 toolCalls          | 0–1   |
-| `MemoryExtractor`      | 每轮必有（注入 memory 时）  | 1     |
-| `SummaryUpdater`       | 消息数超阈值                | 0–1   |
-| `Emotion.analyze`      | 阶段 5 后每轮               | 1     |
-| `embedding`            | recall 1 次 + save 每条记忆 | 1 + M |
+| Call                        | Trigger                           | Count |
+| --------------------------- | --------------------------------- | ----- |
+| Main `generate`             | Every turn                        | 1+    |
+| `generate` (tool follow-up) | Model returns toolCalls           | 0–1   |
+| `MemoryExtractor`           | Every turn (when memory injected) | 1     |
+| `SummaryUpdater`            | Message count exceeds threshold   | 0–1   |
+| `Emotion.analyze`           | Every turn after stage 5          | 1     |
+| `embedding`                 | 1 recall + save per memory        | 1 + M |
 
 ---
 
-### 3.4 Model Runtime 子流程（每次 `generate` / `stream`）
+### 3.4 Model Runtime sub-flow (each `generate` / `stream`)
 
 ```mermaid
 flowchart LR
-  IN["GenerateInput\nmessages + tools?"] --> P1["主模型尝试\nprimaryMaxRetries"]
-  P1 -->|失败| P2["降级模型\nfallbackMaxRetries"]
-  P1 -->|成功| OUT["GenerateOutput\ntext + toolCalls? + runtime"]
+  IN["GenerateInput\nmessages + tools?"] --> P1["Primary model attempts\nprimaryMaxRetries"]
+  P1 -->|fail| P2["Fallback model\nfallbackMaxRetries"]
+  P1 -->|success| OUT["GenerateOutput\ntext + toolCalls? + runtime"]
   P2 --> OUT
-  P2 -->|全失败| ERR["ModelRuntimeError"]
+  P2 -->|all fail| ERR["ModelRuntimeError"]
 ```
 
-- **流式 `stream`**：用于 demo 直连模型调试；V1 工具多步循环以**非流式 `generate`** 为准（流式一旦吐字不再切换模型/插工具）。
+- **Streaming `stream`**: used by the demo for direct model debugging; V1 multi-step tool loop is based on **non-streaming `generate`** (once streaming has emitted tokens, the runtime does not switch models / insert tools).
 
 ---
 
-## 4. 涉及到的知识点
+## 4. Concepts involved
 
-### 4.1 架构与设计模式
+### 4.1 Architecture and design patterns
 
-| 知识点               | 在完整流程中的体现                                                            |
-| -------------------- | ----------------------------------------------------------------------------- |
-| **依赖注入**         | 宿主 `createCompanionCore({ model, memory, emotion, tools, ... })` 注入各实现 |
-| **策略 / 插件化**    | Workflow 只调接口；可换 `PostgresMemoryProvider` → LangChainMemoryProvider    |
-| **门面模式**         | 宿主只调 `executeWorkflow`，不感知内部 10+ Provider                           |
-| **观察者模式**       | 每个步骤 `emit` 事件，调试 UI 无需改 Core 代码                                |
-| **编排与副作用分离** | recall / extract 是副作用；主回复由 `Model.generate` 决定                     |
-| **Fail-safe**        | Memory / Summary / Observer 失败不阻断回复；Safety 失败必须抛错               |
+| Concept                           | How it shows up in the full flow                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Dependency injection**          | Host injects implementations via `createCompanionCore({ model, memory, emotion, tools, ... })` |
+| **Strategy / plugins**            | Workflow only calls interfaces; swap `PostgresMemoryProvider` → LangChainMemoryProvider        |
+| **Facade**                        | Host only calls `executeWorkflow`; does not see 10+ Providers                                  |
+| **Observer**                      | Each step `emit`s events; debug UI needs no Core code changes                                  |
+| **Orchestration vs side effects** | recall / extract are side effects; main reply comes from `Model.generate`                      |
+| **Fail-safe**                     | Memory / Summary / Observer failures do not block replies; Safety failures must throw          |
 
-### 4.2 单轮流程中的 AI / LLM 知识点
+### 4.2 AI / LLM concepts in a single turn
 
-| 知识点                | 出现在哪一步                                      | 说明                                                      |
-| --------------------- | ------------------------------------------------- | --------------------------------------------------------- |
-| **Chat Completion**   | 主 `generate`、工具二次生成                       | `ChatMessage[]` → 文本回复                                |
-| **RAG**               | `Memory.recall`                                   | query 向量化 → TopK → 注入 system prompt                  |
-| **结构化输出**        | `MemoryExtractor`                                 | `GenerateInput.structuredOutput` / JSON + Zod schema 校验 |
-| **滚动上下文窗口**    | `Summary` + `recentHistory`                       | 长对话压缩旧消息，控制 token                              |
-| **Persona Prompting** | `buildPersonaPrompt` / `buildPersonaSystemPrompt` | 结构化 Persona、用户称呼、兴趣与外貌设定驱动回复风格      |
-| **Emotion Prompting** | `Emotion.analyze`（阶段 5）                       | 情绪连续性注入 prompt                                     |
-| **Function Calling**  | 主 `generate` + Tool 循环（阶段 6）               | `toolCalls` → execute → re-generate                       |
-| **Embedding**         | recall / save                                     | 语义检索与持久化（在 `memory-postgres`）                  |
-| **主模型重试与降级**  | 每次 `generate`                                   | `ModelRuntimeInfo` 记录尝试与错误摘要                     |
+| Concept                      | Where                                             | Notes                                                                   |
+| ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
+| **Chat Completion**          | Main `generate`, tool follow-up                   | `ChatMessage[]` → text reply                                            |
+| **RAG**                      | `Memory.recall`                                   | Embed query → TopK → inject into system prompt                          |
+| **Structured output**        | `MemoryExtractor`                                 | `GenerateInput.structuredOutput` / JSON + Zod schema                    |
+| **Rolling context window**   | `Summary` + `recentHistory`                       | Compress old messages; control tokens                                   |
+| **Persona Prompting**        | `buildPersonaPrompt` / `buildPersonaSystemPrompt` | Structured Persona, user address, hobbies, appearance drive reply style |
+| **Emotion Prompting**        | `Emotion.analyze` (stage 5)                       | Emotion continuity injected into prompt                                 |
+| **Function Calling**         | Main `generate` + Tool loop (stage 6)             | `toolCalls` → execute → re-generate                                     |
+| **Embedding**                | recall / save                                     | Semantic retrieval & persistence (in `memory-postgres`)                 |
+| **Primary retry & fallback** | Every `generate`                                  | `ModelRuntimeInfo` records attempts and error summaries                 |
 
-### 4.3 记忆与隔离
+### 4.3 Memory and isolation
 
-| 概念                       | 说明                                                       |
-| -------------------------- | ---------------------------------------------------------- |
-| **MemoryScope**            | `ownerType + ownerId + companionId`：多用户/多伴侣不互串   |
-| **extract → save 闭环**    | 生成**后**抽取 → 向量化 → 入库；下轮 recall **前**检索     |
-| **importance 阈值**        | 默认 `>= 3` 才 save / recall                               |
-| **Memory 与 history 分工** | history = 短期（宿主传）；memory = 长期（Provider 持久化） |
+| Concept                  | Notes                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| **MemoryScope**          | `ownerType + ownerId + companionId`: multi-user / multi-companion isolation           |
+| **extract → save loop**  | Extract **after** generation → embed → store; next turn recalls **before** generation |
+| **importance threshold** | Default `>= 3` to save / recall                                                       |
+| **Memory vs history**    | history = short-term (host-passed); memory = long-term (Provider-persisted)           |
 
-### 4.4 工程与边界
+### 4.4 Engineering and boundaries
 
-| 实践             | 说明                                                                                                     |
-| ---------------- | -------------------------------------------------------------------------------------------------------- |
-| **接口优先**     | 宿主只依赖 `abstractions/` 类型                                                                          |
-| **稳定 meta.id** | `core.inspect()` 与 Observer 不依赖类名                                                                  |
-| **debugContext** | `metadata.debugContext` 还原首次 prompt；工具二次生成输入见 `toolFollowUpMessages`（调试用，非业务契约） |
-| **包边界**       | DB 在 `memory-postgres`；ai-core 零 `pg` 依赖                                                            |
+| Practice             | Notes                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Interfaces first** | Host depends only on `abstractions/` types                                                                                                        |
+| **Stable meta.id**   | `core.inspect()` and Observer do not rely on class names                                                                                          |
+| **debugContext**     | `metadata.debugContext` reconstructs the first prompt; follow-up tool inputs live in `toolFollowUpMessages` (debug only, not a business contract) |
+| **Package boundary** | DB lives in `memory-postgres`; ai-core has zero `pg` dependency                                                                                   |
 
 ---
 
-## 5. 快速上手
+## 5. Quick start
 
 ```ts
-import { createModel, createCompanionCore } from "@ying-companion/ai-core";
+import { createModel, createCompanionCore } from "@ying-ai/ai-core";
 
 const model = createModel({
   apiKey: "...",
@@ -393,12 +395,12 @@ console.log(result.text);
 console.log(result.metadata?.trace?.steps.map((step) => [step.step, step.status]));
 ```
 
-`workflowOptions.timeoutMs` 只用于计时与 `trace.budgetExceeded` 标记，不会取消底层 Provider 调用。关键路径失败仍会抛错；失败时可从 `workflow:error` Observer 事件的 `payload.trace` 获取截至失败点的轨迹。
+`workflowOptions.timeoutMs` is only used for timing and the `trace.budgetExceeded` flag; it does not cancel underlying Provider calls. Critical-path failures still throw; on failure you can read the trajectory up to the failure point from `payload.trace` on the `workflow:error` Observer event.
 
-替换 Workflow 时，宿主只需要注入新的 `ChatWorkflow` 实现，不应反向修改 Model / Memory / Emotion / Tool / Safety Provider 接口。最小 smoke 可以在宿主侧内联一个 `ChatWorkflow`：
+To replace Workflow, the host only injects a new `ChatWorkflow` implementation and must not reverse-edit Model / Memory / Emotion / Tool / Safety Provider interfaces. Minimal smoke can inline a `ChatWorkflow` on the host side:
 
 ```ts
-import { createCompanionCore, type ChatWorkflow } from "@ying-companion/ai-core";
+import { createCompanionCore, type ChatWorkflow } from "@ying-ai/ai-core";
 
 const customWorkflow: ChatWorkflow = {
   meta: {
@@ -408,7 +410,7 @@ const customWorkflow: ChatWorkflow = {
   },
   async execute() {
     return {
-      text: "来自替换 Workflow 的固定回复",
+      text: "Fixed reply from replaced Workflow",
       metadata: { smoke: true },
     };
   },
@@ -422,12 +424,12 @@ const core = createCompanionCore({
 console.log(core.inspect().providers.workflow.id); // workflow.host-smoke
 ```
 
-`apps/model-runtime-demo` 为了阶段 7 调试默认传入 `workflowOptions.includeTrace: true`；正式宿主可保持默认 false，仅在需要展示调试时间线时开启。
+`apps/model-runtime-demo` passes `workflowOptions.includeTrace: true` by default for stage 7 debugging; production hosts can keep the default `false` and enable it only when showing a debug timeline.
 
-启用真实情绪状态机时，宿主显式注入 `ModelEmotionEngine`，并负责保存/回传上轮情绪：
+To enable the real emotion state machine, the host explicitly injects `ModelEmotionEngine` and is responsible for storing / passing back previous emotion:
 
 ```ts
-import { createCompanionCore, createModel, ModelEmotionEngine } from "@ying-companion/ai-core";
+import { createCompanionCore, createModel, ModelEmotionEngine } from "@ying-ai/ai-core";
 
 const model = createModel({ apiKey: "...", model: "gpt-4o-mini" });
 const core = createCompanionCore({
@@ -447,12 +449,12 @@ const result = await core.executeWorkflow({
 previousEmotion = result.emotion;
 ```
 
-`EmotionState` 表示「伴侣对用户的情绪状态」。Core 不保存该状态、不建情绪表；正式业务层应只持久化 `current / intensity / updatedAt`，下一轮再作为 `ChatWorkflowInput.emotion` 传回。
+`EmotionState` means “the companion’s emotional state toward the user.” Core does not persist it or create an emotion table; the product layer should only persist `current / intensity / updatedAt` and pass it back next turn as `ChatWorkflowInput.emotion`.
 
-启用本地工具调用时，宿主显式注入 `LocalToolRegistry`。Core 默认仍使用 `EmptyToolRegistry`，无工具时行为与普通聊天一致：
+To enable local tool calling, the host explicitly injects `LocalToolRegistry`. Core still defaults to `EmptyToolRegistry`; with no tools, behavior matches plain chat:
 
 ```ts
-import { createCompanionCore, createModel, LocalToolRegistry } from "@ying-companion/ai-core";
+import { createCompanionCore, createModel, LocalToolRegistry } from "@ying-ai/ai-core";
 
 const model = createModel({ apiKey: "...", model: "gpt-4o-mini" });
 const tools = new LocalToolRegistry();
@@ -494,20 +496,19 @@ const result = await core.executeWorkflow({
   history: [],
 });
 
-result.toolResults; // 本轮工具执行结果
-result.metadata?.toolCallsDropped; // 二次生成仍请求工具时为 true
+result.toolResults; // tool execution results this turn
+result.metadata?.toolCallsDropped; // true if follow-up generation still requested tools
 ```
 
-V1 工具循环只接入非流式 `generate`，默认最多执行 1 轮工具；二次生成再次返回的 `toolCalls` 会进入 `droppedToolCalls` 供调试观察，不会继续执行第三轮。
+The V1 tool loop only uses non-streaming `generate`, defaulting to at most 1 tool round; `toolCalls` returned again by the follow-up generation go into `droppedToolCalls` for debug observation and do not run a third round.
 
 ---
 
-## 5.1 V1.1 模型能力与工具规划契约
+## 5.1 V1.1 model capabilities and tool-planning contract
 
-`ChatModel` 现在暴露 `primaryProfile` 与可选 `fallbackProfile`。Workflow 和宿主调试面板只能根据
-`ModelProfile.capabilities` 判断 `streaming`、`toolCalling`、`usage`，不得根据 provider 名称分支。
+`ChatModel` now exposes `primaryProfile` and optional `fallbackProfile`. Workflow and host debug panels may only decide `streaming`, `toolCalling`, and `usage` from `ModelProfile.capabilities` — never branch on provider name.
 
-每次模型调用可通过 `GenerateInput.requiredCapabilities` 声明本次必须满足的能力：
+Each model call can declare required capabilities via `GenerateInput.requiredCapabilities`:
 
 ```ts
 await model.stream({
@@ -516,15 +517,9 @@ await model.stream({
 });
 ```
 
-OpenAI-compatible adapter 会先筛选 primary / fallback profile，能力不满足的候选不会发请求，并记录到
-`ModelRuntimeInfo.capabilitySkips` 或 `ModelCapabilityUnavailableError.capabilitySkips`。未声明
-`requiredCapabilities` 的旧 `generate()` 调用保持 V1.0 行为。
+The OpenAI-compatible adapter filters primary / fallback profiles first; candidates that lack capabilities never send a request and are recorded in `ModelRuntimeInfo.capabilitySkips` or `ModelCapabilityUnavailableError.capabilitySkips`. Legacy `generate()` calls without `requiredCapabilities` keep V1.0 behavior.
 
-内部结构化任务可通过 `GenerateInput.structuredOutput` 声明对象 schema。OpenAI-compatible
-adapter 使用 Vercel AI SDK `Output.object({ schema })` 生成并校验结构化对象；非 AI SDK
-adapter 可映射到自身的 JSON/结构化输出能力后再用同一 schema 校验。Adapter 收到
-`structuredOutput` 时必须填充 `GenerateOutput.structuredOutput`，或显式抛出不支持结构化输出的错误。
-`ModelMemoryExtractor` 使用该契约抽取长期记忆，不再依赖从自由文本中手动截取 JSON。
+Internal structured tasks can declare an object schema via `GenerateInput.structuredOutput`. The OpenAI-compatible adapter uses Vercel AI SDK `Output.object({ schema })` to generate and validate structured objects; non–AI SDK adapters may map to their own JSON/structured-output capability and then validate with the same schema. When an adapter receives `structuredOutput`, it must populate `GenerateOutput.structuredOutput` or explicitly throw that structured output is unsupported. `ModelMemoryExtractor` uses this contract for long-term memory extraction and no longer depends on manually slicing JSON from free text.
 
 ```ts
 await model.generate({
@@ -538,23 +533,22 @@ await model.generate({
 });
 ```
 
-`DefaultToolPlanningProvider` 是独立规划器：有工具时要求模型满足 `toolCalling: true`，只返回
-`no_tool` 或 `tool_calls`，不会执行工具，也不会把规划模型的自然语言 `text` 作为用户可见回复。
+`DefaultToolPlanningProvider` is a standalone planner: when tools exist it requires `toolCalling: true`, returns only `no_tool` or `tool_calls`, does not execute tools, and never treats the planning model’s natural-language `text` as the user-visible reply.
 
 ---
 
-## 5.2 V1.1 流式工作流（`streamWorkflow`）
+## 5.2 V1.1 streaming workflow (`streamWorkflow`)
 
-### 双路入口
+### Dual entry points
 
-| 方法                | 返回类型                                 | 用途                             |
-| ------------------- | ---------------------------------------- | -------------------------------- |
-| `executeWorkflow()` | `Promise<ChatWorkflowOutput>`            | 非流式、后台任务、旧宿主兼容     |
-| `streamWorkflow()`  | `AsyncIterable<ChatWorkflowStreamEvent>` | 聊天 UI、实时 Timeline、调试面板 |
+| Method              | Return type                              | Use                                          |
+| ------------------- | ---------------------------------------- | -------------------------------------------- |
+| `executeWorkflow()` | `Promise<ChatWorkflowOutput>`            | Non-streaming, background jobs, legacy hosts |
+| `streamWorkflow()`  | `AsyncIterable<ChatWorkflowStreamEvent>` | Chat UI, live Timeline, debug panel          |
 
-`streamWorkflow()` 必须以 `workflow:finish`（成功）或 `workflow:error`（失败）收口；仅有 `text:delta` 不代表成功完成。Core 门面对漏发终止事件会补发安全的 `workflow:error`。
+`streamWorkflow()` must terminate with `workflow:finish` (success) or `workflow:error` (failure); having only `text:delta` does not mean success. The Core facade emits a safe `workflow:error` if a terminal event is missing.
 
-### Core 流事件
+### Core stream events
 
 ```txt
 workflow:start
@@ -564,29 +558,29 @@ tool:call / tool:result
 workflow:finish | workflow:error
 ```
 
-最终用户可见回复走 `model.stream()` → `text:delta`；情绪分析、记忆抽取、摘要更新、工具规划与工具执行等内部步骤仍使用非流式 `generate()`。
+User-visible reply text goes through `model.stream()` → `text:delta`; internal steps such as emotion analysis, memory extraction, summary updates, tool planning, and tool execution still use non-streaming `generate()`.
 
 ### Core Event vs Wire Event
 
-- **Core Event**（`ChatWorkflowStreamEvent`）：可含 `Date`、完整 `ChatWorkflowOutput`、调试上下文。
-- **Wire Event**（宿主定义，如 demo 的 `ChatWorkflowStreamWireEvent`）：JSON 可序列化 DTO；不得透传 `raw`、`Error` 实例或未转换的 `Date`。
+- **Core Event** (`ChatWorkflowStreamEvent`): may include `Date`, full `ChatWorkflowOutput`, and debug context.
+- **Wire Event** (host-defined, e.g. demo’s `ChatWorkflowStreamWireEvent`): JSON-serializable DTO; must not pass through `raw`, `Error` instances, or unconverted `Date` values.
 
-NDJSON、HTTP、持久化顺序（`workflow:finish` 晚于 DB 写回）由宿主负责，见 [`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)。
+NDJSON, HTTP, and persistence ordering (`workflow:finish` after DB write-back) are the host’s responsibility — see [`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md).
 
-### 错误语义摘要
+### Error semantics summary
 
-| 情况                         | 预期行为                                       |
-| ---------------------------- | ---------------------------------------------- |
-| 首个 `text:delta` 前模型失败 | retry / fallback 或 `workflow:error`           |
-| 已输出部分文本后失败         | 保留 partial text；`workflow:error`，无 finish |
-| Output Safety 拒绝           | `workflow:error`；不发送 `workflow:finish`     |
-| Memory / Emotion 等后置失败  | 主回复可完成；trace / debug 标 degraded        |
+| Situation                             | Expected behavior                                      |
+| ------------------------------------- | ------------------------------------------------------ |
+| Model fails before first `text:delta` | retry / fallback or `workflow:error`                   |
+| Fails after partial text              | Keep partial text; `workflow:error`; no finish         |
+| Output Safety rejects                 | `workflow:error`; do not send `workflow:finish`        |
+| Post-step Memory / Emotion failure    | Main reply can complete; trace / debug marked degraded |
 
 ---
 
-## 6. Provider 默认实现一览
+## 6. Default Provider implementations
 
-| 插槽                   | 默认实现                                       | `meta.id`                 |
+| Slot                   | Default                                        | `meta.id`                 |
 | ---------------------- | ---------------------------------------------- | ------------------------- |
 | `ChatModel`            | `createModel()` → `OpenAICompatibleModel`      | `model.openai-compatible` |
 | `ToolPlanningProvider` | `DefaultToolPlanningProvider`                  | `tool-planning.default`   |
@@ -603,13 +597,13 @@ NDJSON、HTTP、持久化顺序（`workflow:finish` 晚于 DB 写回）由宿主
 
 ---
 
-## 相关文档
+## Related docs
 
-- V1.0 总体规划：[`.requirements/prompts/03-v1.0-plan.md`](../../.requirements/prompts/03-v1.0-plan.md)
-- V1.1 总体规划：[`.requirements/prompts/04-v1.1-plan.md`](../../.requirements/prompts/04-v1.1-plan.md)
-- V1 边界：[`.requirements/prompts/02-execution.md`](../../.requirements/prompts/02-execution.md)
-- V1.0 阶段规格：[`.requirements/stages/v1.0/`](../../.requirements/stages/v1.0/)
-- V1.1 阶段规格：[`.requirements/stages/v1.1/`](../../.requirements/stages/v1.1/)
-- Ollama 适配器：[`packages/model-ollama`](../model-ollama/README.md)
-- 调试应用：[`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)
-- PostgreSQL 记忆：[`packages/memory-postgres`](../memory-postgres/README.md)
+- V1.0 master plan: [`.requirements/companion/prompts/03-v1.0-plan.md`](../../.requirements/companion/prompts/03-v1.0-plan.md)
+- V1.1 master plan: [`.requirements/companion/prompts/04-v1.1-plan.md`](../../.requirements/companion/prompts/04-v1.1-plan.md)
+- V1 boundaries: [`.requirements/companion/prompts/02-execution.md`](../../.requirements/companion/prompts/02-execution.md)
+- V1.0 stage specs: [`.requirements/companion/stages/v1.0/`](../../.requirements/companion/stages/v1.0/)
+- V1.1 stage specs: [`.requirements/companion/stages/v1.1/`](../../.requirements/companion/stages/v1.1/)
+- Ollama adapter: [`packages/model-ollama`](../model-ollama/README.md)
+- Debug app: [`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)
+- PostgreSQL memory: [`packages/memory-postgres`](../memory-postgres/README.md)

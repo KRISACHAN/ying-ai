@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { MemoryImportance, MemoryRecord, MemoryType } from "@ying-companion/ai-core";
+import type { MemoryImportance, MemoryRecord, MemoryType } from "@ying-ai/ai-core";
 
 const TYPES: MemoryType[] = ["fact", "preference", "relationship", "event"];
 

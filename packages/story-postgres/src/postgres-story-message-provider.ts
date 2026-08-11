@@ -1,4 +1,4 @@
-import type { StoryMessage, StoryMessageProvider } from "@ying-companion/story-core";
+import type { StoryMessage, StoryMessageProvider } from "@ying-ai/story-core";
 import type { StoryPostgresClient } from "./client";
 
 interface StoryMessageRow {

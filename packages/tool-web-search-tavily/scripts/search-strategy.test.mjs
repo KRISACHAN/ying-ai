@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { evaluateSearchQuality } from "@ying-companion/tool-web-search";
+import { evaluateSearchQuality } from "@ying-ai/tool-web-search";
 import { scoreUpcomingEventRelevance } from "../dist/extract-event-dates.js";
 import { normalizeRetrievalQuery } from "../dist/normalize-retrieval-query.js";
 import {

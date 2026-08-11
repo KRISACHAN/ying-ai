@@ -1,6 +1,8 @@
-# @ying-companion/api
+# @ying-ai/api
 
-Backend API package for **ying-companion**. Supplements root [AGENTS.md](../../AGENTS.md).
+**English** | [简体中文](./README.zh-CN.md)
+
+Backend API package for **ying-ai**. Supplements root [AGENTS.md](../../AGENTS.md).
 
 > **AI read order:** This README → [docs/ai/core/project-context.md](../../docs/ai/core/project-context.md) → stage requirements under [`.requirements/`](../../.requirements/README.md) when implementing product features.
 
@@ -8,12 +10,12 @@ Backend API package for **ying-companion**. Supplements root [AGENTS.md](../../A
 
 ## Role
 
-| Field               | Value                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Package**         | `@ying-companion/api`                                                                                         |
-| **Path**            | `apps/api/`                                                                                                   |
-| **Planned purpose** | Admin / RBAC backend service ([`.requirements/prompts/00-basic.md`](../../.requirements/prompts/00-basic.md)) |
-| **Current status**  | **Scaffold only** — TypeScript package with placeholder export; no HTTP server, routes, or RBAC yet           |
+| Field               | Value                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Package**         | `@ying-ai/api`                                                                                                                    |
+| **Path**            | `apps/api/`                                                                                                                       |
+| **Planned purpose** | Admin / RBAC backend service ([`.requirements/companion/prompts/00-basic.md`](../../.requirements/companion/prompts/00-basic.md)) |
+| **Current status**  | **Scaffold only** — TypeScript package with placeholder export; no HTTP server, routes, or RBAC yet                               |
 
 Do **not** put AI Companion Core SDK logic here. Core lives in `packages/ai-core`. V1.0 core debugging uses [`apps/model-runtime-demo`](../model-runtime-demo/README.md), not this package.
 
@@ -37,9 +39,9 @@ apps/api/
 From repo root:
 
 ```bash
-pnpm turbo run build --filter @ying-companion/api
-pnpm turbo run typecheck --filter @ying-companion/api
-pnpm turbo run lint --filter @ying-companion/api
+pnpm turbo run build --filter @ying-ai/api
+pnpm turbo run typecheck --filter @ying-ai/api
+pnpm turbo run lint --filter @ying-ai/api
 ```
 
 From this directory:
@@ -58,7 +60,7 @@ pnpm clean        # rm -rf dist .turbo
 After changes:
 
 ```bash
-pnpm turbo run typecheck lint --filter @ying-companion/api
+pnpm turbo run typecheck lint --filter @ying-ai/api
 ```
 
 Or from `apps/api/`: `pnpm typecheck && pnpm lint`.
@@ -76,8 +78,8 @@ Or from `apps/api/`: `pnpm typecheck && pnpm lint`.
 
 ## Related Paths
 
-| Path                                                             | Purpose                                      |
-| ---------------------------------------------------------------- | -------------------------------------------- |
-| [`apps/web/`](../web/README.md)                                  | Planned user-facing frontend (also scaffold) |
-| [`packages/ai-core/`](../../packages/ai-core/)                   | AI Companion Core SDK                        |
-| [`.requirements/stages/v1.0/`](../../.requirements/stages/v1.0/) | V1.0 executable stage specs                  |
+| Path                                                                                 | Purpose                                      |
+| ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| [`apps/web/`](../web/README.md)                                                      | Planned user-facing frontend (also scaffold) |
+| [`packages/ai-core/`](../../packages/ai-core/)                                       | AI Companion Core SDK                        |
+| [`.requirements/companion/stages/v1.0/`](../../.requirements/companion/stages/v1.0/) | V1.0 executable stage specs                  |

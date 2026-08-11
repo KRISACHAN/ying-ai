@@ -1,5 +1,5 @@
-import type { ModelProfile } from "@ying-companion/ai-core";
-import type { StoryCatalogEntry, StoryDefinition } from "@ying-companion/story-core";
+import type { ModelProfile } from "@ying-ai/ai-core";
+import type { StoryCatalogEntry, StoryDefinition } from "@ying-ai/story-core";
 import {
   DefaultStoryTransitionValidator,
   DefaultStoryWorkflow,
@@ -9,7 +9,7 @@ import {
   minimalWuxiaContract,
   ModelStoryPlanner,
   ModelStoryRenderer,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 import {
   PostgresStoryMessageProvider,
   PostgresStorySessionProvider,
@@ -18,7 +18,7 @@ import {
   PostgresStoryTurnCommitter,
   PostgresStoryTurnRepository,
   runStoryPostgresMigrations,
-} from "@ying-companion/story-postgres";
+} from "@ying-ai/story-postgres";
 import type { Pool } from "pg";
 
 import { getDebugPool } from "./debug-db";

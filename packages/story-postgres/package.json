@@ -1,5 +1,5 @@
 {
-  "name": "@ying-companion/story-postgres",
+  "name": "@ying-ai/story-postgres",
   "version": "0.0.0",
   "private": true,
   "type": "commonjs",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@ying-companion/story-core": "workspace:*",
+    "@ying-ai/story-core": "workspace:*",
     "pg": "^8.13.0"
   },
   "devDependencies": {

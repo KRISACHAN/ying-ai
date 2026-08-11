@@ -2,7 +2,7 @@ import type {
   StoryNarrativeSummary,
   StorySummaryProvider,
   StorySummaryUpdateInput,
-} from "@ying-companion/story-core";
+} from "@ying-ai/story-core";
 import type { StoryPostgresClient } from "./client";
 
 interface StorySummaryRow {
