@@ -4,6 +4,9 @@ packages:
   - "infra/*"
 
 allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  prisma: true
   sharp: false
 
 catalog:

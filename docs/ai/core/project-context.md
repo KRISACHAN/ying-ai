@@ -15,7 +15,8 @@ ying-ai/
 ├── apps/                      # Independent AI apps — one per folder
 │   ├── api/                  # @ying-ai/api (scaffold)
 │   ├── web/                  # @ying-ai/web (scaffold)
-│   └── model-runtime-demo/   # @ying-ai/model-runtime-demo — Companion SDK + Story Mode (first app)
+│   ├── model-runtime-demo/   # @ying-ai/model-runtime-demo — Companion SDK + Story Mode (first app)
+│   └── story-architect/      # @ying-ai/story-architect — independent AI novel authoring app
 ├── packages/                  # Reusable AI capabilities/SDKs — shared across apps
 │   ├── ai-core/              # @ying-ai/ai-core
 │   ├── model-ollama/         # @ying-ai/model-ollama

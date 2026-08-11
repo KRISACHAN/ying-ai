@@ -15,6 +15,10 @@ Root **index** for per-app requirement and planning archives in this `ying-ai` m
     README.md           # Companion-specific layout, conventions, read order
     prompts/             # Planning prompt chain
     stages/              # Versioned executable stage specs (v1.0 – v1.3)
+  story-architect/      # AI novel authoring app
+    README.md           # Archive read order and migration boundary
+    prompts/            # Original V1.0 plan
+    stages/             # Original V1.0 implementation stages
   <app-name>/           # Future app archives follow the same shape
     README.md
     prompts/
@@ -27,9 +31,10 @@ Each app archive is **self-contained**: its own `README.md` documents that app's
 
 ## App Archives
 
-| App               | Path                       | Status                              | Entry                                        |
-| ----------------- | -------------------------- | ----------------------------------- | -------------------------------------------- |
-| **Companion SDK** | [`companion/`](companion/) | V1.0–V1.3 complete (frozen history) | [`companion/README.md`](companion/README.md) |
+| App                 | Path                                   | Status                              | Entry                                                    |
+| ------------------- | -------------------------------------- | ----------------------------------- | -------------------------------------------------------- |
+| **Companion SDK**   | [`companion/`](companion/)             | V1.0–V1.3 complete (frozen history) | [`companion/README.md`](companion/README.md)             |
+| **Story Architect** | [`story-architect/`](story-architect/) | V1.0 migrated from standalone app   | [`story-architect/README.md`](story-architect/README.md) |
 
 Migration note: `companion/` was moved here from the original standalone `ying-companion` repository (now renamed `ying-ai` on GitHub) — see [`companion/README.md`](companion/README.md) for its full history and conventions. Internal cross-references inside its historical `prompts/`/`stages/` documents are **not** rewritten (frozen record); only this index and top-level docs (`README.md`, `AGENTS.md`, `docs/ai/core/project-context.md`, package READMEs) were updated to the new `companion/` path.
 

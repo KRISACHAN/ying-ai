@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  title       String   @default("未命名作品")
+  initialIdea String
+  currentStep Step     @default(WORLDBUILDING)
+
+  world       WorldBuilding?
+  characters  Character[]
+  chapters    Chapter[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum Step {
+  WORLDBUILDING
+  CHARACTERS
+  OUTLINE
+  CHAPTERS
+}
+
+model WorldBuilding {
+  id              String   @id @default(cuid())
+  projectId       String   @unique
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  era             String   @default("")
+  geography       String   @default("")
+  socialStructure String   @default("")
+  powerSystem     String   @default("")
+}
+
+model Character {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name          String
+  role          String
+  identity      String   @default("")
+  motivation    String   @default("")
+  personality   String   @default("")
+  appearance    String   @default("")
+  arc           String   @default("")
+  relationships String   @default("")
+  order         Int      @default(0)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Chapter {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  number     Int
+  title      String
+  summary    String   @default("")
+  content    String   @default("")
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([projectId, number])
+}

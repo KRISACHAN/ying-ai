@@ -29,6 +29,7 @@ _Apps and packages that make up the Companion SDK — the first app hosted in th
 | **Story Core SDK**    | [`packages/story-core`](packages/story-core/)                                                                                   | V1.3 — Story workflow, Lore, planner/renderer, state validation          |
 | **Story Postgres**    | [`packages/story-postgres`](packages/story-postgres/)                                                                           | V1.3 — snapshot sessions and atomic turn persistence                     |
 | **Debug workbench**   | [`apps/model-runtime-demo`](apps/model-runtime-demo/)                                                                           | V1.3 — Companion chat + playable Story Workbench                         |
+| **Story Architect**   | [`apps/story-architect`](apps/story-architect/)                                                                                 | Independent AI novel authoring workflow                                  |
 | **Product API**       | [`apps/api`](apps/api/)                                                                                                         | Scaffold — planned RBAC backend                                          |
 | **Product web**       | [`apps/web`](apps/web/)                                                                                                         | Scaffold — planned user frontend                                         |
 
@@ -66,7 +67,8 @@ ying-ai/
 ├── apps/                        Independent AI apps — one folder per app
 │   ├── api/                     @ying-ai/api                   (scaffold)
 │   ├── web/                     @ying-ai/web                   (scaffold)
-│   └── model-runtime-demo/      @ying-ai/model-runtime-demo    (Companion SDK + Story Mode — first app)
+│   ├── model-runtime-demo/      @ying-ai/model-runtime-demo    (Companion SDK + Story Mode — first app)
+│   └── story-architect/         @ying-ai/story-architect       (AI novel authoring app)
 ├── packages/                     Reusable AI capabilities & SDKs — shared across apps
 │   ├── ai-core/                 @ying-ai/ai-core
 │   ├── model-ollama/            @ying-ai/model-ollama
@@ -84,7 +86,7 @@ ying-ai/
 
 **Convention for new AI apps:** add a folder under `apps/<app-name>` with its own `package.json` (`@ying-ai/<app-name>`), English `README.md`, and Simplified Chinese `README.zh-CN.md` (with language switcher links at the top of both). Keep app-specific glue code in the app; move anything reusable across apps into `packages/<capability-name>`. See [Adding a new AI app](#adding-a-new-ai-app).
 
-Package READMEs (EN · 中文): [ai-core](packages/ai-core/README.md) · [中文](packages/ai-core/README.zh-CN.md) · [model-ollama](packages/model-ollama/README.md) · [中文](packages/model-ollama/README.zh-CN.md) · [memory-postgres](packages/memory-postgres/README.md) · [中文](packages/memory-postgres/README.zh-CN.md) · [tool-web-search](packages/tool-web-search/README.md) · [中文](packages/tool-web-search/README.zh-CN.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.md) · [中文](packages/tool-web-search-tavily/README.zh-CN.md) · [story-core](packages/story-core/README.md) · [中文](packages/story-core/README.zh-CN.md) · [story-postgres](packages/story-postgres/README.md) · [中文](packages/story-postgres/README.zh-CN.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [中文](apps/model-runtime-demo/README.zh-CN.md) · [web](apps/web/README.md) · [中文](apps/web/README.zh-CN.md) · [api](apps/api/README.md) · [中文](apps/api/README.zh-CN.md)
+Package and app READMEs (EN · 中文): [story-architect](apps/story-architect/README.md) · [中文](apps/story-architect/README.zh-CN.md) · [ai-core](packages/ai-core/README.md) · [中文](packages/ai-core/README.zh-CN.md) · [model-ollama](packages/model-ollama/README.md) · [中文](packages/model-ollama/README.zh-CN.md) · [memory-postgres](packages/memory-postgres/README.md) · [中文](packages/memory-postgres/README.zh-CN.md) · [tool-web-search](packages/tool-web-search/README.md) · [中文](packages/tool-web-search/README.zh-CN.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.md) · [中文](packages/tool-web-search-tavily/README.zh-CN.md) · [story-core](packages/story-core/README.md) · [中文](packages/story-core/README.zh-CN.md) · [story-postgres](packages/story-postgres/README.md) · [中文](packages/story-postgres/README.zh-CN.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [中文](apps/model-runtime-demo/README.zh-CN.md) · [web](apps/web/README.md) · [中文](apps/web/README.zh-CN.md) · [api](apps/api/README.md) · [中文](apps/api/README.zh-CN.md)
 
 ---
 

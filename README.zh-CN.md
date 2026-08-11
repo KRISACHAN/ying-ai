@@ -29,6 +29,7 @@ _组成 Companion SDK 的应用与包 —— 这是本仓库托管的第一个�
 | **Story Core SDK**   | [`packages/story-core`](packages/story-core/)                                                                                   | V1.3 —— Story 工作流、Lore、规划器/渲染器、状态校验                  |
 | **Story Postgres**   | [`packages/story-postgres`](packages/story-postgres/)                                                                           | V1.3 —— 快照式会话与原子化回合持久化                                 |
 | **调试工作台**       | [`apps/model-runtime-demo`](apps/model-runtime-demo/)                                                                           | V1.3 —— Companion 对话 + 可玩的 Story Workbench                      |
+| **Story Architect**  | [`apps/story-architect`](apps/story-architect/)                                                                                 | 独立的 AI 小说创作流程                                               |
 | **产品 API**         | [`apps/api`](apps/api/)                                                                                                         | 脚手架 —— 计划中的 RBAC 后端                                         |
 | **产品前端**         | [`apps/web`](apps/web/)                                                                                                         | 脚手架 —— 计划中的用户前端                                           |
 
@@ -66,7 +67,8 @@ ying-ai/
 ├── apps/                        独立的 AI 应用 —— 每个应用一个文件夹
 │   ├── api/                     @ying-ai/api                   （脚手架）
 │   ├── web/                     @ying-ai/web                   （脚手架）
-│   └── model-runtime-demo/      @ying-ai/model-runtime-demo    （Companion SDK + Story Mode —— 第一个应用）
+│   ├── model-runtime-demo/      @ying-ai/model-runtime-demo    （Companion SDK + Story Mode —— 第一个应用）
+│   └── story-architect/         @ying-ai/story-architect       （AI 小说创作应用）
 ├── packages/                     可复用的 AI 能力与 SDK —— 各应用共享
 │   ├── ai-core/                 @ying-ai/ai-core
 │   ├── model-ollama/            @ying-ai/model-ollama
@@ -84,7 +86,7 @@ ying-ai/
 
 **新增 AI 应用的约定：** 在 `apps/<app-name>` 下新建一个文件夹，带上自己的 `package.json`（`@ying-ai/<app-name>`）、英文 `README.md` 与简体中文 `README.zh-CN.md`（两者顶部都要有语言切换链接）。应用专属的粘合代码留在应用内部；跨应用可复用的东西移到 `packages/<capability-name>`。参见 [如何添加一个新的 AI 应用](#如何添加一个新的-ai-应用)。
 
-各包 README（中文 · EN）：[ai-core](packages/ai-core/README.zh-CN.md) · [EN](packages/ai-core/README.md) · [model-ollama](packages/model-ollama/README.zh-CN.md) · [EN](packages/model-ollama/README.md) · [memory-postgres](packages/memory-postgres/README.zh-CN.md) · [EN](packages/memory-postgres/README.md) · [tool-web-search](packages/tool-web-search/README.zh-CN.md) · [EN](packages/tool-web-search/README.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.zh-CN.md) · [EN](packages/tool-web-search-tavily/README.md) · [story-core](packages/story-core/README.zh-CN.md) · [EN](packages/story-core/README.md) · [story-postgres](packages/story-postgres/README.zh-CN.md) · [EN](packages/story-postgres/README.md) · [model-runtime-demo](apps/model-runtime-demo/README.zh-CN.md) · [EN](apps/model-runtime-demo/README.md) · [web](apps/web/README.zh-CN.md) · [EN](apps/web/README.md) · [api](apps/api/README.zh-CN.md) · [EN](apps/api/README.md)
+各包及应用 README（中文 · EN）：[story-architect](apps/story-architect/README.zh-CN.md) · [EN](apps/story-architect/README.md) · [ai-core](packages/ai-core/README.zh-CN.md) · [EN](packages/ai-core/README.md) · [model-ollama](packages/model-ollama/README.zh-CN.md) · [EN](packages/model-ollama/README.md) · [memory-postgres](packages/memory-postgres/README.zh-CN.md) · [EN](packages/memory-postgres/README.md) · [tool-web-search](packages/tool-web-search/README.zh-CN.md) · [EN](packages/tool-web-search/README.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.zh-CN.md) · [EN](packages/tool-web-search-tavily/README.md) · [story-core](packages/story-core/README.zh-CN.md) · [EN](packages/story-core/README.md) · [story-postgres](packages/story-postgres/README.zh-CN.md) · [EN](packages/story-postgres/README.md) · [model-runtime-demo](apps/model-runtime-demo/README.zh-CN.md) · [EN](apps/model-runtime-demo/README.md) · [web](apps/web/README.zh-CN.md) · [EN](apps/web/README.md) · [api](apps/api/README.zh-CN.md) · [EN](apps/api/README.md)
 
 ---
 

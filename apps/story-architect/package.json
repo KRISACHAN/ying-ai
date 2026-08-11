@@ -1,0 +1,39 @@
+{
+  "name": "@ying-ai/story-architect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "prisma generate && next dev -p 3001",
+    "build": "prisma generate && next build --webpack",
+    "start": "next start -p 3001",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ignore-pattern next-env.d.ts",
+    "clean": "rm -rf .next .turbo"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.16",
+    "@ai-sdk/react": "^4.0.34",
+    "@prisma/client": "^6.5.0",
+    "@tailwindcss/postcss": "^4.1.4",
+    "ai": "^7.0.31",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.475.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.3",
+    "tailwind-merge": "^3.0.2",
+    "tailwindcss": "^4.1.4",
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "prisma": "^6.5.0",
+    "typescript": "catalog:"
+  }
+}
