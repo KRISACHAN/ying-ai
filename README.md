@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+> **Name history:** This project was originally named `ying-companion`, focused on AI companion capabilities. As the scope kept expanding, Companion became one sub-feature among many, and the repository was renamed to **ying-ai**.
+
 A general-purpose **AI capabilities monorepo** — home for independent AI applications (`apps/*`) built on shared, reusable AI capabilities and SDKs (`packages/*`). Built with pnpm workspaces and Turborepo.
 
 > **Using an AI coding assistant?** See [AGENTS.md](AGENTS.md). This file is for humans.
@@ -18,7 +20,7 @@ This repo is a **container for many AI apps**, not a single product. Each app un
 
 ## Architecture
 
-_Apps and packages that make up the Companion SDK — the first app hosted in this repo:_
+_Apps and shared capabilities currently hosted in this repo:_
 
 | Part                  | Path                                                                                                                            | Status                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -30,15 +32,11 @@ _Apps and packages that make up the Companion SDK — the first app hosted in th
 | **Story Postgres**    | [`packages/story-postgres`](packages/story-postgres/)                                                                           | V1.3 — snapshot sessions and atomic turn persistence                     |
 | **Debug workbench**   | [`apps/model-runtime-demo`](apps/model-runtime-demo/)                                                                           | V1.3 — Companion chat + playable Story Workbench                         |
 | **Story Architect**   | [`apps/story-architect`](apps/story-architect/)                                                                                 | Independent AI novel authoring workflow                                  |
-| **Product API**       | [`apps/api`](apps/api/)                                                                                                         | Scaffold — planned RBAC backend                                          |
-| **Product web**       | [`apps/web`](apps/web/)                                                                                                         | Scaffold — planned user frontend                                         |
+
+> **Knowledge workspace:** the local-first Knowledge desktop app and its document-loader / organizer / searcher packages now live in the sibling repo [`ying-knowledge`](../ying-knowledge/).
 
 ```mermaid
 flowchart LR
-  subgraph product [Product layer - planned]
-    Web[apps/web]
-    API[apps/api]
-  end
   subgraph core [Core SDK]
     AiCore[packages/ai-core]
     StoryCore[packages/story-core]
@@ -47,13 +45,15 @@ flowchart LR
   subgraph debug [Debug host]
     Demo[apps/model-runtime-demo]
   end
-  Web --> AiCore
-  API --> AiCore
+  subgraph authoring [Authoring]
+    StoryArchitect[apps/story-architect]
+  end
   Demo --> AiCore
   Demo --> Ollama
   Demo --> MemoryPostgres[packages/memory-postgres]
   Demo --> StoryCore
   Demo --> StoryPostgres[packages/story-postgres]
+  StoryArchitect --> AiCore
 ```
 
 **Boundary:** `ai-core` is a pure SDK — no env vars, HTTP, NDJSON, or database. The demo app owns provider config, Wire Event mapping, persistence, and UI.
@@ -65,8 +65,6 @@ flowchart LR
 ```txt
 ying-ai/
 ├── apps/                        Independent AI apps — one folder per app
-│   ├── api/                     @ying-ai/api                   (scaffold)
-│   ├── web/                     @ying-ai/web                   (scaffold)
 │   ├── model-runtime-demo/      @ying-ai/model-runtime-demo    (Companion SDK + Story Mode — first app)
 │   └── story-architect/         @ying-ai/story-architect       (AI novel authoring app)
 ├── packages/                     Reusable AI capabilities & SDKs — shared across apps
@@ -86,7 +84,7 @@ ying-ai/
 
 **Convention for new AI apps:** add a folder under `apps/<app-name>` with its own `package.json` (`@ying-ai/<app-name>`), English `README.md`, and Simplified Chinese `README.zh-CN.md` (with language switcher links at the top of both). Keep app-specific glue code in the app; move anything reusable across apps into `packages/<capability-name>`. See [Adding a new AI app](#adding-a-new-ai-app).
 
-Package and app READMEs (EN · 中文): [story-architect](apps/story-architect/README.md) · [中文](apps/story-architect/README.zh-CN.md) · [ai-core](packages/ai-core/README.md) · [中文](packages/ai-core/README.zh-CN.md) · [model-ollama](packages/model-ollama/README.md) · [中文](packages/model-ollama/README.zh-CN.md) · [memory-postgres](packages/memory-postgres/README.md) · [中文](packages/memory-postgres/README.zh-CN.md) · [tool-web-search](packages/tool-web-search/README.md) · [中文](packages/tool-web-search/README.zh-CN.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.md) · [中文](packages/tool-web-search-tavily/README.zh-CN.md) · [story-core](packages/story-core/README.md) · [中文](packages/story-core/README.zh-CN.md) · [story-postgres](packages/story-postgres/README.md) · [中文](packages/story-postgres/README.zh-CN.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [中文](apps/model-runtime-demo/README.zh-CN.md) · [web](apps/web/README.md) · [中文](apps/web/README.zh-CN.md) · [api](apps/api/README.md) · [中文](apps/api/README.zh-CN.md)
+Package and app READMEs (EN · 中文): [story-architect](apps/story-architect/README.md) · [中文](apps/story-architect/README.zh-CN.md) · [ai-core](packages/ai-core/README.md) · [中文](packages/ai-core/README.zh-CN.md) · [model-ollama](packages/model-ollama/README.md) · [中文](packages/model-ollama/README.zh-CN.md) · [memory-postgres](packages/memory-postgres/README.md) · [中文](packages/memory-postgres/README.zh-CN.md) · [tool-web-search](packages/tool-web-search/README.md) · [中文](packages/tool-web-search/README.zh-CN.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.md) · [中文](packages/tool-web-search-tavily/README.zh-CN.md) · [story-core](packages/story-core/README.md) · [中文](packages/story-core/README.zh-CN.md) · [story-postgres](packages/story-postgres/README.md) · [中文](packages/story-postgres/README.zh-CN.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [中文](apps/model-runtime-demo/README.zh-CN.md)
 
 ---
 
@@ -160,18 +158,20 @@ This repo is designed to keep growing with new, unrelated AI apps. To add one:
 pnpm install
 pnpm typecheck
 pnpm lint
-pnpm build
+pnpm build:all
 ```
 
-| Command             | Purpose                                 |
-| ------------------- | --------------------------------------- |
-| `pnpm dev`          | Run all `dev` tasks via Turbo           |
-| `pnpm build`        | Build all packages                      |
-| `pnpm typecheck`    | Typecheck the workspace                 |
-| `pnpm lint`         | Lint the workspace                      |
-| `pnpm format`       | Format with Prettier                    |
-| `pnpm format:check` | Check formatting                        |
-| `pnpm clean`        | Remove Turbo outputs and `node_modules` |
+| Command             | Purpose                                                   |
+| ------------------- | --------------------------------------------------------- |
+| `pnpm dev`          | Select apps with checkboxes and run their `dev` scripts   |
+| `pnpm dev:all`      | Run all `dev` tasks via Turbo                             |
+| `pnpm build`        | Select apps with checkboxes and run their `build` scripts |
+| `pnpm build:all`    | Build the entire workspace via Turbo                      |
+| `pnpm typecheck`    | Typecheck the workspace                                   |
+| `pnpm lint`         | Lint the workspace                                        |
+| `pnpm format`       | Format with Prettier                                      |
+| `pnpm format:check` | Check formatting                                          |
+| `pnpm clean`        | Remove Turbo outputs and `node_modules`                   |
 
 **Single package:**
 

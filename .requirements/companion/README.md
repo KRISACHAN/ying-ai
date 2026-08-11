@@ -183,9 +183,9 @@ When generating **new** requirement or stage docs, follow project convention: **
 
 ## Related Paths
 
-| Path                                                                     | Purpose                                                      |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| [`.requirements/README.md`](../README.md)                                | Cross-app index — other app archives live alongside this one |
-| [`.code-reviews/`](../../.code-reviews/README.md)                        | Code review reports tied to commits/stages                   |
-| [`docs/ai/core/`](../../docs/ai/core/)                                   | Agent operating rules for implementation                     |
-| [`.codex/skills/code-review/`](../../.codex/skills/code-review/SKILL.md) | Review skill; loads stage docs when reviewing `packages/**`  |
+| Path                                                                       | Purpose                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [`.requirements/README.md`](../README.md)                                  | Cross-app index — other app archives live alongside this one |
+| [`.code-reviews/`](../../.code-reviews/README.md)                          | Code review reports tied to commits/stages                   |
+| [`docs/ai/core/`](../../docs/ai/core/)                                     | Agent operating rules for implementation                     |
+| [`.agents/skills/code-review/`](../../.agents/skills/code-review/SKILL.md) | Review skill; loads stage docs when reviewing `packages/**`  |

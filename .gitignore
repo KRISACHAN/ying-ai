@@ -146,14 +146,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 .omx/
-.codex/*
-!.codex/agents/
-!.codex/agents/**
-!.codex/skills/
-!.codex/skills/**
-.codex/skills/.system/**
-!.codex/prompts/
-!.codex/prompts/**
 
 # playwright
 .playwright-cli/
@@ -163,3 +155,13 @@ vite.config.ts.timestamp-*
 output/
 output/*
 output/**
+
+# Knowledge desktop generated artifacts
+apps/knowledge/.package-app/
+apps/knowledge/release/
+apps/knowledge/test-results/
+apps/knowledge/playwright-report/
+
+.example/
+.example/*
+.example/**

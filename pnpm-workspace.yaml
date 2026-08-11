@@ -6,8 +6,14 @@ packages:
 allowBuilds:
   "@prisma/client": true
   "@prisma/engines": true
+  electron: true
+  electron-winstaller: false
+  esbuild: true
   prisma: true
   sharp: false
+
+overrides:
+  "app-builder-lib>@electron/get": 5.1.0
 
 catalog:
   "@commitlint/cli": ^19.0.0

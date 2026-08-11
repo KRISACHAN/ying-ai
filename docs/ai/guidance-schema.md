@@ -4,13 +4,12 @@ Canonical schema for AI agent documentation in this repository.
 
 ## Role & Intent
 
-| Surface                                    | Purpose                                                                     |
-| ------------------------------------------ | --------------------------------------------------------------------------- |
-| [`AGENTS.md`](../../AGENTS.md)             | **Single entry for all tools** — wizard only, not detailed prompts          |
-| [`docs/ai/core/`](core/)                   | Tool-agnostic rules all agents must follow                                  |
-| [`docs/ai/platforms.md`](platforms.md)     | Cross-tool adapter map; tool-specific behavior in `.{tool}/*` native assets |
-| [`docs/ai/oh-my-codex.md`](oh-my-codex.md) | OMX orchestration contract (OMX-generated; read when using `.codex/`)       |
-| Package `README.md`                        | App- or package-scoped context (e.g. `apps/web/README.md`)                  |
+| Surface                                | Purpose                                                                     |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| [`AGENTS.md`](../../AGENTS.md)         | **Single entry for all tools** — wizard only, not detailed prompts          |
+| [`docs/ai/core/`](core/)               | Tool-agnostic rules all agents must follow                                  |
+| [`docs/ai/platforms.md`](platforms.md) | Cross-tool adapter map; tool-specific behavior in `.{tool}/*` native assets |
+| Package `README.md`                    | App- or package-scoped context (e.g. `apps/model-runtime-demo/README.md`)   |
 
 ## File Taxonomy
 
@@ -18,17 +17,21 @@ Canonical schema for AI agent documentation in this repository.
 docs/ai/
 ├── guidance-schema.md     # This file — extension contract
 ├── platforms.md           # Cross-tool adapter map (all IDEs)
-├── oh-my-codex.md         # OMX orchestration (OMX-generated template)
-├── core/                  # Universal rules (no $keywords, no tool paths)
+├── core/                  # Universal rules (no tool paths)
 │   ├── principles.md
 │   ├── working-agreements.md
 │   ├── verification.md
 │   ├── git-protocol.md
 │   └── project-context.md
-.{tool}/                   # Native assets only (no README in .codex/)
-├── .codex/                # skills/, agents/, prompts/
-├── .cursor/rules/         # Cursor
-└── .agents/               # Antigravity skills and workflows
+.{tool}/                   # Native assets only
+├── .agents/rules/         # Project rules (canonical)
+├── .agents/skills/        # Antigravity skills
+├── .codex/rules/          # Codex adapters → .agents/rules/
+├── .codex/skills/         # Codex skills
+├── .cursor/rules/         # Cursor adapters → .agents/rules/
+├── .claude/rules/         # Claude Code adapters → .agents/rules/
+├── .claude/skills/        # Claude Code skills
+└── .agents/workflows/     # Antigravity workflows
 ```
 
 ## Precedence
@@ -37,8 +40,8 @@ docs/ai/
 2. Nearest package `README.md` (e.g. under `apps/`)
 3. Root `AGENTS.md` (sole project entry; `CLAUDE.md` / `GEMINI.md` redirect here)
 4. `docs/ai/core/*`
-5. `docs/ai/oh-my-codex.md` (when `.codex/` skills, agents, or prompts apply — all tools)
-6. Platform native assets (`.codex/*`, `.cursor/rules/*`, `.agents/*`)
+5. `.agents/rules/*`
+6. Platform native assets (`.codex/*`, `.cursor/rules/*`, `.claude/*`, `.agents/skills/*`)
 
 ## Adding a New Platform
 
@@ -49,44 +52,26 @@ docs/ai/
 
 ## Adding a New Skill or Workflow
 
-| Platform           | Location                                                                       |
-| ------------------ | ------------------------------------------------------------------------------ |
-| Codex / OMX        | `.codex/skills/<name>/SKILL.md` — document in [oh-my-codex.md](oh-my-codex.md) |
-| Antigravity        | `.agents/skills/<name>.md`, `.agents/workflows/<name>.md`                      |
-| Cursor             | `.cursor/skills/` or `.cursor/rules/`                                          |
-| Universal behavior | `docs/ai/core/<topic>.md` only — no tool syntax                                |
-
-## OMX Marker Contract
-
-OMX-managed sections in `AGENTS.md` use explicit HTML comment markers. **Do not edit content inside these markers manually** — use `omx setup --merge-agents` instead.
-
-User-owned wizard content must live **above** `<!-- OMX:AGENTS:START -->`. OMX `setup --merge-agents` replaces everything between the START/END markers with its managed template (model table + optional contract).
-
-| Marker                               | Owner             | Purpose                                          |
-| ------------------------------------ | ----------------- | ------------------------------------------------ |
-| `<!-- OMX:AGENTS:START/END -->`      | OMX setup         | Model table and managed refreshes                |
-| `<!-- OMX:MODELS:START/END -->`      | OMX setup         | Auto-generated model capability table            |
-| `<!-- OMX:RUNTIME:START/END -->`     | OMX runtime hooks | Session overlays                                 |
-| `<!-- OMX:TEAM:WORKER:START/END -->` | OMX team mode     | Ephemeral worker overlay (stripped on `$cancel`) |
-
-User-owned content lives **outside** these markers. Never run `omx setup --force` on `AGENTS.md` unless you intend to refresh managed blocks — prefer `--merge-agents`.
-
-OMX full orchestration template: [oh-my-codex.md](oh-my-codex.md) (not under `.codex/`).
+| Platform           | Location                                                              |
+| ------------------ | --------------------------------------------------------------------- |
+| All tools (rules)  | `.agents/rules/<name>.md` (canonical)                                 |
+| Codex              | `.codex/rules/<name>.md` (adapter), `.codex/skills/<name>/SKILL.md`   |
+| Claude Code        | `.claude/rules/<name>.md` (adapter), `.claude/skills/<name>/SKILL.md` |
+| Antigravity        | `.agents/skills/<name>/SKILL.md`, `.agents/workflows/<name>.md`       |
+| Cursor             | `.cursor/rules/<name>.mdc` (adapter → `.agents/rules/`)               |
+| Universal behavior | `docs/ai/core/<topic>.md` only — no tool syntax                       |
 
 ## Language & Tone
 
 - English, imperative mood
-- `core/` files must not contain tool-specific syntax (`$ralph`, `omx question`, Cursor modes, etc.)
+- `core/` files must not contain tool-specific syntax (Cursor modes, etc.)
 - Native asset files may reference tool-native commands and paths
 - Link to `core/` instead of copying universal rules
 
-## Guidance Section Mapping (OMX compatibility)
-
-For tools that expect the OMX guidance schema:
+## Guidance Section Mapping
 
 - **Role & Intent** → root `AGENTS.md` (sole onboarding entry)
 - **Operating Principles** → `docs/ai/core/principles.md`
-- **Execution Protocol** → `docs/ai/oh-my-codex.md`
-- **Constraints & Safety** → `docs/ai/oh-my-codex.md` (keyword detection, cancellation, state)
-- **Verification & Completion** → `docs/ai/core/verification.md` + `docs/ai/oh-my-codex.md` execution protocols
-- **Recovery & Lifecycle Overlays** → OMX runtime markers in `AGENTS.md`
+- **Verification & Completion** → `docs/ai/core/verification.md`
+- **Git & Commits** → `docs/ai/core/git-protocol.md`
+- **Project Context** → `docs/ai/core/project-context.md`

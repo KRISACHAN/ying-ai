@@ -48,7 +48,7 @@
 
 ## AI 辅助工具
 
-- oh-my-codex 系列 skills
+- `.agents/skills/` 下的 code-review、code-review-followup、git-commit skills
 
 ## 辅助说明
 

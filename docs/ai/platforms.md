@@ -7,12 +7,12 @@ All AI tools share the same operating contract in this repo. Requirements do not
 ```txt
 1. AGENTS.md
 2. docs/ai/core/          ← universal rules (all tools)
-3. docs/ai/oh-my-codex.md ← OMX orchestration (when using .codex/ — all tools)
+3. .agents/rules/         ← project rules (canonical)
 4. Native tool assets     ← see table below
 5. .requirements/ | apps/*/README.md | .code-reviews/   ← task context
 ```
 
-**Precedence:** user prompt → nearest package `README.md` → `AGENTS.md` → `docs/ai/core/` → `docs/ai/oh-my-codex.md` (when `.codex/` applies) → native tool assets. Details: [guidance-schema.md](guidance-schema.md).
+**Precedence:** user prompt → nearest package `README.md` → `AGENTS.md` → `docs/ai/core/` → `.agents/rules/` → native tool assets. Details: [guidance-schema.md](guidance-schema.md).
 
 Do **not** duplicate `docs/ai/core/` rules in native files — link instead.
 
@@ -20,16 +20,18 @@ Do **not** duplicate `docs/ai/core/` rules in native files — link instead.
 
 ## Tool Map
 
-| Tool            | Repo entry redirect                      | Native assets                                                                                | Orchestration doc                                               |
-| --------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| **Cursor**      | —                                        | [`.cursor/rules/`](../../.cursor/rules/)                                                     | [oh-my-codex.md](oh-my-codex.md) when invoking `.codex/` skills |
-| **Codex + OMX** | —                                        | [`.codex/`](../../.codex/) — `skills/`, `agents/`, `prompts/`                                | [oh-my-codex.md](oh-my-codex.md)                                |
-| **Antigravity** | [GEMINI.md](../../GEMINI.md) → AGENTS.md | [`.agents/skills/`](../../.agents/skills/), [`.agents/workflows/`](../../.agents/workflows/) | [oh-my-codex.md](oh-my-codex.md) when invoking `.codex/` skills |
-| **Claude Code** | [CLAUDE.md](../../CLAUDE.md) → AGENTS.md | —                                                                                            | [oh-my-codex.md](oh-my-codex.md) when invoking `.codex/` skills |
+| Tool            | Repo entry redirect                      | Native assets                                                                                                                          |
+| --------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Codex**       | —                                        | [`.codex/rules/`](../../.codex/rules/) (→ `.agents/rules/`), [`.codex/skills/`](../../.codex/skills/)                                  |
+| **Cursor**      | —                                        | [`.cursor/rules/`](../../.cursor/rules/) → `.agents/rules/`                                                                            |
+| **Claude Code** | [CLAUDE.md](../../CLAUDE.md) → AGENTS.md | [`.claude/CLAUDE.md`](../../.claude/CLAUDE.md), [`.claude/rules/`](../../.claude/rules/), [`.claude/skills/`](../../.claude/skills/)   |
+| **Antigravity** | [GEMINI.md](../../GEMINI.md) → AGENTS.md | [`.agents/rules/`](../../.agents/rules/), [`.agents/skills/`](../../.agents/skills/), [`.agents/workflows/`](../../.agents/workflows/) |
 
 When editing under `apps/` or `packages/`, read the nearest package `README.md`.
 
-**`.codex/` has no README** — orchestration lives in [oh-my-codex.md](oh-my-codex.md); skills/agents/prompts stay under `.codex/`.
+**Canonical project rules** live in [`.agents/rules/`](../../.agents/rules/). Tool adapters: Codex (`.codex/rules/`), Cursor (`.cursor/rules/*.mdc`), Claude Code (`.claude/rules/*.md` with optional `paths` frontmatter).
+
+**Shared skills** (`code-review`, `code-review-followup`, `git-commit`) live in [`.agents/skills/`](../../.agents/skills/) and [`.claude/skills/`](../../.claude/skills/).
 
 ---
 
@@ -48,12 +50,14 @@ When editing under `apps/` or `packages/`, read the nearest package `README.md`.
 
 ## Adding Native Assets
 
-| Platform           | Where to add                                              | Document in                                   |
-| ------------------ | --------------------------------------------------------- | --------------------------------------------- |
-| Codex / OMX        | `.codex/skills/<name>/SKILL.md`                           | [oh-my-codex.md](oh-my-codex.md) + this table |
-| Cursor             | `.cursor/rules/<name>.mdc` or `.cursor/skills/`           | This file (tool table)                        |
-| Antigravity        | `.agents/skills/<name>.md`, `.agents/workflows/<name>.md` | This file (tool table)                        |
-| Universal behavior | `docs/ai/core/<topic>.md` only                            | — no tool syntax                              |
+| Platform           | Where to add                                                          | Document in                                                |
+| ------------------ | --------------------------------------------------------------------- | ---------------------------------------------------------- |
+| All tools (rules)  | `.agents/rules/<name>.md` (canonical)                                 | This file + [AGENTS.md](../../AGENTS.md)                   |
+| Codex              | `.codex/rules/<name>.md` (adapter), `.codex/skills/<name>/SKILL.md`   | This file (tool table)                                     |
+| Cursor             | `.cursor/rules/<name>.mdc` (adapter → `.agents/rules/`)               | This file (tool table)                                     |
+| Claude Code        | `.claude/rules/<name>.md` (adapter), `.claude/skills/<name>/SKILL.md` | This file + [`.claude/CLAUDE.md`](../../.claude/CLAUDE.md) |
+| Antigravity        | `.agents/skills/<name>/SKILL.md`, `.agents/workflows/<name>.md`       | This file (tool table)                                     |
+| Universal behavior | `docs/ai/core/<topic>.md` only                                        | — no tool syntax                                           |
 
 ## Adding a New Tool
 

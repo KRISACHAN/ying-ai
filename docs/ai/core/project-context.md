@@ -8,13 +8,13 @@
 
 **First app — Companion SDK** (`apps/model-runtime-demo` + `packages/ai-core`, `model-ollama`, `memory-postgres`, `tool-web-search*`, `story-core`, `story-postgres`): **V1.0** delivered the core SDK, Postgres memory, and debug workbench. **V1.1** added Persona, workflow streaming, model profiles, tool planning, Ollama, and NDJSON. **V1.2** added provider-neutral Web Search and an AI SDK UI chat surface. **V1.3** added the independent `story-core` runtime, `story-postgres` persistence, and a playable Story Workbench with live/persisted debug data.
 
+**Knowledge workspace** (desktop app + document-loader / data-organizer / data-searcher) lives in the sibling repo `ying-knowledge`, not in this monorepo.
+
 ## Layout
 
 ```txt
 ying-ai/
 ├── apps/                      # Independent AI apps — one per folder
-│   ├── api/                  # @ying-ai/api (scaffold)
-│   ├── web/                  # @ying-ai/web (scaffold)
 │   ├── model-runtime-demo/   # @ying-ai/model-runtime-demo — Companion SDK + Story Mode (first app)
 │   └── story-architect/      # @ying-ai/story-architect — independent AI novel authoring app
 ├── packages/                  # Reusable AI capabilities/SDKs — shared across apps
@@ -28,22 +28,28 @@ ying-ai/
 ├── docs/ai/                  # AI agent operating rules
 ├── .requirements/            # Requirement and stage specs (per app; Companion SDK covers v1.0-v1.3)
 ├── .code-reviews/            # Code review archive
-├── .codex/                   # Codex / OMX project scope
+├── .codex/                   # Codex adapters and skills
+│   ├── rules/               # Adapters → .agents/rules/
+│   └── skills/              # Codex skills
+├── .agents/                  # Canonical rules + Antigravity skills/workflows
+│   └── rules/               # Project rules (canonical)
 └── turbo.json                # Turborepo task graph
 ```
 
 ## Root Commands
 
-| Command             | Purpose                              |
-| ------------------- | ------------------------------------ |
-| `pnpm install`      | Install workspace dependencies       |
-| `pnpm dev`          | Run all dev tasks via Turbo          |
-| `pnpm build`        | Build all packages                   |
-| `pnpm typecheck`    | Typecheck all packages               |
-| `pnpm lint`         | Lint all packages                    |
-| `pnpm format`       | Prettier write                       |
-| `pnpm format:check` | Prettier check                       |
-| `pnpm clean`        | Clean turbo outputs and node_modules |
+| Command             | Purpose                                               |
+| ------------------- | ----------------------------------------------------- |
+| `pnpm install`      | Install workspace dependencies                        |
+| `pnpm dev`          | Select apps with checkboxes and run their dev tasks   |
+| `pnpm dev:all`      | Run all dev tasks via Turbo                           |
+| `pnpm build`        | Select apps with checkboxes and run their build tasks |
+| `pnpm build:all`    | Build the entire workspace via Turbo                  |
+| `pnpm typecheck`    | Typecheck all packages                                |
+| `pnpm lint`         | Lint all packages                                     |
+| `pnpm format`       | Prettier write                                        |
+| `pnpm format:check` | Prettier check                                        |
+| `pnpm clean`        | Clean turbo outputs and node_modules                  |
 
 ## Package-Scoped Commands
 
@@ -52,13 +58,13 @@ Use Turbo filters to target a single package:
 ```bash
 pnpm turbo run build --filter @ying-ai/ai-core
 pnpm turbo run typecheck --filter @ying-ai/model-runtime-demo
-pnpm turbo run lint --filter @ying-ai/web
+pnpm turbo run lint --filter @ying-ai/story-architect
 ```
 
 Or run scripts from the package directory:
 
 ```bash
-cd apps/web && pnpm typecheck
+cd apps/model-runtime-demo && pnpm typecheck
 cd packages/ai-core && pnpm build
 ```
 
@@ -93,8 +99,7 @@ pnpm --filter @ying-ai/model-runtime-demo verify:story-workbench-data
 - [`packages/story-core/README.md`](../../../packages/story-core/README.md) — Story domain and workflow
 - [`packages/story-postgres/README.md`](../../../packages/story-postgres/README.md) — Story persistence
 - [`apps/model-runtime-demo/README.md`](../../../apps/model-runtime-demo/README.md) — AI SDK UI + NDJSON debug workbench
-- [`apps/web/README.md`](../../../apps/web/README.md) — web app specifics
-- [`apps/api/README.md`](../../../apps/api/README.md) — API specifics
+- [`apps/story-architect/README.md`](../../../apps/story-architect/README.md) — independent AI novel authoring workflow
 
 ## Current architecture (summary)
 

@@ -2,7 +2,7 @@
 
 Archive for **Companion SDK code reviews** — the first AI app hosted in this `ying-ai` monorepo. Migrated here from the original standalone `ying-companion` repository (now renamed `ying-ai` on GitHub); content below is kept as historical record. All AI tools write initial reviews and follow-up reports here so later sessions can quickly answer: what was reviewed, what was concluded, and whether follow-up happened.
 
-> **AI read order:** [`.code-reviews/README.md`](../README.md) for the cross-app index, then pick the relevant release folder here (for V1.0, `.code-reviews/companion/v1.0/`), then match `{n}-{7-char-sha}/` to a commit, open the matching folder, and read `{tool}-review.md` plus `{model}-followup.md`. Full workflows: `.codex/skills/code-review/SKILL.md` and `.codex/skills/code-review-followup/SKILL.md`.
+> **AI read order:** [`.code-reviews/README.md`](../README.md) for the cross-app index, then pick the relevant release folder here (for V1.0, `.code-reviews/companion/v1.0/`), then match `{n}-{7-char-sha}/` to a commit, open the matching folder, and read `{tool}-review.md` plus `{model}-followup.md`. Full workflows: `.agents/skills/code-review/SKILL.md` and `.agents/skills/code-review-followup/SKILL.md`.
 
 ---
 
@@ -52,7 +52,7 @@ Archive for **Companion SDK code reviews** — the first AI app hosted in this `
 | Tool        | `{tool}`                    | Display name in report |
 | ----------- | --------------------------- | ---------------------- |
 | Cursor      | `cursor`                    | Cursor                 |
-| Codex / OMX | `codex`                     | Codex                  |
+| Codex       | `codex`                     | Codex                  |
 | Claude Code | `claude`                    | Claude Code            |
 | Antigravity | `antigravity`               | Antigravity            |
 | Other       | Platform name in kebab-case | Readable display name  |
@@ -111,7 +111,7 @@ Follow-up reports also use four **Follow-Up Conclusions** categories: Accepted a
 | **Advisory**         | Blockers resolved; non-blocking WATCH or deferred items remain |
 | **Approve**          | All findings fixed or fully rebutted; verification passed      |
 
-Initial reviews synthesize via OMX dual-lane (code-reviewer + architect). Follow-ups verify each finding against current code and do not defer blindly to the original review.
+Initial reviews synthesize via dual-lane (code-reviewer + architect). Follow-ups verify each finding against current code and do not defer blindly to the original review.
 
 ---
 
@@ -131,10 +131,10 @@ Multiple rounds per scope are allowed — e.g. `cursor-review.md` → `codex-fol
 
 ## Related Skills
 
-| Skill                  | Path                                                                                               | Responsibility                                         |
-| ---------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `code-review`          | [`.codex/skills/code-review/SKILL.md`](../../.codex/skills/code-review/SKILL.md)                   | Initial review; produces `{tool}-review.md`            |
-| `code-review-followup` | [`.codex/skills/code-review-followup/SKILL.md`](../../.codex/skills/code-review-followup/SKILL.md) | Follow-up verification; produces `{model}-followup.md` |
+| Skill                  | Path                                                                                                 | Responsibility                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `code-review`          | [`.agents/skills/code-review/SKILL.md`](../../.agents/skills/code-review/SKILL.md)                   | Initial review; produces `{tool}-review.md`            |
+| `code-review-followup` | [`.agents/skills/code-review-followup/SKILL.md`](../../.agents/skills/code-review-followup/SKILL.md) | Follow-up verification; produces `{model}-followup.md` |
 
 ---
 

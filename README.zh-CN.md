@@ -2,6 +2,8 @@
 
 **[English](./README.md)** | 简体中文
 
+> **命名说明：** 本项目最初命名为 `ying-companion`，主要做 AI 伴侣（Companion）。随着功能不断拓展，Companion 成为众多子功能之一，因此仓库现更名为 **ying-ai**。
+
 一个通用的 **AI 能力 monorepo** —— 用来存放各种独立 AI 应用（`apps/*`），这些应用基于共享、可复用的 AI 能力与 SDK（`packages/*`）构建。基于 pnpm workspaces 和 Turborepo。
 
 > **使用 AI 编程助手？** 请看 [AGENTS.md](AGENTS.md)。本文件是给人类看的。
@@ -30,15 +32,11 @@ _组成 Companion SDK 的应用与包 —— 这是本仓库托管的第一个�
 | **Story Postgres**   | [`packages/story-postgres`](packages/story-postgres/)                                                                           | V1.3 —— 快照式会话与原子化回合持久化                                 |
 | **调试工作台**       | [`apps/model-runtime-demo`](apps/model-runtime-demo/)                                                                           | V1.3 —— Companion 对话 + 可玩的 Story Workbench                      |
 | **Story Architect**  | [`apps/story-architect`](apps/story-architect/)                                                                                 | 独立的 AI 小说创作流程                                               |
-| **产品 API**         | [`apps/api`](apps/api/)                                                                                                         | 脚手架 —— 计划中的 RBAC 后端                                         |
-| **产品前端**         | [`apps/web`](apps/web/)                                                                                                         | 脚手架 —— 计划中的用户前端                                           |
+
+> **知识库工作区：** 本地优先的 Knowledge 桌面应用及其 document-loader / organizer / searcher 包已迁至同级仓库 [`ying-knowledge`](../ying-knowledge/)。
 
 ```mermaid
 flowchart LR
-  subgraph product [产品层 - 规划中]
-    Web[apps/web]
-    API[apps/api]
-  end
   subgraph core [核心 SDK]
     AiCore[packages/ai-core]
     StoryCore[packages/story-core]
@@ -47,13 +45,15 @@ flowchart LR
   subgraph debug [调试宿主]
     Demo[apps/model-runtime-demo]
   end
-  Web --> AiCore
-  API --> AiCore
+  subgraph authoring [创作]
+    StoryArchitect[apps/story-architect]
+  end
   Demo --> AiCore
   Demo --> Ollama
   Demo --> MemoryPostgres[packages/memory-postgres]
   Demo --> StoryCore
   Demo --> StoryPostgres[packages/story-postgres]
+  StoryArchitect --> AiCore
 ```
 
 **边界：** `ai-core` 是一个纯粹的 SDK —— 不读环境变量、不涉及 HTTP、NDJSON 或数据库。demo 应用负责持有 provider 配置、Wire Event 映射、持久化和 UI。
@@ -65,8 +65,6 @@ flowchart LR
 ```txt
 ying-ai/
 ├── apps/                        独立的 AI 应用 —— 每个应用一个文件夹
-│   ├── api/                     @ying-ai/api                   （脚手架）
-│   ├── web/                     @ying-ai/web                   （脚手架）
 │   ├── model-runtime-demo/      @ying-ai/model-runtime-demo    （Companion SDK + Story Mode —— 第一个应用）
 │   └── story-architect/         @ying-ai/story-architect       （AI 小说创作应用）
 ├── packages/                     可复用的 AI 能力与 SDK —— 各应用共享
@@ -86,7 +84,7 @@ ying-ai/
 
 **新增 AI 应用的约定：** 在 `apps/<app-name>` 下新建一个文件夹，带上自己的 `package.json`（`@ying-ai/<app-name>`）、英文 `README.md` 与简体中文 `README.zh-CN.md`（两者顶部都要有语言切换链接）。应用专属的粘合代码留在应用内部；跨应用可复用的东西移到 `packages/<capability-name>`。参见 [如何添加一个新的 AI 应用](#如何添加一个新的-ai-应用)。
 
-各包及应用 README（中文 · EN）：[story-architect](apps/story-architect/README.zh-CN.md) · [EN](apps/story-architect/README.md) · [ai-core](packages/ai-core/README.zh-CN.md) · [EN](packages/ai-core/README.md) · [model-ollama](packages/model-ollama/README.zh-CN.md) · [EN](packages/model-ollama/README.md) · [memory-postgres](packages/memory-postgres/README.zh-CN.md) · [EN](packages/memory-postgres/README.md) · [tool-web-search](packages/tool-web-search/README.zh-CN.md) · [EN](packages/tool-web-search/README.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.zh-CN.md) · [EN](packages/tool-web-search-tavily/README.md) · [story-core](packages/story-core/README.zh-CN.md) · [EN](packages/story-core/README.md) · [story-postgres](packages/story-postgres/README.zh-CN.md) · [EN](packages/story-postgres/README.md) · [model-runtime-demo](apps/model-runtime-demo/README.zh-CN.md) · [EN](apps/model-runtime-demo/README.md) · [web](apps/web/README.zh-CN.md) · [EN](apps/web/README.md) · [api](apps/api/README.zh-CN.md) · [EN](apps/api/README.md)
+各包及应用 README（中文 · EN）：[story-architect](apps/story-architect/README.zh-CN.md) · [EN](apps/story-architect/README.md) · [ai-core](packages/ai-core/README.zh-CN.md) · [EN](packages/ai-core/README.md) · [model-ollama](packages/model-ollama/README.zh-CN.md) · [EN](packages/model-ollama/README.md) · [memory-postgres](packages/memory-postgres/README.zh-CN.md) · [EN](packages/memory-postgres/README.md) · [tool-web-search](packages/tool-web-search/README.zh-CN.md) · [EN](packages/tool-web-search/README.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.zh-CN.md) · [EN](packages/tool-web-search-tavily/README.md) · [story-core](packages/story-core/README.zh-CN.md) · [EN](packages/story-core/README.md) · [story-postgres](packages/story-postgres/README.zh-CN.md) · [EN](packages/story-postgres/README.md) · [model-runtime-demo](apps/model-runtime-demo/README.zh-CN.md) · [EN](apps/model-runtime-demo/README.md)
 
 ---
 
@@ -160,18 +158,20 @@ _本仓库第一个应用的版本历史。未来的应用会在各自的 `READM
 pnpm install
 pnpm typecheck
 pnpm lint
-pnpm build
+pnpm build:all
 ```
 
-| 命令                | 用途                             |
-| ------------------- | -------------------------------- |
-| `pnpm dev`          | 通过 Turbo 运行所有 `dev` 任务   |
-| `pnpm build`        | 构建所有包                       |
-| `pnpm typecheck`    | 对整个 workspace 做类型检查      |
-| `pnpm lint`         | 对整个 workspace 做 lint         |
-| `pnpm format`       | 用 Prettier 格式化               |
-| `pnpm format:check` | 检查格式                         |
-| `pnpm clean`        | 清理 Turbo 产物和 `node_modules` |
+| 命令                | 用途                                          |
+| ------------------- | --------------------------------------------- |
+| `pnpm dev`          | 使用 checkbox 选择应用并运行其 `dev` script   |
+| `pnpm dev:all`      | 通过 Turbo 运行所有 `dev` 任务                |
+| `pnpm build`        | 使用 checkbox 选择应用并运行其 `build` script |
+| `pnpm build:all`    | 通过 Turbo 构建整个 workspace                 |
+| `pnpm typecheck`    | 对整个 workspace 做类型检查                   |
+| `pnpm lint`         | 对整个 workspace 做 lint                      |
+| `pnpm format`       | 用 Prettier 格式化                            |
+| `pnpm format:check` | 检查格式                                      |
+| `pnpm clean`        | 清理 Turbo 产物和 `node_modules`              |
 
 **单个包：**
 

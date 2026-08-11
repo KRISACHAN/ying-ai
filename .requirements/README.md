@@ -1,6 +1,6 @@
 # .requirements
 
-Root **index** for per-app requirement and planning archives in this `ying-ai` monorepo. `ying-ai` hosts multiple independent AI apps ([README.md → Adding a new AI app](../README.md#adding-a-new-ai-app)); any app that benefits from staged, trackable specs gets its own `.requirements/<app-name>/` folder here.
+Root **index** for per-app and product-domain requirement/planning archives in this `ying-ai` monorepo. `ying-ai` hosts multiple independent AI apps ([README.md → Adding a new AI app](../README.md#adding-a-new-ai-app)); any app or cross-cutting product domain that benefits from staged, trackable specs gets its own `.requirements/<name>/` folder here.
 
 > **AI entry:** [AGENTS.md](../AGENTS.md) — start there, then use this README to find the right app archive → that app's own `README.md` for layout/conventions → its `prompts/` for planning context → its `stages/{version}/stage-{NN}/` for the task doc to implement against. Requirement **content is Chinese**; index READMEs are English for agent readability.
 
@@ -25,7 +25,7 @@ Root **index** for per-app requirement and planning archives in this `ying-ai` m
     stages/
 ```
 
-Each app archive is **self-contained**: its own `README.md` documents that app's `prompts/` → `stages/{version}/` conventions, versioning scheme, and read order. This root README only indexes _which_ archives exist and routes to them — it does not duplicate any app's internal conventions.
+Each archive is **self-contained**: its own `README.md` documents its scope, conventions, versioning scheme, and read order. This root README only indexes _which_ archives exist and routes to them — it does not duplicate an archive's internal conventions.
 
 ---
 
@@ -35,6 +35,8 @@ Each app archive is **self-contained**: its own `README.md` documents that app's
 | ------------------- | -------------------------------------- | ----------------------------------- | -------------------------------------------------------- |
 | **Companion SDK**   | [`companion/`](companion/)             | V1.0–V1.3 complete (frozen history) | [`companion/README.md`](companion/README.md)             |
 | **Story Architect** | [`story-architect/`](story-architect/) | V1.0 migrated from standalone app   | [`story-architect/README.md`](story-architect/README.md) |
+
+Knowledge Infrastructure requirements moved with the product to the sibling repo `ying-knowledge` (see that repo's `.requirements/knowledge/`).
 
 Migration note: `companion/` was moved here from the original standalone `ying-companion` repository (now renamed `ying-ai` on GitHub) — see [`companion/README.md`](companion/README.md) for its full history and conventions. Internal cross-references inside its historical `prompts/`/`stages/` documents are **not** rewritten (frozen record); only this index and top-level docs (`README.md`, `AGENTS.md`, `docs/ai/core/project-context.md`, package READMEs) were updated to the new `companion/` path.
 
