@@ -1,343 +1,59 @@
 ---
 name: code-review
-description: Comprehensive code review: dual-lane (code-reviewer + architect), ying-ai project standards and AI editor rules, scope from user commit/paths else staged else unstaged; write numbered Chinese reports to .code-reviews/{app-name}/{n}-{slug}/ with tool-attributed filenames. Use for code review, PR review, or quality assessment.
+description: Optional independent review of implemented code for correctness, solution/spec compliance, Clean Code and refactoring quality, architecture boundaries, Strategy/Plugin/Adapter fit, security/performance risks, verification gaps, structured code-comment quality, and engineering-documentation drift. Review only; do not fix findings.
 ---
 
 # Code Review
 
-Dual-lane review + project standards + AI editor rules. Skill instructions are in English; **report output is Chinese** and saved under `.code-reviews/<app-name>/` — this repo hosts multiple independent AI apps, each with its own review archive (see [`.code-reviews/README.md`](../../../.code-reviews/README.md)).
+Review what was actually implemented.
 
-## When to Use
+This Skill is **optional**. Run it only when the user explicitly requests review, or when project policy explicitly requires one. The Skill does not decide when or how often review must happen.
 
-- User requests a code review
-- Before merging a PR or after completing a major feature
-- User specifies a commit, paths, or leaves scope unset (staged/unstaged changes)
+Read:
 
-**Out of scope:** follow-up on an existing review report or cross-validation → use the **`code-review-followup`** skill.
+- `./references/_shared/engineering-principles.md`
+- `./references/_shared/clean-code.md`
+- `./references/_shared/refactoring.md`
+- `./references/_shared/module-first-architecture.md`
+- `./references/_shared/layered-architecture.md`
+- `./references/_shared/ports-and-adapters.md`
+- `./references/_shared/strategy-and-plugin.md`
+- `./references/_shared/code-comments.md`
+- `./references/_shared/engineering-documentation.md`
+- `./references/_shared/verification.md`
+- `./references/_shared/artifact-protocol.md`
 
-## Workflow Overview
+Load project-specific standards, nearest module/package docs, related solution/spec/plan, and relevant diff/commit/PR/path evidence.
 
-1. **Determine scope** (priority rules below)
-2. **Determine app archive** — which `<app-name>` this scope belongs to (see Directory Layout below)
-3. **Load standards** (project + editor rules)
-4. **Run dual-lane review in parallel** (`code-reviewer` + `architect`)
-5. **Synthesize verdict** per synthesis rules below
-6. **Write Chinese report** to `.code-reviews/<app-name>/{n}-{slug}/`
+## Review Lenses
 
----
+1. **Correctness & data safety** — behavior, states, errors, transactions, persistence, ordering, concurrency, compatibility.
+2. **Solution/spec compliance** — implementation matches approved requirements/plan and does not add hidden scope.
+3. **Architecture** — module ownership, dependency direction, public boundaries, composition, infrastructure leakage, architecture drift.
+4. **Clean Code / Refactoring** — naming, cohesion, abstraction levels, duplication of knowledge, long/complex flows, broad responsibilities, testability.
+5. **Pattern fit** — Strategy/Plugin/Port/Adapter are justified; flag speculative or missing abstractions with evidence.
+6. **Security & performance** — only evidence-backed risks relevant to the scope.
+7. **Verification gap** — ask not only “is the code wrong?” but also “if this important behavior broke, would a current test/gate fail?”
+8. **Structured code comments** — important modules/APIs/functions preserve enough Purpose / Capability / Responsibility / Boundary / Contract / Lifecycle / Tradeoff context for humans and AI without narrating syntax or inventing unsupported semantics.
+9. **Engineering documentation** — README/AGENTS/ADR/index/module docs match the implemented structure, contracts, data flow, and verification reality.
 
-## 1. Determine Review Scope (Priority)
+## Scope
 
-Take the **first** matching item in order; do not fall back once matched.
+Honor explicit user scope first. If no scope is supplied, use the project's normal review convention; if none exists, prefer staged diff, then unstaged diff, and stop if there is nothing concrete to review.
 
-| Priority | Condition                                                | Git command                                                               | Folder `{slug}` example                                    |
-| -------- | -------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| 1a       | User-specified commit / short SHA / HEAD (latest commit) | `git show <commit>` / `git rev-parse HEAD`                                | `63288da` (first 7 chars of full SHA) → folder `0-63288da` |
-| 1b       | User-specified path(s)/directory                         | `git diff [--cached] -- <paths>`                                          | `packages-ai-core` → folder `2-packages-ai-core`           |
-| 2        | Staged changes exist                                     | `git diff --cached --stat` → if non-empty, `git diff --cached --no-color` | `staged` → folder `2-staged`                               |
-| 3        | Unstaged working-tree changes                            | `git diff --stat` → if non-empty, `git diff --no-color`                   | `unstaged` → folder `2-unstaged`                           |
+Prefer reviewing a meaningful completed scope (package/app/module/change) rather than forcing a review after every small internal work item.
 
-If all three are empty → tell the user there is nothing to review and stop.
+## Findings
 
----
+- Findings require evidence and impact; cite path/line/symbol when possible.
+- Separate blockers from improvements.
+- Do not manufacture findings to reach a quota. `0 findings` is valid.
+- Do not fix code in this skill.
+- Do not demand comments merely because a function/file exists; comment findings must identify missing semantic context that materially harms understanding or safety.
+- Do not demand new docs when an existing source of truth already covers the needed information accurately.
 
-## 2. Load Standards (Required Before Review)
+Recommended verdicts: **PASS / WATCH / REQUEST_CHANGES**.
 
-When project rules exist, **do not** rely on generic best practices alone. Record loaded files under **Standards Referenced** in the report.
+Persist the report when the user/project wants review history; include standards consulted, verification evidence observed, and gaps not independently verified.
 
-### Always Load
-
-| File                                                                              | Purpose                                                   |
-| --------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| [AGENTS.md](../../../AGENTS.md)                                                   | Project entry point                                       |
-| [docs/ai/core/principles.md](../../../docs/ai/core/principles.md)                 | Operating principles                                      |
-| [docs/ai/core/working-agreements.md](../../../docs/ai/core/working-agreements.md) | Diff size, patterns, verification                         |
-| [docs/ai/core/verification.md](../../../docs/ai/core/verification.md)             | Verification loop                                         |
-| [docs/ai/core/project-context.md](../../../docs/ai/core/project-context.md)       | Monorepo layout and commands                              |
-| [.agents/rules/ai-guide.md](../../../.agents/rules/ai-guide.md)                   | Project AI rules entry                                    |
-| [eslint.config.mjs](../../../eslint.config.mjs)                                   | Lint (`consistent-type-imports`, `no-explicit-any`, etc.) |
-| [prettier.config.mjs](../../../prettier.config.mjs)                               | Formatting                                                |
-
-### Load by Scope
-
-| Condition                    | Also read                                                                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `apps/**`                    | [.agents/rules/project-context.md](../../../.agents/rules/project-context.md)                                                  |
-| `apps/model-runtime-demo/**` | [apps/model-runtime-demo/README.md](../../../apps/model-runtime-demo/README.md)                                                |
-| `apps/story-architect/**`    | [apps/story-architect/README.md](../../../apps/story-architect/README.md)                                                      |
-| `packages/**`                | Package conventions; read `docs/requirements/` when architecture-related                                                       |
-| Reviewing commit / message   | [docs/ai/core/git-protocol.md](../../../docs/ai/core/git-protocol.md), [commitlint.config.mjs](../../../commitlint.config.mjs) |
-
-Dual-lane prompts must include: **summary of loaded standards** + **git diff for scope**.
-
----
-
-## 3. Dual-Lane Review
-
-**Do not** substitute one lane for a missing lane. If either lane is unavailable → report "independent review unavailable" and **do not** mark merge-ready.
-
-### code-reviewer lane
-
-Responsible for: standards compliance, security, code quality, performance, maintainability.
-
-**Check dimensions**
-
-- **Security** — hardcoded secrets, injection, XSS, CSRF, auth
-- **Code Quality** — complexity, duplication, naming, function size
-- **Performance** — N+1, caching, algorithm efficiency, unnecessary re-renders
-- **Best Practices** — error handling, logging, docs, tests
-- **Project standards** — AGENTS.md, docs/ai/core, eslint/prettier loaded above; violations must be tagged `[standard: path]`
-
-**Severity:** CRITICAL / HIGH / MEDIUM / LOW → report as Critical / High / Medium / Low
-
-**Output:** files reviewed, findings by severity (with file:line), fix suggestions, lane recommendation (APPROVE / REQUEST CHANGES / COMMENT)
-
-### architect lane
-
-Responsible for: architecture/design tradeoffs, devil's advocate perspective.
-
-**Check dimensions**
-
-- System boundaries and interfaces
-- Hidden coupling and long-term maintenance risk
-- Tradeoffs the primary reviewer may miss
-- Strongest argument against approving as-is
-
-**Architecture status** (pick one):
-
-| Status    | Meaning                                                      |
-| --------- | ------------------------------------------------------------ |
-| **CLEAR** | No unresolved architecture blockers                          |
-| **WATCH** | Non-blocking design concerns; must appear in final synthesis |
-| **BLOCK** | Unresolved design issue; not merge-ready                     |
-
-**Output:** Architectural Status, file:line evidence, design recommendations
-
-### Parallel Delegation
-
-```
-delegate(
-  role="code-reviewer",
-  tier="THOROUGH",
-  prompt="CODE REVIEW TASK
-
-Review quality, security, maintainability, and **project standards** (see list below).
-This is the code/spec/security lane; it does not own architecture.
-
-Scope: [git diff or specified files]
-Loaded standards: [list]
-
-Checklist: OWASP, code quality, performance, best practices, project ESLint/AGENTS.md/docs/ai/core compliance
-
-Output: file count, CRITICAL/HIGH/MEDIUM/LOW, file:line, fix suggestions, APPROVE/REQUEST CHANGES/COMMENT"
-)
-
-delegate(
-  role="architect",
-  tier="THOROUGH",
-  prompt="ARCHITECTURE REVIEW TASK
-
-Architecture/tradeoff review for the same scope.
-
-Scope: [git diff or specified files]
-Loaded standards: [list]
-
-Focus: boundaries, coupling, long-term risk, reasons to reject approval
-
-Output: CLEAR/WATCH/BLOCK, file:line, design recommendations"
-)
-```
-
-Run both lanes **in parallel**, then synthesize.
-
-### External Model Cross-Check (Optional)
-
-1. Complete this lane's review independently first
-2. Consult Codex for cross-validation when available
-3. Adopt critically; do not cite blindly
-4. External consult unavailable is **non-blocking**; it cannot replace the required dual lanes
-
----
-
-## 4. Synthesis Rules
-
-| Condition                           | Final verdict (in report)                  |
-| ----------------------------------- | ------------------------------------------ |
-| architect = **BLOCK**               | **需修改**                                 |
-| code-reviewer = **REQUEST CHANGES** | **需修改**                                 |
-| architect = **WATCH**               | **建议**                                   |
-| Otherwise                           | Follow code-reviewer → **批准** / **建议** |
-
-Mapping: APPROVE → 批准; COMMENT → 建议; REQUEST CHANGES → 需修改
-
-If either lane delegation fails or is skipped → **需修改** (independent review unavailable); do not approve.
-
----
-
-## 5. Output
-
-### Language
-
-Reports are **written in Chinese** (headings, summary, findings, checklist, notes). Paths, SHAs, and code identifiers stay as-is. This skill file stays in English for agent readability.
-
-### Directory Layout
-
-```
-.code-reviews/
-  {app-name}/
-    {n}-{slug}/
-      {tool}-review.md       # initial review
-```
-
-- Root: `.code-reviews/<app-name>/` (create the app folder if missing)
-- **`{app-name}`** — the app this review's scope belongs to. Infer it from the diff: which `apps/<name>` it touches, or which app owns the touched `packages/*` (check that package's README "used by" section, or [`docs/ai/core/project-context.md`](../../../docs/ai/core/project-context.md)). Companion SDK packages (`packages/ai-core`, `model-ollama`, `memory-postgres`, `tool-web-search*`, `story-core`, `story-postgres`) and `apps/model-runtime-demo` belong to `companion`; `apps/story-architect` belongs to `story-architect`. Knowledge reviews belong in the sibling `ying-knowledge` repo. If scope spans multiple apps or doesn't map cleanly to one, ask the user which `{app-name}` to file under.
-- One review scope → **one subfolder** inside that app's archive; different AI tools write separate files under the same scope without overwriting
-
-### Folder Naming `{n}-{slug}`
-
-| Part     | Rule                                                                                                                                                                                                     |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `{n}`    | Scan `.code-reviews/<app-name>/` (or its versioned subfolder, if that app uses release folders like Companion SDK's `v1.0/`, `v1.1/`, …) for folders matching `^\d+-`, take max+1; start at `0` if empty |
-| `{slug}` | See table below                                                                                                                                                                                          |
-
-| Scope type                                                    | `{slug}` rule                           | Example                      |
-| ------------------------------------------------------------- | --------------------------------------- | ---------------------------- |
-| User-specified commit, short SHA, or **HEAD / latest commit** | First **7 lowercase chars** of full SHA | `0-63288da`, `1-ca46e25`     |
-| Staged / unstaged / path scope (no commit context)            | kebab-case scope hint (≤40 chars)       | `staged`, `packages-ai-core` |
-
-**Commit scopes must** use `{n}-{7-char-sha}` format, consistent with archived folders `.code-reviews/companion/v1.0/0-63288da` and `.code-reviews/companion/v1.0/1-ca46e25`.
-
-When resolving slug: if scope maps to a commit, run `git rev-parse` for the full SHA, then take the first 7 characters.
-
-### File Naming `{tool}-review.md`
-
-| Part     | Rule                                                                   |
-| -------- | ---------------------------------------------------------------------- |
-| `{tool}` | AI tool identifier that performed the review, **lowercase kebab-case** |
-| Suffix   | `-review.md`                                                           |
-
-Common `{tool}` values:
-
-| Tool        | `{tool}`                    | Display name (in report) |
-| ----------- | --------------------------- | ------------------------ |
-| Cursor      | `cursor`                    | Cursor                   |
-| Codex       | `codex`                     | Codex                    |
-| Claude Code | `claude`                    | Claude Code              |
-| Antigravity | `antigravity`               | Antigravity              |
-| Other       | Platform name in kebab-case | Readable display name    |
-
-**Regardless of AI tool**, attribute source in **both** the filename and report body (see **审查工具** in template). If the current model name is known, **must** include the **模型** field.
-
-### Report Template (`{tool}-review.md`)
-
-Reference: `.code-reviews/companion/v1.0/0-63288da/cursor-review.md`, `.code-reviews/companion/v1.0/1-ca46e25/cursor-review.md`.
-
-```markdown
-# 代码审查 — {范围简述}
-
-**日期：** {YYYY-MM-DD}
-**审查工具：** {Cursor | Codex | Claude Code | …}
-**模型：** {当前模型名称；不可知则省略此行}
-**审查范围：** {用户指定 commit / 已暂存 / 未暂存 / 路径}
-**引用：** {commit SHA、路径、git 命令}
-**结论：** {批准 | 建议 | 需修改}
-
-## 依据规范
-
-{实际读取的规范与规则文件列表；可用 markdown 链接或反引号路径}
-
-## 摘要
-
-{2–4 句；变更是否符合项目规范；双车道概览}
-
-## 审查统计
-
-- 审查文件数：{n}
-- 问题总数：{n}（严重 {n} / 高 {n} / 中 {n} / 低 {n}）
-- code-reviewer 建议：{APPROVE | REQUEST CHANGES | COMMENT}
-- 架构状态：{CLEAR | WATCH | BLOCK}
-
-## 问题清单
-
-### 严重
-
-无。（或列出）
-
-- [`{file}:{line}`] [规范: {path}] {问题描述}
-
-  **修复建议：** {具体建议；复杂修复可附代码块}
-
-### 高
-
-- ...
-
-### 中
-
-- ...
-
-### 低
-
-- ...
-
-（无则写「无」。项目规范类须带 `[规范: …]` 或 `[规则: …]`。高级别问题可含**复现路径**、**当前影响**、**修复建议**分段。）
-
-## 架构关注项
-
-{architect lane 的 WATCH/BLOCK 项；CLEAR 时写「无阻塞架构问题」}
-
-- [`{file}:{line}`] **{WATCH|BLOCK}** — {顾虑与建议}
-
-## 合成说明
-
-- code-reviewer：{建议}
-- 架构状态：{CLEAR/WATCH/BLOCK}
-- 最终结论：**{批准|建议|需修改}**（依据合成规则）
-
-## 检查项
-
-### 安全
-
-- [ ] 无硬编码密钥；输入校验；注入/XSS/CSRF；鉴权
-
-### 代码质量
-
-- [ ] 复杂度与重复；命名；DRY
-
-### 性能
-
-- [ ] N+1；缓存；算法；多余重渲染
-
-### 项目规范
-
-- [ ] docs/ai/core/ 原则与工作约定
-- [ ] `.agents/rules/` 与相关 AGENTS.md
-- [ ] ESLint / Prettier / TypeScript
-
-### 架构
-
-- [ ] 边界与接口明确；耦合风险已评估；状态为 CLEAR/WATCH/BLOCK
-
-### 验证
-
-- [ ] 测试与验证说明（verification.md）；已执行的命令与结果
-
-## 备注
-
-{未审查范围、建议验证命令、独立 lane 是否可用}
-```
-
-### Chat Reply
-
-After writing the file, reply briefly with: verdict, key findings, report path (e.g. `.code-reviews/<app-name>/2-ca46e25/cursor-review.md`).
-
----
-
-## Related Skills
-
-**Follow-up / cross-validation** (verify fixes against an existing `{tool}-review.md`, accept/reject findings) is **not** this skill. Use **`code-review-followup`** (`.agents/skills/code-review-followup/`). That skill writes `{model}-followup.md`, where `{model}` is the identifier of the model that produced the follow-up.
-
-## Best Practices
-
-- Review early and in small batches; prioritize CRITICAL/HIGH
-- Consider context — some "issues" may be intentional tradeoffs
-- Resolve or explicitly record WATCH items before merge
+Do not automatically trigger followup or re-review. The user decides whether findings need action and whether another review is worth the cost.
