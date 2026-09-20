@@ -1,3 +1,10 @@
+/**
+ * 共享工作流步骤运行器。
+ *
+ * 每个步骤按固定顺序同步 Trace、可选 Stream Event 与旁路 CoreObserver；成功、降级和
+ * 失败的 status 必须在三条通道保持一致。Observer 仅用于观测，即使回调失败也不得改变
+ * 工作流结果；真正的步骤异常会记录 failed 后继续向上抛出。
+ */
 import type { CoreEvent, CoreObserver } from "../../abstractions/observer";
 import type {
   WorkflowStepEventPayload,
@@ -26,6 +33,7 @@ export interface RunWorkflowStepOptions<TResult> {
   summarize?: (result: TResult) => Record<string, unknown>;
 }
 
+/** 执行一个可追踪步骤，并在返回或抛错前完成对应的 end/failed 事件。 */
 export async function runWorkflowStep<TResult>(
   options: RunWorkflowStepOptions<TResult>,
 ): Promise<TResult> {

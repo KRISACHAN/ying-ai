@@ -1,3 +1,10 @@
+/**
+ * 进程内 ToolRegistry 实现。
+ *
+ * 宿主负责注册 definition/handler；Registry 校验名称与 object schema，执行时补齐计时和原始
+ * 参数元数据，并把 handler 异常收敛为 ToolResult，而不是让本地工具异常直接逃逸。
+ * list 返回定义副本，避免调用方修改已注册契约。
+ */
 import type {
   ToolDefinition,
   ToolExecuteInput,
@@ -13,7 +20,7 @@ interface RegisteredTool {
   handler: ToolHandler;
 }
 
-/** 本地工具注册表：注册、列出并执行宿主注入的本地工具。 */
+/** 适合单进程宿主的可变注册表；不提供跨进程发现、权限或持久化。 */
 export class LocalToolRegistry implements ToolRegistry {
   public readonly meta = {
     id: "tool.local-registry",

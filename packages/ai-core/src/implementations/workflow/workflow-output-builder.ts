@@ -1,6 +1,13 @@
+/**
+ * 将已完成的 WorkflowExecutionState 投影为公开 ChatWorkflowOutput。
+ *
+ * 本模块不执行 Provider 调用；所有必需步骤必须已写入状态，否则立即报错，避免返回缺字段
+ * 的伪成功结果。Trace 始终在内部生成，仅在宿主显式请求 includeTrace 时附加到 metadata。
+ */
 import type { ChatWorkflowDebugContext, ChatWorkflowOutput } from "../../abstractions/workflow";
 import { requireStateValue, type WorkflowExecutionState } from "./workflow-execution-state";
 
+/** 汇总最终回复、能力结果和调试快照；不修改执行状态。 */
 export function buildWorkflowOutput(state: WorkflowExecutionState): ChatWorkflowOutput {
   const prompt = requireStateValue(state.prompt, "prompt");
   const generation = requireStateValue(state.generation, "generation");

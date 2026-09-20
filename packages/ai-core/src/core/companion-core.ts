@@ -1,7 +1,9 @@
 /**
  * CompanionCore 门面类。
  *
- * 对外暴露 inspect()（查看已挂载 Provider）与 executeWorkflow()（执行单轮聊天）。
+ * 对外暴露 Provider 检查、非流式执行与 Core 级事件流入口；不参与 Prompt、模型流或
+ * Wire DTO 编排。streamWorkflow 会为旧自定义 Workflow 补充“不支持流式”的协议错误，
+ * 并保证异常结束或缺少终止事件时仍向宿主返回 workflow:error。
  * context 在构造时冻结，防止运行期意外替换 Provider。
  */
 import type {
@@ -74,7 +76,10 @@ export class CompanionCore {
     });
   }
 
-  /** 委托当前挂载的 ChatWorkflow 输出 Core 内部流事件。 */
+  /**
+   * 委托当前 Workflow 输出 Core 事件，并在门面边界保证最多一个终止事件。
+   * 此处不做网络序列化；宿主需另行映射为 JSON-safe Wire Event。
+   */
   public async *streamWorkflow(input: ChatWorkflowInput): AsyncIterable<ChatWorkflowStreamEvent> {
     const { workflow, ...core } = this.context;
 

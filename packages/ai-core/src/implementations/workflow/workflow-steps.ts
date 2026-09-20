@@ -1,3 +1,10 @@
+/**
+ * execute 与 stream 共用的能力步骤集合。
+ *
+ * 这些函数封装 Tool、Emotion、Summary、Memory 的领域语义及 Observer/Trace 结果，不知道
+ * HTTP、NDJSON 或 UI。可恢复能力失败会返回显式 degraded/skipped 结果，由上层继续生成
+ * 可信回复；Safety、最终模型与未受控工具异常仍由编排层按关键路径处理。
+ */
 import type { EmotionState } from "../../abstractions/emotion";
 import type { ChatMessage, GenerateOutput } from "../../abstractions/model";
 import type { MemoryRecord, MemoryScope, RecalledMemory } from "../../abstractions/memory";
@@ -23,6 +30,7 @@ import type { WorkflowStreamEmitter } from "./workflow-stream-emitter";
 import { runWorkflowStep, safeEmit } from "./workflow-step-runner";
 import type { WorkflowTraceRecorder } from "./workflow-trace-recorder";
 
+/** 将空调用列表降级为 invalid_plan；缺少工具名属于无法安全执行的无效计划。 */
 export function normalizeToolPlan(plan: ToolPlan): ToolPlan | null {
   if (plan.type === "no_tool") {
     return plan;
@@ -45,6 +53,7 @@ export function normalizeToolPlan(plan: ToolPlan): ToolPlan | null {
   return plan;
 }
 
+/** 将公开 ToolPlan 投影为包含降级来源与 runtime 的内部调试状态。 */
 export function toToolPlanningState(
   plan: ToolPlan,
   plannerUnavailableSource?: PlannerUnavailableSource,
@@ -66,6 +75,9 @@ export function toToolPlanningState(
   };
 }
 
+/**
+ * 工具执行前的占位结果，只为复用 generation 状态结构；不会作为最终 Workflow 输出。
+ */
 export function createPlaceholderGenerateOutput(): GenerateOutput {
   return {
     text: "",
@@ -82,6 +94,7 @@ interface ListToolsOptions {
   sessionId?: string;
 }
 
+/** 在 Prompt 构建前冻结本轮工具定义快照，保证规划与调试上下文看到同一集合。 */
 export async function listTools(options: ListToolsOptions): Promise<ToolDefinition[]> {
   return runWorkflowStep({
     observer: options.observer,

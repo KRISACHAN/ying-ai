@@ -1,5 +1,5 @@
 /**
- * 长期记忆抽象（阶段 4）。
+ * 长期记忆抽象。
  *
  * - MemoryProvider：向量/关键词 recall + 持久化 save
  * - MemoryExtractor：从本轮对话抽取结构化记忆（与存储解耦）
@@ -73,7 +73,7 @@ export interface MemoryRecallResult {
   memories: RecalledMemory[];
   /**
    * 可选调试信息：本次 recall 使用的 query embedding 维度。
-   * 仅供宿主调试展示（patch-0 §5.4），不属于业务契约；
+   * 仅供宿主调试展示，不属于记忆业务语义；
    * 进程内 / Noop provider 可不返回。
    */
   embeddingVectorLength?: number;
@@ -92,7 +92,7 @@ export interface MemorySaveResult {
   skipped?: ExtractedMemory[];
   /**
    * 可选调试信息：本次 save 中最后一次 content embedding 的维度。
-   * 仅供宿主调试展示（patch-0 §5.4），不属于业务契约。
+   * 仅供宿主调试展示，不属于记忆业务语义。
    */
   embeddingVectorLength?: number;
 }

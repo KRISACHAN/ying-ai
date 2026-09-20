@@ -1,10 +1,11 @@
 /**
- * 当前 V1 聊天主链路实现（阶段 3～6）。
+ * Companion Core 的参考聊天工作流编排。
  *
  * 编排顺序：Persona → Safety(input) → Summary(load) → Memory(recall)
  * → Emotion(analyze/transition) → ToolRegistry.list → Prompt.build
- * → ToolPlanningProvider.plan → ToolRegistry.execute → final generate → Safety(output)
+ * → ToolPlanningProvider.plan → ToolRegistry.execute → final generate/stream → Safety(output)
  * → Summary(update/save) → Memory(extract/save)。
+ * execute 与 stream 共享前后处理步骤，仅在最终模型调用处按 generate/stream 分叉。
  */
 import type { ToolPlanningProvider } from "../../abstractions/tool-planning";
 import type {
@@ -54,15 +55,13 @@ export interface SimpleChatWorkflowOptions {
 }
 
 /**
- * 阶段 4 聊天主链路：Persona → Safety(input) → Summary(load) → Memory(recall)
- * → Emotion(analyze/transition) → ToolRegistry.list → Prompt.build
- * → ToolPlanning → ToolRegistry.execute → final generate → Safety(output)
- * → Summary(update/save) → Memory(extract/save)。
+ * 参考聊天主链路，同时提供独立的非流式 execute 与真实流式 stream。
  *
- * 约束：
+ * 关键约束：
  * - Memory 失败不得打断主聊天链路；
  * - Emotion 失败不得打断主聊天链路；
- * - V1.1 Stage 4 只支持非流式 final generate，工具调用必须先经规划；
+ * - 工具调用必须先经独立规划，且在最终用户回复开始前完成；
+ * - stream 只为最终用户回复发 text:delta，delta 拼接必须等于 finish.output.text；
  * - 不保存 history，history 由宿主通过 ChatWorkflowInput.history 传入；
  * - 不读取环境变量、不写 console；
  * - Observer 事件失败不得打断主链路；
@@ -150,7 +149,10 @@ export class SimpleChatWorkflow implements ChatWorkflow {
     }
   }
 
-  /** 输出工作流级真实流式事件；业务步骤复用 execute() 的共享步骤。 */
+  /**
+   * 输出工作流级真实流式事件；共享步骤与 execute 一致，最终回答改用 ChatModel.stream。
+   * producer 与事件消费者并行，确保模型 delta 可即时 yield，而不是等整轮工作流完成。
+   */
   public async *stream(
     input: ChatWorkflowInput,
     context: ChatWorkflowExecutionContext,

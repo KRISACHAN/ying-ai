@@ -1,3 +1,9 @@
+/**
+ * 伴侣情绪的确定性状态转移规则。
+ *
+ * 强烈新情绪直接覆盖；neutral 让旧情绪衰减；同类情绪增强；切换时保留少量上一状态惯性。
+ * 输入无效时回退 neutral，并在 metadata.transitionRule 中记录实际采用的规则。
+ */
 import type {
   EmotionState,
   EmotionTransitionInput,
@@ -15,6 +21,7 @@ const EMOTION_TYPES = new Set<EmotionType>([
   "affectionate",
 ]);
 
+/** 合并 previous 与 detected，输出归一化后的下一状态。 */
 export function transitionEmotion(input: EmotionTransitionInput): EmotionState {
   const now = input.now ?? new Date();
   const previous = normalizeEmotion(input.previous, now);
@@ -55,6 +62,7 @@ export function transitionEmotion(input: EmotionTransitionInput): EmotionState {
   );
 }
 
+/** 创建无调试元数据的中性状态，作为缺省与降级基线。 */
 export function createNeutralEmotion(now = new Date()): EmotionState {
   return {
     current: "neutral",

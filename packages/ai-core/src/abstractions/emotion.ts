@@ -1,5 +1,5 @@
 /**
- * 情绪状态机抽象（阶段 5）。
+ * 伴侣情绪状态机抽象。
  *
  * EmotionState 始终表示「伴侣对用户的情绪状态」，不是对用户的心理诊断。
  * analyze 输出伴侣面对本轮消息时的意向情绪，transition 合并上轮状态得到最终状态。
@@ -9,7 +9,7 @@ import type { ChatMessage } from "./model";
 import type { CompanionPersona } from "./persona";
 import type { CoreProvider } from "./provider";
 
-/** 伴侣当前情绪类型（阶段 5 完整接入）。 */
+/** 伴侣当前情绪类型。 */
 export type EmotionType = "neutral" | "happy" | "sad" | "angry" | "anxious" | "affectionate";
 
 export type EmotionTransitionRule =

@@ -1,6 +1,6 @@
 # Model Provider Strategy
 
-V1.1 的模型选择边界：
+当前模型选择边界（由 V1.1 引入并沿用）：
 
 - `ai-core` 只定义 `ChatModel`、`ModelProfile`、`requiredCapabilities` 与错误语义；
 - 具体 Adapter 负责把第三方 SDK 调用映射到 `ChatModel`，并按本次调用能力筛选 primary / fallback；
@@ -48,13 +48,13 @@ fallback 不满足能力时记录 capability skip，不发请求
 - 模型不支持工具调用时降级为 `no_tool(reason=tool_calling_unavailable)`；
 - 规划器不执行工具，也不把模型规划文本作为用户可见回复。
 
-## Stream Workflow Lifecycle (V1.1)
+## Stream Workflow Lifecycle
 
 详细事件顺序与 Core API：[`packages/ai-core/README.md`](../../packages/ai-core/README.md) § 5.2。
 
 ```txt
 Persona → Safety input → Summary load → Memory recall → Emotion
-→ Tool list → Tool plan (generate) → Tool execute (generate, if any)
+→ Tool list → Tool plan (generate) → Tool execute (ToolRegistry, if any)
 → Final response (stream → text:delta)
 → Safety output (full text) → Summary save → Memory extract/save
 → workflow:finish

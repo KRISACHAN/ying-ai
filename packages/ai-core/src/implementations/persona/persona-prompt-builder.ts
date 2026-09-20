@@ -1,8 +1,16 @@
+/**
+ * Persona 规范化与系统提示词构建。
+ *
+ * 结构化 Persona 是身份、关系与用户称呼的权威来源；自由 systemPrompt 只能补充，不能覆盖
+ * 结构化字段。构建过程不修改 Provider 返回的对象，并将 Summary、Memory、Emotion 与工具
+ * 提示作为独立区块组合，便于 Workflow 在 debugContext 中保留相同快照。
+ */
 import type { CompanionGender, CompanionPersona } from "../../abstractions/persona";
 import type { ToolDefinition } from "../../abstractions/tool";
 
 const VALID_GENDERS: CompanionGender[] = ["female", "male", "non_binary", "unknown"];
 
+/** 清理空白和无效画像字段，并为必填身份字段提供稳定默认值。 */
 export function normalizeCompanionPersona(persona: CompanionPersona): CompanionPersona {
   const normalized: CompanionPersona = {
     id: normalizeRequiredString(persona.id, "default-companion"),
@@ -59,6 +67,7 @@ export function normalizeCompanionPersona(persona: CompanionPersona): CompanionP
   return normalized;
 }
 
+/** 生成仅包含规范化 Persona 的可预览文本，不注入会话上下文。 */
 export function buildPersonaPrompt(persona: CompanionPersona): string {
   const effectivePersona = normalizeCompanionPersona(persona);
 
@@ -106,6 +115,9 @@ function buildPersonaPromptFromNormalized(effectivePersona: CompanionPersona): s
   return lines.join("\n");
 }
 
+/**
+ * 组合最终 system prompt，并同时返回规范化 Persona 与独立 personaPrompt 供调试展示。
+ */
 export function buildPersonaSystemPrompt(
   persona: CompanionPersona,
   context: {

@@ -1,3 +1,10 @@
+/**
+ * 单轮 Workflow 的内部可变状态。
+ *
+ * execute 与 stream 都通过同一状态形状传递步骤产物，避免两条编排路径各自维护上下文。
+ * 本模块负责输入派生、history 清洗、scope/摘要阈值解析和缺失前置状态校验；它不执行
+ * Provider 副作用，也不属于 package 公共 API。
+ */
 import type { EmotionState } from "../../abstractions/emotion";
 import type {
   ChatMessage,
@@ -121,6 +128,7 @@ export interface WorkflowExecutionState {
   memoryResult?: ExtractAndSaveResult;
 }
 
+/** 从宿主输入派生稳定的单轮初始状态，不修改 input 或原始 history 数组。 */
 export function createWorkflowExecutionState(input: ChatWorkflowInput): WorkflowExecutionState {
   const sanitizedHistory = sanitizeHistory(input.history);
   const summaryScope = resolveSummaryScope(input);

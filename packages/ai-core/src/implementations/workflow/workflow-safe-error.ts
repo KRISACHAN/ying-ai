@@ -1,3 +1,10 @@
+/**
+ * Workflow 错误的安全边界。
+ *
+ * SimpleChatWorkflow 的内部异常在进入 Stream/Trace 等宿主可见通道前收敛为固定错误码
+ * 与脱敏短消息。受控错误的 details 契约只允许有限标量；底层 Error、堆栈、连接串和
+ * 凭据不得由本模块主动穿过该边界。
+ */
 import type { SafeWorkflowError, SafeWorkflowErrorCode } from "../../abstractions/workflow-stream";
 import type { WorkflowStepName, WorkflowTraceError } from "../../abstractions/workflow-trace";
 
@@ -9,6 +16,7 @@ export interface CreateSafeWorkflowErrorOptions {
   details?: Record<string, string | number | boolean | null> | undefined;
 }
 
+/** 创建既可抛出又符合 SafeWorkflowError DTO 形状的受控异常。 */
 export function createSafeWorkflowError(
   options: CreateSafeWorkflowErrorOptions,
 ): SafeWorkflowError {
@@ -37,6 +45,7 @@ class SafeWorkflowException extends Error implements SafeWorkflowError {
   }
 }
 
+/** 保留已受控错误；未知异常统一映射为 workflow_failed。 */
 export function toSafeWorkflowError(error: unknown): SafeWorkflowError {
   const normalized = normalizeSafeWorkflowError(error);
 
@@ -50,6 +59,7 @@ export function toSafeWorkflowError(error: unknown): SafeWorkflowError {
   });
 }
 
+/** 仅接受冻结错误码与字符串 message，防止任意对象被误当作安全错误透传。 */
 export function normalizeSafeWorkflowError(error: unknown): SafeWorkflowError | null {
   if (typeof error !== "object" || error === null) {
     return null;

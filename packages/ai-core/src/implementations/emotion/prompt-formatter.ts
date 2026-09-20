@@ -1,6 +1,12 @@
+/**
+ * 将最终伴侣情绪转换为 system prompt 区块。
+ * neutral/0 不注入额外文本；其他情绪只影响语气与关注点，不允许模型暴露标签或把它当作
+ * 对用户的医学/心理诊断。
+ */
 import type { EmotionState } from "../../abstractions/emotion";
 import { clamp01 } from "./emotion.schema";
 
+/** 返回可选 Prompt 区块；不修改 EmotionState。 */
 export function formatEmotionForPrompt(emotion?: EmotionState): string | undefined {
   if (emotion === undefined) {
     return undefined;

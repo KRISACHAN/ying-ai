@@ -13,7 +13,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
+    "lint": "pnpm run verify:boundaries && eslint .",
+    "verify:boundaries": "node scripts/verify-boundaries.mjs",
     "verify:memory-extractor": "node scripts/verify-memory-extractor.mjs",
     "clean": "rm -rf dist .turbo"
   },

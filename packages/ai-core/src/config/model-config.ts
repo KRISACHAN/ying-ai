@@ -1,10 +1,9 @@
-import type { ModelProfileOverride } from "../abstractions/model";
-
 /**
  * 模型运行时配置类型。
  *
  * 由宿主读取环境变量后组装，传入 createModel()；ai-core 不直接读 env。
  */
+import type { ModelProfileOverride } from "../abstractions/model";
 
 /** 主模型与降级模型的重试策略。 */
 export interface ModelRetryOptions {

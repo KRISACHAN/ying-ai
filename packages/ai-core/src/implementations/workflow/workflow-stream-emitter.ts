@@ -1,3 +1,10 @@
+/**
+ * 单次 Workflow 的 producer/consumer 事件队列。
+ *
+ * producer 可以在模型生成期间持续 push，AsyncIterable 消费者同步获得事件；队列保证顺序，
+ * workflow:finish 与 workflow:error 互斥且最多发送一次，终止后的事件被忽略。协议级失败用
+ * emitError 结束流；fail 只用于 producer 自身未能转换成协议事件的异常，并拒绝等待者。
+ */
 import type { GenerateStreamChunk, ModelToolCall } from "../../abstractions/model";
 import type { ToolResult } from "../../abstractions/tool";
 import type { ChatWorkflowOutput } from "../../abstractions/workflow";
@@ -12,6 +19,7 @@ interface QueueWaiter {
   reject(error: unknown): void;
 }
 
+/** 内部事件协调器；不负责 Wire DTO 序列化或网络背压策略。 */
 export class WorkflowStreamEmitter {
   private readonly queue: ChatWorkflowStreamEvent[] = [];
   private readonly waiters: QueueWaiter[] = [];
@@ -54,6 +62,7 @@ export class WorkflowStreamEmitter {
   }
 
   public emitTextDelta(chunk: GenerateStreamChunk): void {
+    // 空字符串不产生事件；仅含空白的 delta 必须原样保留，才能与最终文本严格一致。
     if (chunk.text.length === 0) {
       return;
     }

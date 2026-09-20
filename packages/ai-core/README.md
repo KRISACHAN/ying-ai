@@ -2,31 +2,33 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
-AI Companion Core pure SDK package (V1.0 baseline + V1.1 streaming extensions). Provides pluggable Provider abstractions, model runtime, and chat workflow orchestration so host apps can inject configuration and drive the full “user input → companion reply” lifecycle.
+Host-agnostic AI Companion Core SDK. It provides pluggable Provider contracts, model runtime, and non-streaming or streaming chat workflow orchestration so host apps can inject configuration and drive the full “user input → companion reply” lifecycle.
 
 ---
 
 ## 1. Package role and boundaries
 
-`@ying-ai/ai-core` is a **business-agnostic** companion Core:
+`@ying-ai/ai-core` is a **transport- and durable-storage-agnostic** companion Core:
 
-- Defines all capability slots: Persona, Memory, Emotion, Tool, Safety, Workflow, and more
+- Defines capability contracts for Persona, Memory, Emotion, Tool, Safety, Workflow, and more
 - Ships default / placeholder implementations so it still runs before full capabilities are wired
 - Exposes single-turn chat via `CompanionCore.executeWorkflow()`
-- Exposes the V1.1 workflow-level Core event stream via `CompanionCore.streamWorkflow()`
+- Exposes the workflow-level Core event stream via `CompanionCore.streamWorkflow()`
 - **Does not** read env vars, **does not** connect to a database, **does not** own debug UI (see [`memory-postgres`](../memory-postgres/README.md) and [`model-runtime-demo`](../../apps/model-runtime-demo/README.md))
 
-| Not included               | Owned by                     |
-| -------------------------- | ---------------------------- |
-| `DATABASE_URL` / `pg.Pool` | Host + `memory-postgres`     |
-| User system / auth         | Later product API / Web      |
-| `console` / debug panel    | Host + `CoreObserver` events |
+| Not included                             | Owned by                     |
+| ---------------------------------------- | ---------------------------- |
+| `DATABASE_URL` / `pg.Pool`               | Host + `memory-postgres`     |
+| HTTP / NDJSON / Wire event serialization | Host app                     |
+| Chat history / emotion-state persistence | Host app                     |
+| User system / auth                       | Product API / Web            |
+| `console` / debug panel                  | Host + `CoreObserver` events |
 
 ---
 
 ## 2. Module overview
 
-Organized under `src/`. Every module is a **replaceable slot**; Workflow depends only on interfaces in `abstractions/`.
+Organized under `src/`. Contracts in `abstractions/` define the replaceable capability slots; built-in implementations supply defaults. Workflow consumes Provider contracts and keeps prompt formatting and tool-message adaptation inside implementation-local helpers.
 
 ### 2.1 `abstractions/` — public contracts (stable API)
 
@@ -39,12 +41,12 @@ Organized under `src/`. Every module is a **replaceable slot**; Workflow depends
 | `persona.ts`         | Companion persona     | `PersonaProvider`, `CompanionPersona`: name, gender, personality, speaking style, user address, hobbies, appearance, etc. |
 | `memory.ts`          | Long-term memory      | `MemoryProvider` (recall/save), `MemoryExtractor`, `EmbeddingProvider`, `MemoryScope`                                     |
 | `summary.ts`         | Rolling summary       | `SummaryProvider` (load/save), `SummaryUpdater` (compress old messages into `ConversationSummary`)                        |
-| `emotion.ts`         | Emotion state machine | `EmotionEngine`: `analyze` and `transition` (wired into Workflow in stage 5)                                              |
+| `emotion.ts`         | Emotion state machine | `EmotionEngine`: analyze the intended companion emotion and transition from the previous state                            |
 | `tool.ts`            | Tool calling          | `ToolRegistry`: register tools, execute `tool_call`, return `ToolResult`; V1 param schema uses Core’s object convention   |
 | `safety.ts`          | Content safety        | `SafetyProvider`: `guardInput` / `guardOutput`; Workflow throws on reject                                                 |
-| `workflow.ts`        | Chat orchestration    | `ChatWorkflow`, `ChatWorkflowInput/Output`: main host↔Core business contract; `stream` is optional in V1.1                |
+| `workflow.ts`        | Chat orchestration    | `ChatWorkflow`, `ChatWorkflowInput/Output`: main host↔Core contract; implementations may optionally expose `stream`       |
 | `workflow-stream.ts` | Streaming protocol    | `ChatWorkflowStreamEvent`, `SafeWorkflowError`: Core-internal stream events and safe error DTOs                           |
-| `observer.ts`        | Observability         | `CoreObserver`, `CoreEvent`: per-stage `*:start` / `*:end` events for host debug UI                                       |
+| `observer.ts`        | Observability         | `CoreObserver`, `CoreEvent`: per-step `*:start` / `*:end` events for host observability                                   |
 
 ### 2.2 `core/` — facade and factory
 
@@ -68,7 +70,7 @@ Organized under `src/`. Every module is a **replaceable slot**; Workflow depends
 | ------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `model/openai.ts`                                 | `OpenAICompatibleModel`       | Vercel AI SDK adapter; `generate` / `stream`, retry and fallback                                           |
 | `tool-planning/default-tool-planning-provider.ts` | `DefaultToolPlanningProvider` | Calls `generate({ requiredCapabilities: { toolCalling: true } })` and only emits `no_tool` or `tool_calls` |
-| `workflow/simple-chat-workflow.ts`                | `SimpleChatWorkflow`          | V1 reference orchestration (stages 3–7): full single-turn flow, tool loop, Workflow Trace                  |
+| `workflow/simple-chat-workflow.ts`                | `SimpleChatWorkflow`          | Reference single-turn orchestration shared by execute/stream, including Tool Planning and Workflow Trace   |
 | `workflow/disabled-chat-workflow.ts`              | `DisabledChatWorkflow`        | Throws on `execute` when Workflow is explicitly disabled                                                   |
 | `persona/default-persona-provider.ts`             | `DefaultPersonaProvider`      | Default persona “映映” (Ying Ying)                                                                         |
 | `persona/persona-prompt-builder.ts`               | Persona Prompt Builder        | Normalize structured Persona; build previewable Persona paragraph and final system prompt                  |
@@ -86,36 +88,34 @@ Organized under `src/`. Every module is a **replaceable slot**; Workflow depends
 | `emotion/prompt-formatter.ts`                     | `formatEmotionForPrompt`      | Format final emotion state into a prompt text block                                                        |
 | `tool/empty-tool-registry.ts`                     | `EmptyToolRegistry`           | Default empty registry; chat behavior unchanged when no tools                                              |
 | `tool/local-tool-registry.ts`                     | `LocalToolRegistry`           | Local register / list / execute with controlled error wrapping                                             |
-| `tool/tool-adapter.ts`                            | Tool adapter                  | `ToolDefinition -> GenerateInput.tools`, `ModelToolCall -> ToolCall`, follow-up messages                   |
-| `tool/format-tool-results.ts`                     | Tool result formatter         | Serialize `ToolResult` into tool-role message content for follow-up generation                             |
+| `tool/tool-adapter.ts`                            | Tool adapter                  | `ToolDefinition -> GenerateInput.tools`, `ModelToolCall -> ToolCall`, final-response messages              |
+| `tool/format-tool-results.ts`                     | Tool result formatter         | Serialize `ToolResult` into tool-role message content for final-response generation                        |
 | `safety/passthrough-safety-provider.ts`           | `PassthroughSafetyProvider`   | Always allow                                                                                               |
 | `observer/noop-core-observer.ts`                  | `NoopCoreObserver`            | Drop all events                                                                                            |
 
 ### 2.5 External collaborator packages (outside this package)
 
-| Package                    | Implements                             | Role                                                   |
-| -------------------------- | -------------------------------------- | ------------------------------------------------------ |
-| `@ying-ai/memory-postgres` | `MemoryProvider` + `EmbeddingProvider` | PostgreSQL + pgvector persistence and semantic recall  |
-| `apps/model-runtime-demo`  | Host (debug)                           | Read env, maintain history, inject Core, show Observer |
+| Package                    | Implements                             | Role                                                                            |
+| -------------------------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| `@ying-ai/memory-postgres` | `MemoryProvider` + `EmbeddingProvider` | PostgreSQL + pgvector persistence and semantic recall                           |
+| `apps/model-runtime-demo`  | Host (debug)                           | Read env, maintain history, map Core events to Wire/NDJSON, and render Timeline |
 
-### 2.6 Current progress vs goals
+### 2.6 Current capability status
 
-| Stage | Capability                         | Status                                                    |
-| ----- | ---------------------------------- | --------------------------------------------------------- |
-| 1     | Model Runtime                      | ✅                                                        |
-| 2     | Core abstraction layer             | ✅                                                        |
-| 3     | Chat main path                     | ✅                                                        |
-| 4     | Long-term memory + rolling summary | ✅                                                        |
-| 5     | Emotion state machine              | ✅                                                        |
-| 6     | Multi-step tool loop               | ✅ Local Tool Registry + non-streaming follow-up generate |
-| 7     | Full Workflow orchestration        | ✅ Trace contract + failure/degraded semantics frozen     |
-| 8     | Debug UI                           | Partially in demo                                         |
+| Capability                     | Current status                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| Model runtime                  | `generate` / `stream`, retry/fallback, capability filtering, structured output |
+| Workflow entry points          | `executeWorkflow` and workflow-level `streamWorkflow`                          |
+| Context capabilities           | Persona, summary, memory, emotion, safety; defaults remain injectable          |
+| Tool planning and execution    | Independent planning, at most one execution round, then final reply generation |
+| Observability                  | Trace, Observer events, safe Core stream events                                |
+| Transport, persistence, and UI | Host-owned; implemented by collaborator packages/apps                          |
 
 ---
 
 ## 3. Real call flow today
 
-> The diagrams below describe the real end-to-end path after stages 1–7: from user prompt to final reply.
+> The diagrams below describe the current end-to-end path from user prompt to final reply.
 
 ### 3.1 Participants and data-flow overview
 
@@ -133,8 +133,8 @@ flowchart TB
   end
 
   subgraph Core["@ying-ai/ai-core"]
-    EXEC["core.executeWorkflow(input)"]
-    WF["ChatWorkflow (goal: full-capability orchestration)"]
+    EXEC["core.executeWorkflow(input)\nor core.streamWorkflow(input)"]
+    WF["ChatWorkflow\nshared orchestration"]
   end
 
   subgraph External["Optional external implementations"]
@@ -148,8 +148,8 @@ flowchart TB
   EXEC --> WF
   WF --> PG
   WF --> LLM
-  WF -->|ChatWorkflowOutput.text| UI
-  WF -.->|CoreEvent| OBS_SUB
+  WF -->|Output or Core stream events| UI
+  WF -.->|CoreEvent / step events| OBS_SUB
 ```
 
 **Host passes on every call:**
@@ -175,66 +175,73 @@ result.metadata; // extracted/saved memories, summary, debugContext, etc.
 
 ---
 
-### 3.2 Full single-turn flow (V1 target state)
+### 3.2 Current single-turn flow
 
 ```mermaid
 flowchart TD
-  START(["User prompt\nHost calls executeWorkflow"]) --> A
+  START(["User prompt\nexecuteWorkflow or streamWorkflow"]) --> A
 
-  subgraph PhaseA["Phase A: input guard & context prep"]
-    A["workflow:start"] --> B["Safety.guardInput"]
-    B -->|reject| ERR(["workflow:error\nthrow; no fake reply"])
-    B -->|pass| C["Persona.load"]
-    C --> D["Summary.load\n(if summaryOptions.enabled)"]
-    D --> E["Memory.recall\nquery = user prompt\n→ embedding → pgvector TopK"]
-    E --> F["Emotion.analyze\n→ transition\n(based on previous emotion)"]
+  subgraph PhaseA["Phase A: guard and context preparation"]
+    A["workflow:start"] --> A1["Validate non-empty message"]
+    A1 -->|invalid| ERR(["workflow:error\nthrow; no fake reply"])
+    A1 -->|valid| B["Persona.load"]
+    B --> C["Safety.guardInput"]
+    C -->|reject| ERR
+    C -->|pass| D["Summary.load\nwhen enabled"]
+    D --> E["Memory.recall\nquery = user prompt"]
+    E --> F["Emotion.analyze → transition"]
   end
 
   subgraph PhaseB["Phase B: prompt assembly"]
-    F --> F2["ToolRegistry.list\n(if host injected tools)"]
-    F2 --> G["buildSystemPrompt\n= Persona\n+ Summary block\n+ Memory block\n+ Emotion block\n+ tool instructions\n+ reply constraints"]
-    G --> H["messages =\n[system,\n recentHistory,\n user: prompt]"]
+    F --> G["ToolRegistry.list"]
+    G --> H["Build system prompt + messages"]
   end
 
-  subgraph PhaseC["Phase C: main generation & tool loop (non-streaming)"]
-    H --> I["Model.generate\n(with registered tools)"]
-    I --> J{"toolCalls?"}
-    J -->|yes| K["ToolRegistry.execute\neach tool_call"]
-    K --> L["Append ToolResult to messages"]
-    L --> I2["Model.generate\nfollow-up"]
-    I2 --> M
-    J -->|no| M["Candidate reply text"]
+  subgraph PhaseC["Phase C: planning, tools, and final response"]
+    H --> I["ToolPlanningProvider.plan\nnon-streaming generate when tools exist"]
+    I --> J{"tool_calls plan?"}
+    J -->|yes| K["ToolRegistry.execute\nat most one planned round"]
+    K --> L["Append ToolResult messages"]
+    J -->|no / unavailable| M{"Workflow entry point"}
+    L --> M
+    M -->|execute| N["Model.generate\nwithout tools"]
+    M -->|stream| O["Model.stream → text:delta\nwithout tools"]
+    N --> P["Complete candidate text"]
+    O --> P
   end
 
-  subgraph PhaseD["Phase D: output guard & write-back"]
-    M --> N["Safety.guardOutput"]
-    N -->|reject| ERR
-    N -->|pass| O["Summary.update → save\n(when long history exceeds threshold)"]
-    O --> P["MemoryExtractor.extract\nthis turn user + assistant"]
-    P --> Q["Memory.save\n→ embed → persist"]
-    Q --> END(["workflow:end\nreturn ChatWorkflowOutput.text"])
+  subgraph PhaseD["Phase D: output guard and write-back"]
+    P --> Q["Safety.guardOutput"]
+    Q -->|reject| ERR
+    Q -->|pass| R["Summary.update → save"]
+    R --> S["MemoryExtractor.extract"]
+    S --> T["Memory.save"]
+    T --> END(["workflow:end / workflow:finish"])
   end
 
-  E -.->|fail| G
-  F -.->|fail| G
-  O -.->|fail| P
-  P -.->|fail| END
-  Q -.->|fail| END
+  D -.->|degraded| E
+  E -.->|degraded| F
+  F -.->|degraded| G
+  R -.->|degraded| S
+  S -.->|degraded| END
+  T -.->|degraded| END
 ```
 
-**Current `SimpleChatWorkflow` V1 orchestration constraints:**
+**Current `SimpleChatWorkflow` orchestration constraints:**
 
-| Step                | V1 behavior                                                                                    |
-| ------------------- | ---------------------------------------------------------------------------------------------- |
-| `Persona.load`      | Critical path; failure aborts the turn                                                         |
-| `Safety`            | Any input/output reject throws; never returns unchecked text                                   |
-| `Summary.load`      | Auxiliary read; failure degrades to no summary and continues                                   |
-| `Memory.recall`     | Auxiliary read; failure degrades to empty recall and continues                                 |
-| `Emotion.analyze`   | Auxiliary read; failure falls back to previous/neutral and continues                           |
-| `ToolRegistry.list` | Critical path; failure aborts the turn                                                         |
-| Tool loop           | Non-streaming generate; default max 1 tool round + 1 follow-up generate                        |
-| follow-up toolCalls | Not executed; recorded as `droppedToolCalls` / `toolCallsDropped`                              |
-| Write-back path     | `Summary.update/save`, `Memory.extract/save` failures do not block the already generated reply |
+| Step                   | Behavior                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `Persona.load`         | Critical path; failure aborts the turn                                                            |
+| `Safety`               | Any input/output rejection throws; unchecked text is never returned as a successful output        |
+| `Summary.load`         | Auxiliary read; failure degrades to no summary and continues                                      |
+| `Memory.recall`        | Auxiliary read; failure degrades to empty recall and continues                                    |
+| `Emotion.analyze`      | Auxiliary read; failure falls back to previous/neutral and continues                              |
+| `ToolRegistry.list`    | Critical path; failure aborts the turn                                                            |
+| Tool planning          | Non-streaming; skipped with no tools and degrades to `no_tool` when the planner is unavailable    |
+| Tool execution         | At most one planned execution round before final response generation                              |
+| Final response         | `executeWorkflow` uses `generate`; `streamWorkflow` uses `stream`; neither passes tools           |
+| Unexpected final calls | Tool calls returned by final `generate` are recorded as `droppedToolCalls`, never executed        |
+| Write-back path        | `Summary.update/save` and `Memory.extract/save` failures do not block the already generated reply |
 
 > Default `createCompanionCore({ model })` still uses `DisabledEmotionEngine` and does not trigger an extra emotion-analysis LLM call.
 > After the host explicitly injects `new ModelEmotionEngine({ model })`, Workflow analyzes intended emotion and appends the final emotion into the prompt.
@@ -247,10 +254,11 @@ Using **one user message** as the example, the actual Core-internal calls (inclu
 
 ```txt
 1. Host
-   └─ core.executeWorkflow({ message, history, sessionId, scope, ... })
+   └─ core.executeWorkflow(...) or core.streamWorkflow(...)
 
-2. Workflow start
+2. Shared context preparation
    ├─ observer.emit(workflow:start)
+   ├─ validate non-empty message             → throw if invalid
    ├─ persona.load({ sessionId })          → CompanionPersona
    ├─ safety.guardInput(message)          → throw if rejected
    ├─ summary.load(scope)                  → ConversationSummary | null (optional)
@@ -258,7 +266,7 @@ Using **one user message** as the example, the actual Core-internal calls (inclu
    │    └─ embeddingProvider.embed(query)  → vector
    │    └─ SQL pgvector TopK               → RecalledMemory[]
    ├─ emotion.analyze({ message, history, persona, recalledMemories, previous })
-   │                                      → EmotionState (stage 5)
+   │                                      → EmotionState
    └─ emotion.transition({ previous, detected })
 
 3. Prompt assembly (no model call)
@@ -268,41 +276,49 @@ Using **one user message** as the example, the actual Core-internal calls (inclu
    ├─ buildPersonaSystemPrompt(persona, summary, memory, emotion, tools)
    └─ messages = [system, ...recentHistory, user:message]
 
-4. Main generation + tool loop (stage 6, non-streaming generate)
-   ├─ model.generate({ messages, tools })  → text + toolCalls?
-   ├─ [if toolCalls] tools.execute(call) → ToolResult
-   ├─ [if toolCalls] model.generate(...)  → follow-up generation
-   ├─ [if follow-up still has toolCalls] record droppedToolCalls; no third round
-   └─ final assistant text
+4. Tool planning (non-streaming)
+   ├─ [if tools exist] toolPlanning.plan({ model, messages, tools })
+   │    └─ model.generate({ requiredCapabilities: { toolCalling: true } })
+   └─ ToolPlan = no_tool | tool_calls
 
-5. Output guard
+5. Optional tool execution
+   ├─ [if tool_calls] tools.execute(call)  → ToolResult
+   └─ append assistant tool_calls + tool result messages
+
+6. Final user-visible response (tools are not passed)
+   ├─ executeWorkflow → model.generate({ messages })
+   └─ streamWorkflow  → model.stream({ messages }) → text:delta events
+
+7. Output guard
    └─ safety.guardOutput(text)             → throw if rejected
 
-6. Write-back (after generate; does not block main reply)
+8. Write-back (after final response generation; failures are degraded)
    ├─ summaryUpdater.update + summary.save  → compress old history (optional)
    ├─ memoryExtractor.extract(...)          → extra 1 LLM call (structuredOutput extract)
    └─ memory.save(...)                      → extra N embeddings + DB INSERT
 
-7. Return
-   ├─ observer.emit(workflow:end)
-   └─ ChatWorkflowOutput { text, memories, metadata, modelOutput, ... }
+9. Terminal success
+   ├─ executeWorkflow → ChatWorkflowOutput
+   └─ streamWorkflow  → workflow:finish { output }
 
-8. Host
+10. Host
    ├─ Show text to user
    ├─ history.push(user, assistant)        → pass again next turn
-   └─ Update debug panel from Observer events
+   └─ Map Core events to any Wire DTO and update observability UI
 ```
 
-**Possible model calls per turn (full target state enabled):**
+**Logical model/provider operations per successful turn:**
 
-| Call                        | Trigger                           | Count |
-| --------------------------- | --------------------------------- | ----- |
-| Main `generate`             | Every turn                        | 1+    |
-| `generate` (tool follow-up) | Model returns toolCalls           | 0–1   |
-| `MemoryExtractor`           | Every turn (when memory injected) | 1     |
-| `SummaryUpdater`            | Message count exceeds threshold   | 0–1   |
-| `Emotion.analyze`           | Every turn after stage 5          | 1     |
-| `embedding`                 | 1 recall + save per memory        | 1 + M |
+| Operation         | Trigger                                              | Logical count |
+| ----------------- | ---------------------------------------------------- | ------------- |
+| Tool planning     | Tools exist and a planner is configured              | 0–1           |
+| Final reply       | Every successful main path (`generate` or `stream`)  | 1             |
+| `MemoryExtractor` | Model-backed extractor is enabled                    | 0–1           |
+| `SummaryUpdater`  | Model-backed updater is enabled and threshold is met | 0–1           |
+| `Emotion.analyze` | Model-backed emotion engine is injected              | 0–1           |
+| Embedding         | Recall plus one save operation per extracted memory  | 0–(1 + M)     |
+
+Retries and fallback can make the physical provider-attempt count higher than these logical counts.
 
 ---
 
@@ -317,7 +333,7 @@ flowchart LR
   P2 -->|all fail| ERR["ModelRuntimeError"]
 ```
 
-- **Streaming `stream`**: used by the demo for direct model debugging; V1 multi-step tool loop is based on **non-streaming `generate`** (once streaming has emitted tokens, the runtime does not switch models / insert tools).
+- **Streaming `stream`**: used both by direct model debugging and the final `streamWorkflow` reply. Tool planning and execution finish before that final stream, which receives no tools. Once streaming has emitted text, the runtime does not switch models or insert tools.
 
 ---
 
@@ -329,24 +345,24 @@ flowchart LR
 | --------------------------------- | ---------------------------------------------------------------------------------------------- |
 | **Dependency injection**          | Host injects implementations via `createCompanionCore({ model, memory, emotion, tools, ... })` |
 | **Strategy / plugins**            | Workflow only calls interfaces; swap `PostgresMemoryProvider` → LangChainMemoryProvider        |
-| **Facade**                        | Host only calls `executeWorkflow`; does not see 10+ Providers                                  |
+| **Facade**                        | Host calls `executeWorkflow` / `streamWorkflow`; it does not coordinate individual Providers   |
 | **Observer**                      | Each step `emit`s events; debug UI needs no Core code changes                                  |
-| **Orchestration vs side effects** | recall / extract are side effects; main reply comes from `Model.generate`                      |
+| **Orchestration vs side effects** | recall / extract are side effects; final reply comes from `Model.generate` or `Model.stream`   |
 | **Fail-safe**                     | Memory / Summary / Observer failures do not block replies; Safety failures must throw          |
 
 ### 4.2 AI / LLM concepts in a single turn
 
 | Concept                      | Where                                             | Notes                                                                   |
 | ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
-| **Chat Completion**          | Main `generate`, tool follow-up                   | `ChatMessage[]` → text reply                                            |
+| **Chat Completion**          | Final `generate` / `stream`                       | `ChatMessage[]` → user-visible text reply                               |
 | **RAG**                      | `Memory.recall`                                   | Embed query → TopK → inject into system prompt                          |
 | **Structured output**        | `MemoryExtractor`                                 | `GenerateInput.structuredOutput` / JSON + Zod schema                    |
 | **Rolling context window**   | `Summary` + `recentHistory`                       | Compress old messages; control tokens                                   |
 | **Persona Prompting**        | `buildPersonaPrompt` / `buildPersonaSystemPrompt` | Structured Persona, user address, hobbies, appearance drive reply style |
-| **Emotion Prompting**        | `Emotion.analyze` (stage 5)                       | Emotion continuity injected into prompt                                 |
-| **Function Calling**         | Main `generate` + Tool loop (stage 6)             | `toolCalls` → execute → re-generate                                     |
+| **Emotion Prompting**        | `Emotion.analyze`                                 | Emotion continuity injected into prompt                                 |
+| **Function Calling**         | Tool planning → execute → final response          | Planning is separate from user-visible response generation              |
 | **Embedding**                | recall / save                                     | Semantic retrieval & persistence (in `memory-postgres`)                 |
-| **Primary retry & fallback** | Every `generate`                                  | `ModelRuntimeInfo` records attempts and error summaries                 |
+| **Primary retry & fallback** | Model `generate` / `stream` calls                 | `ModelRuntimeInfo` records attempts and error summaries                 |
 
 ### 4.3 Memory and isolation
 
@@ -359,12 +375,12 @@ flowchart LR
 
 ### 4.4 Engineering and boundaries
 
-| Practice             | Notes                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Interfaces first** | Host depends only on `abstractions/` types                                                                                                        |
-| **Stable meta.id**   | `core.inspect()` and Observer do not rely on class names                                                                                          |
-| **debugContext**     | `metadata.debugContext` reconstructs the first prompt; follow-up tool inputs live in `toolFollowUpMessages` (debug only, not a business contract) |
-| **Package boundary** | DB lives in `memory-postgres`; ai-core has zero `pg` dependency                                                                                   |
+| Practice             | Notes                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Interfaces first** | Host depends only on `abstractions/` types                                                                                                             |
+| **Stable meta.id**   | `core.inspect()` and Observer do not rely on class names                                                                                               |
+| **debugContext**     | `metadata.debugContext` exposes prompt/tool-planning diagnostics; `toolFollowUpMessages` is the final-response input after tool execution (debug only) |
+| **Package boundary** | DB lives in `memory-postgres`; ai-core has zero `pg` dependency                                                                                        |
 
 ---
 
@@ -424,7 +440,7 @@ const core = createCompanionCore({
 console.log(core.inspect().providers.workflow.id); // workflow.host-smoke
 ```
 
-`apps/model-runtime-demo` passes `workflowOptions.includeTrace: true` by default for stage 7 debugging; production hosts can keep the default `false` and enable it only when showing a debug timeline.
+`apps/model-runtime-demo` passes `workflowOptions.includeTrace: true` for its debugging Timeline; production hosts can keep the default `false` and enable it only when they need trace diagnostics.
 
 To enable the real emotion state machine, the host explicitly injects `ModelEmotionEngine` and is responsible for storing / passing back previous emotion:
 
@@ -497,16 +513,16 @@ const result = await core.executeWorkflow({
 });
 
 result.toolResults; // tool execution results this turn
-result.metadata?.toolCallsDropped; // true if follow-up generation still requested tools
+result.metadata?.toolCallsDropped; // true if final generate unexpectedly requested tools
 ```
 
-The V1 tool loop only uses non-streaming `generate`, defaulting to at most 1 tool round; `toolCalls` returned again by the follow-up generation go into `droppedToolCalls` for debug observation and do not run a third round.
+Tool planning is a separate non-streaming model call. If the plan contains tool calls, Core executes at most one planned round and then runs the final user-visible `generate` without tools. Any unexpected `toolCalls` returned by that final generate go into `droppedToolCalls` for diagnostics and are never executed.
 
 ---
 
-## 5.1 V1.1 model capabilities and tool-planning contract
+## 5.1 Model capabilities and tool-planning contract
 
-`ChatModel` now exposes `primaryProfile` and optional `fallbackProfile`. Workflow and host debug panels may only decide `streaming`, `toolCalling`, and `usage` from `ModelProfile.capabilities` — never branch on provider name.
+`ChatModel` exposes `primaryProfile` and optional `fallbackProfile`. Workflow and host debug panels may only decide `streaming`, `toolCalling`, and `usage` from `ModelProfile.capabilities` — never branch on provider name.
 
 Each model call can declare required capabilities via `GenerateInput.requiredCapabilities`:
 
@@ -517,7 +533,7 @@ await model.stream({
 });
 ```
 
-The OpenAI-compatible adapter filters primary / fallback profiles first; candidates that lack capabilities never send a request and are recorded in `ModelRuntimeInfo.capabilitySkips` or `ModelCapabilityUnavailableError.capabilitySkips`. Legacy `generate()` calls without `requiredCapabilities` keep V1.0 behavior.
+The OpenAI-compatible adapter filters primary / fallback profiles first; candidates that lack capabilities never send a request and are recorded in `ModelRuntimeInfo.capabilitySkips` or `ModelCapabilityUnavailableError.capabilitySkips`. Calls without `requiredCapabilities` keep the backward-compatible unrestricted behavior.
 
 Internal structured tasks can declare an object schema via `GenerateInput.structuredOutput`. The OpenAI-compatible adapter uses Vercel AI SDK `Output.object({ schema })` to generate and validate structured objects; non–AI SDK adapters may map to their own JSON/structured-output capability and then validate with the same schema. When an adapter receives `structuredOutput`, it must populate `GenerateOutput.structuredOutput` or explicitly throw that structured output is unsupported. `ModelMemoryExtractor` uses this contract for long-term memory extraction and no longer depends on manually slicing JSON from free text.
 
@@ -537,14 +553,14 @@ await model.generate({
 
 ---
 
-## 5.2 V1.1 streaming workflow (`streamWorkflow`)
+## 5.2 Streaming workflow (`streamWorkflow`)
 
 ### Dual entry points
 
-| Method              | Return type                              | Use                                          |
-| ------------------- | ---------------------------------------- | -------------------------------------------- |
-| `executeWorkflow()` | `Promise<ChatWorkflowOutput>`            | Non-streaming, background jobs, legacy hosts |
-| `streamWorkflow()`  | `AsyncIterable<ChatWorkflowStreamEvent>` | Chat UI, live Timeline, debug panel          |
+| Method              | Return type                              | Use                                     |
+| ------------------- | ---------------------------------------- | --------------------------------------- |
+| `executeWorkflow()` | `Promise<ChatWorkflowOutput>`            | Non-streaming hosts and background jobs |
+| `streamWorkflow()`  | `AsyncIterable<ChatWorkflowStreamEvent>` | Chat UI, live Timeline, debug panel     |
 
 `streamWorkflow()` must terminate with `workflow:finish` (success) or `workflow:error` (failure); having only `text:delta` does not mean success. The Core facade emits a safe `workflow:error` if a terminal event is missing.
 
@@ -558,7 +574,7 @@ tool:call / tool:result
 workflow:finish | workflow:error
 ```
 
-User-visible reply text goes through `model.stream()` → `text:delta`; internal steps such as emotion analysis, memory extraction, summary updates, tool planning, and tool execution still use non-streaming `generate()`.
+User-visible reply text goes through `model.stream()` → `text:delta`. Model-backed internal steps such as emotion analysis, memory extraction, summary updates, and tool planning continue to use non-streaming `generate()`; tool execution calls `ToolRegistry` and completes before the final stream.
 
 ### Core Event vs Wire Event
 
@@ -574,7 +590,7 @@ NDJSON, HTTP, and persistence ordering (`workflow:finish` after DB write-back) a
 | Model fails before first `text:delta` | retry / fallback or `workflow:error`                   |
 | Fails after partial text              | Keep partial text; `workflow:error`; no finish         |
 | Output Safety rejects                 | `workflow:error`; do not send `workflow:finish`        |
-| Post-step Memory / Emotion failure    | Main reply can complete; trace / debug marked degraded |
+| Auxiliary context / write-back fails  | Main reply can complete; trace / debug marked degraded |
 
 ---
 
@@ -597,13 +613,37 @@ NDJSON, HTTP, and persistence ordering (`workflow:finish` after DB write-back) a
 
 ---
 
+## 7. Verification
+
+Run checks from the repository root. The change-by-change source of truth is the [package verification matrix](./AGENTS.md#verification-matrix); the common package gates are:
+
+```bash
+pnpm --filter @ying-ai/ai-core typecheck
+pnpm --filter @ying-ai/ai-core lint
+pnpm --filter @ying-ai/ai-core build
+pnpm --filter @ying-ai/ai-core verify:memory-extractor # memory extraction changes only
+```
+
+For documentation-only changes, run a focused Prettier check plus package lint. Package lint includes `scripts/verify-boundaries.mjs`. This package has no general unit-test script, so workflow/runtime behavior also requires the focused verification or manual acceptance named by the governing requirement or consuming app; package checks alone do not prove host transport, persistence, or UI end to end.
+
+---
+
 ## Related docs
 
+### Current design and integration
+
+- Package modification guardrails: [`AGENTS.md`](./AGENTS.md)
+- Model Provider boundary: [`docs/ai/model-provider-strategy.md`](../../docs/ai/model-provider-strategy.md)
+- Public package entry point: [`src/index.ts`](./src/index.ts)
+- Ollama adapter: [`packages/model-ollama`](../model-ollama/README.md)
+- Debug host: [`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)
+- PostgreSQL memory: [`packages/memory-postgres`](../memory-postgres/README.md)
+
+### Accepted requirements and review history
+
+- V1 boundaries: [`.requirements/companion/prompts/02-execution.md`](../../.requirements/companion/prompts/02-execution.md)
 - V1.0 master plan: [`.requirements/companion/prompts/03-v1.0-plan.md`](../../.requirements/companion/prompts/03-v1.0-plan.md)
 - V1.1 master plan: [`.requirements/companion/prompts/04-v1.1-plan.md`](../../.requirements/companion/prompts/04-v1.1-plan.md)
-- V1 boundaries: [`.requirements/companion/prompts/02-execution.md`](../../.requirements/companion/prompts/02-execution.md)
 - V1.0 stage specs: [`.requirements/companion/stages/v1.0/`](../../.requirements/companion/stages/v1.0/)
 - V1.1 stage specs: [`.requirements/companion/stages/v1.1/`](../../.requirements/companion/stages/v1.1/)
-- Ollama adapter: [`packages/model-ollama`](../model-ollama/README.md)
-- Debug app: [`apps/model-runtime-demo`](../../apps/model-runtime-demo/README.md)
-- PostgreSQL memory: [`packages/memory-postgres`](../memory-postgres/README.md)
+- V1.1 release conclusion: [`.code-reviews/companion/v1.1/conclusion.md`](../../.code-reviews/companion/v1.1/conclusion.md)

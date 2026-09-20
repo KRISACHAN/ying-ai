@@ -1,3 +1,10 @@
+/**
+ * ToolPlan 的顺序执行边界。
+ *
+ * 每个调用在 text:delta 之前依次发出 tool:call / tool:result。参数 JSON 无效或 Registry
+ * 返回 ok=false 属于受控工具失败，步骤以 degraded 完成并把结果交给最终模型；自定义
+ * Registry 直接抛出的异常属于未受控失败，会转换为 tool_execution_failed 并终止工作流。
+ */
 import type { ModelToolCall } from "../../abstractions/model";
 import type { CoreObserver } from "../../abstractions/observer";
 import type { ToolResult } from "../../abstractions/tool";
@@ -18,6 +25,7 @@ export interface ExecuteToolCallsOptions {
   metadata?: Record<string, unknown>;
 }
 
+/** 按规划顺序执行工具并保持结果顺序与 toolCalls 一致。 */
 export async function executeToolCalls(options: ExecuteToolCallsOptions): Promise<ToolResult[]> {
   return runWorkflowStep({
     observer: options.observer,

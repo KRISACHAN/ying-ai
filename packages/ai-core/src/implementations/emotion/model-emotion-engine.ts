@@ -1,3 +1,10 @@
+/**
+ * 基于 ChatModel 的伴侣意向情绪识别实现。
+ *
+ * analyze 只推断本轮 detected 状态；transition 使用确定性规则合并 previous。默认非 strict
+ * 模式在超时、无效 JSON 或模型失败后返回带 failed 元数据的 previous/default/neutral，
+ * 让 Workflow 以 degraded 继续；strict 模式保留抛错语义供宿主选择。
+ */
 import type {
   EmotionAnalyzeInput,
   EmotionEngine,
@@ -20,6 +27,7 @@ export interface ModelEmotionEngineOptions {
   strict?: boolean;
 }
 
+/** 模型负责识别、规则负责连续性的混合 EmotionEngine。 */
 export class ModelEmotionEngine implements EmotionEngine {
   public readonly meta = {
     id: "emotion.model",
@@ -48,6 +56,7 @@ export class ModelEmotionEngine implements EmotionEngine {
     this.strict = options.strict ?? false;
   }
 
+  /** 按 retryCount 重试结构化解析；非 strict 耗尽后返回显式失败状态。 */
   public async analyze(input: EmotionAnalyzeInput): Promise<EmotionState> {
     let lastError: unknown;
 

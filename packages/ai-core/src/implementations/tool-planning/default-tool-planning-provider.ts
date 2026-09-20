@@ -1,3 +1,10 @@
+/**
+ * 默认工具规划策略。
+ *
+ * 使用本次 plan 输入携带的 ChatModel 请求 toolCalling 能力，只解析 toolCalls，不把规划模型
+ * 产生的自然语言作为用户回复。能力不足与规划异常都显式降级为 no_tool，由 Workflow 继续
+ * 最终回答；具体 Provider 名称不参与分支。
+ */
 import { ModelCapabilityUnavailableError } from "../../errors/model-capability-unavailable-error";
 import type { ChatModel, ModelToolCall } from "../../abstractions/model";
 import type {
@@ -16,11 +23,12 @@ const PLANNER_SYSTEM_PROMPT = [
 
 export interface DefaultToolPlanningProviderOptions {
   /**
-   * @deprecated Stage 4 planning passes the current request model via plan(input.model).
+   * @deprecated 仅保留构造兼容；规划始终使用 plan(input.model) 的本次请求模型。
    */
   model: ChatModel;
 }
 
+/** 无状态规划器；可安全复用于不同请求与不同 ChatModel。 */
 export class DefaultToolPlanningProvider implements ToolPlanningProvider {
   public readonly meta = {
     id: "tool-planning.default",

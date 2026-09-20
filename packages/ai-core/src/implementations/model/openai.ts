@@ -1,5 +1,5 @@
 /**
- * OpenAI-compatible 模型实现（阶段 1）。
+ * OpenAI-compatible ChatModel Adapter。
  *
  * 基于 Vercel AI SDK（@ai-sdk/openai-compatible + ai）适配，
  * 支持 generate / stream、主模型重试、降级模型与运行时元信息。
@@ -111,7 +111,7 @@ export class OpenAICompatibleModel implements ChatModel {
 
   /**
    * 流式生成：仅在尚未向调用方 yield 文本时可切换降级模型；
-   * 一旦开始吐字，后续错误直接抛出（V1 不在流中途切换模型）。
+   * 一旦开始吐字，后续错误直接抛出，避免把不同候选模型的半截输出拼成同一回复。
    */
   public async *stream(input: GenerateInput): AsyncIterable<GenerateStreamChunk> {
     const state = createRuntimeState();

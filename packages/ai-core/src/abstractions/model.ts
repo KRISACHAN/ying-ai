@@ -1,8 +1,9 @@
 /**
- * 模型运行时抽象（阶段 1）。
+ * 模型运行时抽象。
  *
  * ChatModel 是 Core 与 LLM 之间的唯一边界：Workflow 不直接调用 OpenAI，
- * 只通过 generate / stream 与模型交互。toolCalls 结构已预留，执行循环在阶段 6 接入。
+ * 只通过 generate / stream 与模型交互。能力筛选、重试与 fallback 由 Adapter 负责，
+ * Workflow 仅声明本次调用所需能力并消费统一结果。
  */
 import type { CoreProvider } from "./provider";
 import type { z } from "zod";
@@ -32,7 +33,7 @@ export interface GenerateInput {
    * Adapter 收到该字段时必须填充 GenerateOutput.structuredOutput，或显式抛出不支持结构化输出的错误。
    */
   structuredOutput?: GenerateStructuredOutput;
-  /** 本次调用必须满足的模型能力；未声明时保持 V1.0 兼容行为。 */
+  /** 本次调用必须满足的模型能力；未声明时不额外筛选候选模型。 */
   requiredCapabilities?: RequiredModelCapabilities;
 }
 
@@ -61,7 +62,7 @@ export interface GenerateOutput {
   runtime?: ModelRuntimeInfo;
 }
 
-/** 模型返回的工具调用请求（阶段 6 前由 Workflow 忽略）。 */
+/** 模型返回的工具调用请求；规划与执行由 Workflow 分阶段处理。 */
 export interface ModelToolCall {
   id?: string;
   name: string;
@@ -90,7 +91,7 @@ export interface ChatModel extends CoreProvider {
 export interface ModelCapabilities {
   /** 是否能输出可消费的连续文本增量。 */
   streaming: boolean;
-  /** 是否支持 V1.1 工具规划所需的工具调用能力。 */
+  /** 是否支持工具规划所需的工具调用能力。 */
   toolCalling: boolean;
   /** 是否能稳定返回 token usage。未知或不稳定时为 false。 */
   usage: boolean;

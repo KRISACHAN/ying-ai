@@ -1,3 +1,10 @@
+/**
+ * 单轮 Workflow Trace 的内存记录器。
+ *
+ * start/end 成对更新同一槽位，snapshot 返回步骤条目的浅拷贝，避免外部直接替换内部记录。
+ * 预算超限只记录诊断，不主动取消执行；顶层失败由调用方显式传入 snapshot("failed")，
+ * 可恢复步骤失败则推导为 degraded。
+ */
 import type {
   WorkflowStepName,
   WorkflowStepStatus,
@@ -11,6 +18,7 @@ interface ActiveStep {
   startedAtMs: number;
 }
 
+/** 记录步骤时序与摘要，不发 Observer 或 Stream 事件。 */
 export class WorkflowTraceRecorder {
   private readonly startedAtMs = Date.now();
   private readonly startedAt = new Date(this.startedAtMs).toISOString();
@@ -26,6 +34,7 @@ export class WorkflowTraceRecorder {
     const startedAtMs = Date.now();
     const trace: WorkflowStepTrace = {
       step,
+      // 先按 failed 占位：若步骤异常退出且未正确 end，快照也不会把它误判为成功。
       status: "failed",
       startedAt: new Date(startedAtMs).toISOString(),
     };

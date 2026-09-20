@@ -57,9 +57,8 @@ export interface ChatWorkflowInput {
 }
 
 /**
- * 仅供宿主调试展示的上下文快照（patch-0 §5.4）。
- * 让 Demo 的 Prompt / Context Debug Panel 能 100% 还原本轮实际发给模型的内容，
- * 不属于业务 API 契约。
+ * 仅供宿主诊断展示的上下文快照。
+ * 让调试面板还原本轮 Prompt、能力结果与模型输入；业务逻辑不应依赖这些诊断字段。
  */
 export interface ChatWorkflowDebugContext {
   scope: MemoryScope;
@@ -83,7 +82,7 @@ export interface ChatWorkflowDebugContext {
   toolDefinitions?: ToolDefinition[];
   /** 工具规划结果；只用于调试观察，不是最终回复文本。 */
   toolPlan?: ToolPlan;
-  /** 工具规划降级原因，使用阶段 3 固定枚举。 */
+  /** 工具规划降级原因，使用 ToolPlanningDegradationReason 固定枚举。 */
   toolPlanningReason?: ToolPlanningDegradationReason;
   /** reason=planner_unavailable 时区分未配置还是执行失败。 */
   plannerUnavailableSource?: "not_configured" | "execution_failed";
@@ -95,13 +94,13 @@ export interface ChatWorkflowDebugContext {
   toolResults?: ToolResult[];
   /** 达到单轮工具轮数限制后被保留但不再执行的模型 toolCalls。 */
   droppedToolCalls?: ModelToolCall[];
-  /** 工具执行后传入 final generate 的消息。 */
+  /** 工具执行后传入最终模型调用的消息。 */
   toolFollowUpMessages?: ChatMessage[];
   /** buildPersonaPrompt 结果，仅包含 normalize 后的 Persona 段落；自定义 Workflow 应同步填充。 */
   personaPrompt: string;
   /** buildPersonaSystemPrompt 完整结果。 */
   systemPrompt: string;
-  /** 传入 final model.generate 的基础 messages；工具结果输入见 toolFollowUpMessages。 */
+  /** 传入最终模型调用的基础 messages；工具结果输入见 toolFollowUpMessages。 */
   messages: ChatMessage[];
   /** 本轮 recall 或 save 中最后一次 embedding 的 vector.length。 */
   embeddingVectorLength?: number;
@@ -139,7 +138,10 @@ export interface ChatWorkflowExecutionContext {
   core: ChatWorkflowCoreContext;
 }
 
-/** 聊天编排契约；宿主通过 core.executeWorkflow 间接调用。 */
+/**
+ * 聊天编排契约；宿主通过 CompanionCore 的 executeWorkflow / streamWorkflow 间接调用。
+ * stream 保持可选，以兼容只实现非流式执行的自定义 Workflow。
+ */
 export interface ChatWorkflow extends CoreProvider {
   execute(
     input: ChatWorkflowInput,

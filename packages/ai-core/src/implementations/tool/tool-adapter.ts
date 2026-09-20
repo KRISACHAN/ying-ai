@@ -1,3 +1,10 @@
+/**
+ * Core Tool 契约与 AI SDK 模型消息之间的 Adapter。
+ *
+ * 这里是有意保留的实现层耦合：abstractions/ 不依赖 AI SDK。工具执行仍由 ToolRegistry
+ * 负责；本模块只转换 schema/call，并构造包含 assistant toolCalls 与 tool role 结果的
+ * 最终回答上下文。
+ */
 import { jsonSchema, type ToolSet } from "ai";
 
 import type { ChatMessage, ModelToolCall } from "../../abstractions/model";
@@ -33,7 +40,7 @@ export function toCoreToolCall(modelToolCall: ModelToolCall): ToolCall {
   };
 }
 
-/** 拼装工具执行后的 final generate 消息。 */
+/** 拼装工具执行后的最终模型消息；不执行工具，也不再次开放 tools。 */
 export function buildToolFollowUpMessages(
   messages: ChatMessage[],
   modelText: string,

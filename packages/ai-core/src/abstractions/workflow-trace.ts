@@ -1,4 +1,11 @@
-/** Workflow 级步骤名称。 */
+/**
+ * Workflow Trace 契约。
+ *
+ * Trace 是一次执行的结构化诊断快照，不是流式事件或网络 DTO。步骤顺序由实际编排
+ * 决定；status=degraded 表示主回复可继续但某个可恢复能力失败或被降级。
+ */
+
+/** 可被 Trace、Observer 与 Stream 共同引用的稳定步骤名称。 */
 export type WorkflowStepName =
   | "persona:load"
   | "safety:input"

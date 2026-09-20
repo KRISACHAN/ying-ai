@@ -1,3 +1,10 @@
+/**
+ * 最终用户回复生成边界。
+ *
+ * 工具规划与执行在进入本模块前已经结束，因此最终 generate/stream 均不再传 tools，
+ * 防止模型在最后阶段发起未规划调用。两条路径把结果写回同一 generation 状态，供后续
+ * Output Safety、Summary、Memory 与输出构建共享。
+ */
 import type {
   GenerateOutput,
   GenerateStreamChunk,
@@ -9,6 +16,7 @@ import { createSafeWorkflowError, toSafeMessage } from "./workflow-safe-error";
 import type { WorkflowStreamEmitter } from "./workflow-stream-emitter";
 import { runWorkflowStep } from "./workflow-step-runner";
 
+/** 非流式最终生成；意外返回的 toolCalls 只记录为 dropped，不再执行。 */
 export async function runFinalGenerateStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,
@@ -57,6 +65,10 @@ export async function runFinalGenerateStep(
   };
 }
 
+/**
+ * 流式最终生成；只转发非空 delta，保留空白字符，并将所有 delta 原样聚合为 finalOutput。
+ * 已输出 delta 后发生错误时以 partialOutput 标记失败，绝不发送 workflow:finish。
+ */
 export async function runFinalStreamStep(
   state: WorkflowExecutionState,
   context: ChatWorkflowExecutionContext,

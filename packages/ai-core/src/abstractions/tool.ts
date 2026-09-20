@@ -1,12 +1,13 @@
 /**
- * 工具调用抽象（阶段 6）。
+ * 工具调用抽象。
  *
  * ToolRegistry 扩展 ToolProvider，支持 register 注册工具与 handler。
- * Workflow 通过 ToolRegistry 执行规划返回的 toolCalls，再把 ToolResult 拼回最终生成。
+ * Workflow 通过 ToolRegistry 执行规划返回的 toolCalls，再把 ToolResult 作为最终回答上下文。
+ * 工具的注册、执行副作用与权限由宿主实现；Core 只定义调用契约与编排顺序。
  */
 import type { CoreProvider } from "./provider";
 
-/** 工具元信息，将注册到模型 tools 入参（阶段 6）。 */
+/** 工具元信息；Workflow 会在规划调用前适配为模型工具描述。 */
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -14,7 +15,7 @@ export interface ToolDefinition {
   metadata?: ToolDefinitionMetadata;
 }
 
-/** Core 自己的工具参数 schema 约定：V1 只支持 object 参数。 */
+/** Core 的工具参数 schema 约定；当前公开契约只支持 object 参数。 */
 export interface ToolParametersSchema {
   type: "object";
   properties?: Record<string, unknown>;
@@ -34,7 +35,7 @@ export interface ToolCall {
   arguments: unknown;
 }
 
-/** 工具执行结果，供二次 generate 拼入上下文。 */
+/** 工具执行结果；Workflow 将其作为最终回答的模型上下文。 */
 export interface ToolResult {
   toolCallId?: string;
   name: string;
@@ -68,7 +69,7 @@ export interface ToolExecuteInput {
   metadata?: Record<string, unknown>;
 }
 
-/** 工具列出与执行契约（阶段 6 接入 Workflow）。 */
+/** 工具列出与执行契约；具体副作用与权限校验由实现负责。 */
 export interface ToolProvider extends CoreProvider {
   list(): Promise<ToolDefinition[]>;
   execute(input: ToolExecuteInput): Promise<ToolResult>;
