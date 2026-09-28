@@ -1,0 +1,23 @@
+{
+  "name": "@ying-ai/ollama-script",
+  "version": "1.0.0",
+  "description": "Ollama / Open WebUI / ComfyUI 本地工作流脚本。prompts、images、open-webui、comfyui、archive 等运行时目录为本地数据，不纳入版本库，需自行创建或由安装脚本生成。",
+  "type": "module",
+  "scripts": {
+    "ow:install": "./ai-script/ow-install.sh",
+    "ow:start": "./ai-script/ow-start.sh",
+    "ow:uninstall": "./ai-script/ow-uninstall.sh",
+    "comfy:start": "./ai-script/comfy-start.sh",
+    "flux": "node script/flux.js",
+    "flux:run": "node script/flux-run.js",
+    "flux:loop": "node script/flux.js --loop",
+    "lint": "eslint script"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@inquirer/prompts": "^8.5.2"
+  },
+  "private": true
+}

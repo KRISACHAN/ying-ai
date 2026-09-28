@@ -12,10 +12,29 @@ export default tseslint.config(
       "**/.turbo/**",
       "**/coverage/**",
       "**/next-env.d.ts",
+      "apps/ollama-script/archive/**",
+      "apps/ollama-script/comfyui/**",
+      "apps/ollama-script/open-webui/**",
+      "apps/ollama-script/open-webui-backup-*/**",
+      "apps/ollama-script/images/**",
+      "apps/ollama-script/prompts/**",
+      "apps/ollama-script/results/**",
     ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ["apps/ollama-script/script/**/*.js"],
+    languageOptions: {
+      globals: {
+        Buffer: "readonly",
+        console: "readonly",
+        fetch: "readonly",
+        process: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
   {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {

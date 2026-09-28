@@ -1,0 +1,9 @@
+# Local environments, inputs, and generated output
+.DS_Store
+comfyui/
+archive/
+open-webui/
+open-webui-backup-*/
+images/
+prompts/
+results/

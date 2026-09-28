@@ -66,7 +66,8 @@ flowchart LR
 ying-ai/
 ├── apps/                        Independent AI apps — one folder per app
 │   ├── model-runtime-demo/      @ying-ai/model-runtime-demo    (Companion SDK + Story Mode — first app)
-│   └── story-architect/         @ying-ai/story-architect       (AI novel authoring app)
+│   ├── story-architect/         @ying-ai/story-architect       (AI novel authoring app)
+│   └── ollama-script/           @ying-ai/ollama-script         (Ollama / Open WebUI / ComfyUI scripts)
 ├── packages/                     Reusable AI capabilities & SDKs — shared across apps
 │   ├── ai-core/                 @ying-ai/ai-core
 │   ├── model-ollama/            @ying-ai/model-ollama
@@ -84,7 +85,7 @@ ying-ai/
 
 **Convention for new AI apps:** add a folder under `apps/<app-name>` with its own `package.json` (`@ying-ai/<app-name>`), English `README.md`, and Simplified Chinese `README.zh-CN.md` (with language switcher links at the top of both). Keep app-specific glue code in the app; move anything reusable across apps into `packages/<capability-name>`. See [Adding a new AI app](#adding-a-new-ai-app).
 
-Package and app READMEs (EN · 中文): [story-architect](apps/story-architect/README.md) · [中文](apps/story-architect/README.zh-CN.md) · [ai-core](packages/ai-core/README.md) · [中文](packages/ai-core/README.zh-CN.md) · [model-ollama](packages/model-ollama/README.md) · [中文](packages/model-ollama/README.zh-CN.md) · [memory-postgres](packages/memory-postgres/README.md) · [中文](packages/memory-postgres/README.zh-CN.md) · [tool-web-search](packages/tool-web-search/README.md) · [中文](packages/tool-web-search/README.zh-CN.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.md) · [中文](packages/tool-web-search-tavily/README.zh-CN.md) · [story-core](packages/story-core/README.md) · [中文](packages/story-core/README.zh-CN.md) · [story-postgres](packages/story-postgres/README.md) · [中文](packages/story-postgres/README.zh-CN.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [中文](apps/model-runtime-demo/README.zh-CN.md)
+Package and app READMEs (EN · 中文): [ollama-script](apps/ollama-script/README.md) · [中文](apps/ollama-script/README.zh-CN.md) · [story-architect](apps/story-architect/README.md) · [中文](apps/story-architect/README.zh-CN.md) · [ai-core](packages/ai-core/README.md) · [中文](packages/ai-core/README.zh-CN.md) · [model-ollama](packages/model-ollama/README.md) · [中文](packages/model-ollama/README.zh-CN.md) · [memory-postgres](packages/memory-postgres/README.md) · [中文](packages/memory-postgres/README.zh-CN.md) · [tool-web-search](packages/tool-web-search/README.md) · [中文](packages/tool-web-search/README.zh-CN.md) · [tool-web-search-tavily](packages/tool-web-search-tavily/README.md) · [中文](packages/tool-web-search-tavily/README.zh-CN.md) · [story-core](packages/story-core/README.md) · [中文](packages/story-core/README.zh-CN.md) · [story-postgres](packages/story-postgres/README.md) · [中文](packages/story-postgres/README.zh-CN.md) · [model-runtime-demo](apps/model-runtime-demo/README.md) · [中文](apps/model-runtime-demo/README.zh-CN.md)
 
 ---
 

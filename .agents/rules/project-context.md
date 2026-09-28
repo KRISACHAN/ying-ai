@@ -6,6 +6,7 @@ This is the **ying-ai** pnpm + Turborepo monorepo.
 
 - Root commands: see [docs/ai/core/project-context.md](../../docs/ai/core/project-context.md)
 - `apps/model-runtime-demo`: read [apps/model-runtime-demo/README.md](../../apps/model-runtime-demo/README.md)
+- `apps/ollama-script`: read [apps/ollama-script/README.md](../../apps/ollama-script/README.md)
 - `apps/story-architect`: read [apps/story-architect/README.md](../../apps/story-architect/README.md)
 
 Knowledge workspace code lives in the sibling repo `ying-knowledge`, not under this monorepo.

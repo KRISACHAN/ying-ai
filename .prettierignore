@@ -6,3 +6,10 @@ coverage
 pnpm-lock.yaml
 .codex
 packages/document-loader/test/fixtures
+apps/ollama-script/archive
+apps/ollama-script/comfyui
+apps/ollama-script/open-webui
+apps/ollama-script/open-webui-backup-*
+apps/ollama-script/images
+apps/ollama-script/prompts
+apps/ollama-script/results

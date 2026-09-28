@@ -132,6 +132,7 @@ When editing under `apps/` or `packages/`, read that package's `README.md`. Addi
 - [packages/story-core/README.md](packages/story-core/README.md) — Story Mode workflow, dynamic Attribute Schema, deterministic state transitions
 - [packages/story-postgres/README.md](packages/story-postgres/README.md) — Story persistence, committed turn transaction, recovery verification
 - [apps/model-runtime-demo/README.md](apps/model-runtime-demo/README.md) — AI SDK UI workbench, Story Workbench, NDJSON adapters, Web Search env vars, local run
+- [apps/ollama-script/README.md](apps/ollama-script/README.md) — local Ollama / Open WebUI / ComfyUI workflow scripts
 - [apps/story-architect/README.md](apps/story-architect/README.md) — independent AI novel authoring workflow; not the Story Runtime domain
 
 ---
