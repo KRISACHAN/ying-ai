@@ -40,11 +40,13 @@ Existing local data was moved into the app during migration. Local environments 
 From the repository root:
 
 ```bash
-pnpm --filter @ying-ai/ollama-script ow:install
-pnpm --filter @ying-ai/ollama-script ow:start
-pnpm --filter @ying-ai/ollama-script comfy:start
-pnpm --filter @ying-ai/ollama-script flux
-pnpm --filter @ying-ai/ollama-script flux:run --help
+pnpm ow:install
+pnpm ow:start
+pnpm ow:uninstall --help
+pnpm comfy:start
+pnpm flux
+pnpm flux:run --help
+pnpm flux:loop
 pnpm --filter @ying-ai/ollama-script lint
 ```
 

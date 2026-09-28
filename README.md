@@ -168,6 +168,13 @@ pnpm build:all
 | `pnpm dev:all`      | Run all `dev` tasks via Turbo                             |
 | `pnpm build`        | Select apps with checkboxes and run their `build` scripts |
 | `pnpm build:all`    | Build the entire workspace via Turbo                      |
+| `pnpm ow:install`   | Install or update Open WebUI                              |
+| `pnpm ow:start`     | Start Open WebUI                                          |
+| `pnpm ow:uninstall` | Uninstall Open WebUI                                      |
+| `pnpm comfy:start`  | Start ComfyUI                                             |
+| `pnpm flux`         | Generate images interactively with Ollama                 |
+| `pnpm flux:run`     | Generate images directly; accepts CLI arguments           |
+| `pnpm flux:loop`    | Repeat interactive image generation                       |
 | `pnpm typecheck`    | Typecheck the workspace                                   |
 | `pnpm lint`         | Lint the workspace                                        |
 | `pnpm format`       | Format with Prettier                                      |

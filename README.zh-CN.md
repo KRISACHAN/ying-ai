@@ -168,6 +168,13 @@ pnpm build:all
 | `pnpm dev:all`      | 通过 Turbo 运行所有 `dev` 任务                |
 | `pnpm build`        | 使用 checkbox 选择应用并运行其 `build` script |
 | `pnpm build:all`    | 通过 Turbo 构建整个 workspace                 |
+| `pnpm ow:install`   | 安装或更新 Open WebUI                         |
+| `pnpm ow:start`     | 启动 Open WebUI                               |
+| `pnpm ow:uninstall` | 卸载 Open WebUI                               |
+| `pnpm comfy:start`  | 启动 ComfyUI                                  |
+| `pnpm flux`         | 使用 Ollama 交互式生图                        |
+| `pnpm flux:run`     | 命令行直跑生图，可传入参数                    |
+| `pnpm flux:loop`    | 交互式循环生图                                |
 | `pnpm typecheck`    | 对整个 workspace 做类型检查                   |
 | `pnpm lint`         | 对整个 workspace 做 lint                      |
 | `pnpm format`       | 用 Prettier 格式化                            |

@@ -71,11 +71,12 @@ noproxy
 
 ## pnpm 快捷命令
 
-以下命令在 `apps/ollama-script` 内执行。也可从 `ying-ai` 根目录运行 `pnpm --filter @ying-ai/ollama-script <命令>`，例如：
+以下工作流命令在 `ying-ai` 根目录和 `apps/ollama-script` 内均可直接执行；参数会传递给对应的应用脚本，例如：
 
 ```bash
-pnpm --filter @ying-ai/ollama-script flux
-pnpm --filter @ying-ai/ollama-script ow:start
+pnpm flux
+pnpm ow:start
+pnpm flux:run --help
 pnpm --filter @ying-ai/ollama-script lint
 ```
 

@@ -46,6 +46,13 @@ ying-ai/
 | `pnpm dev:all`      | Run all dev tasks via Turbo                           |
 | `pnpm build`        | Select apps with checkboxes and run their build tasks |
 | `pnpm build:all`    | Build the entire workspace via Turbo                  |
+| `pnpm ow:install`   | Install or update Open WebUI                          |
+| `pnpm ow:start`     | Start Open WebUI                                      |
+| `pnpm ow:uninstall` | Uninstall Open WebUI                                  |
+| `pnpm comfy:start`  | Start ComfyUI                                         |
+| `pnpm flux`         | Interactive Ollama image generation                   |
+| `pnpm flux:run`     | Direct image generation with CLI arguments            |
+| `pnpm flux:loop`    | Repeat interactive image generation                   |
 | `pnpm typecheck`    | Typecheck all packages                                |
 | `pnpm lint`         | Lint all packages                                     |
 | `pnpm format`       | Prettier write                                        |
